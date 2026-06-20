@@ -1,0 +1,24 @@
+[
+  {
+    "origin": [
+      "http://localhost:*",
+      "http://127.0.0.1:*",
+      "https://upgrade-seguros.web.app",
+      "https://upgrade-seguros.firebaseapp.com",
+      "https://upgrade-seguros.firebasestorage.app"
+    ],
+    "method": ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"],
+    "maxAgeSeconds": 3600,
+    "responseHeader": [
+      "Content-Type",
+      "Content-Length",
+      "Authorization",
+      "X-Requested-With",
+      "X-Goog-Upload-Command",
+      "X-Goog-Upload-Content-Type",
+      "X-Goog-Upload-Offset",
+      "X-Goog-Upload-Protocol",
+      "X-Goog-Upload-Header-Content-Length"
+    ]
+  }
+]

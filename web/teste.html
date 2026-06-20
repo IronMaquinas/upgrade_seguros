@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Teste Firebase Upload Web</title>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; }
+    button, input { padding: 10px; margin: 10px 0; }
+    .status { margin-top: 20px; padding: 10px; background: #f0f0f0; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h2>📤 Teste de Upload no Firebase Storage</h2>
+  <p>Selecione uma imagem para testar o upload diretamente no navegador.</p>
+
+  <input type="file" id="fileInput" accept="image/*" />
+  <button onclick="uploadFile()">Upload</button>
+  <div id="status" class="status">Nenhum arquivo enviado.</div>
+
+  <!-- SDKs do Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
+
+  <script>
+    // Configuração do Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyClT8YegIloRniaYoV15dkZZvAR8SMBFC4",
+      authDomain: "upgrade-seguros.firebaseapp.com",
+      projectId: "upgrade-seguros",
+      storageBucket: "upgrade-seguros.firebasestorage.app", // ✅ Nome completo
+      messagingSenderId: "42121837662",
+      appId: "1:42121837662:web:0b31003128497adc0b08cf",
+      measurementId: "G-5SF7VHGESR"
+    };
+
+    // Inicializa o Firebase
+    firebase.initializeApp(firebaseConfig);
+
+    // Obtém referência do Storage
+    const storage = firebase.storage();
+    const statusDiv = document.getElementById('status');
+    const fileInput = document.getElementById('fileInput');
+
+    function uploadFile() {
+      const file = fileInput.files[0];
+      if (!file) {
+        alert('Selecione um arquivo');
+        return;
+      }
+
+      statusDiv.innerHTML = '📤 Enviando...';
+
+      // ✅ Usa o caminho completo
+      const storageRef = storage.ref();
+      const fileRef = storageRef.child('test_uploads/' + file.name);
+
+      const metadata = { contentType: file.type };
+
+      const uploadTask = fileRef.put(file, metadata);
+
+      uploadTask.on('state_changed',
+        (snapshot) => {
+          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          statusDiv.innerHTML = `📊 Upload em andamento: ${Math.round(progress)}%`;
+        },
+        (error) => {
+          console.error('❌ Erro no upload:', error);
+          statusDiv.innerHTML = `<span style="color: red;">❌ Erro: ${error.message} (código: ${error.code})</span>`;
+        },
+        () => {
+          uploadTask.snapshot.ref.getDownloadURL().then((downloadURL) => {
+            statusDiv.innerHTML = `
+              ✅ Upload concluído!<br>
+              <a href="${downloadURL}" target="_blank">Ver imagem</a><br>
+              <small>URL: ${downloadURL}</small>
+            `;
+            console.log('✅ URL de download:', downloadURL);
+          });
+        }
+      );
+    }
+  </script>
+</body>
+</html>

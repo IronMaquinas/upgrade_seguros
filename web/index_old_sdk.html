@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base href="/">
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Upgrade Seguros">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Upgrade Seguros</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+
+  <script>
+    // Configuração do Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyClT8YegIloRniaYoV15dkZZvAR8SMBFC4",
+      authDomain: "upgrade-seguros.firebaseapp.com",
+      projectId: "upgrade-seguros",
+      storageBucket: "upgrade-seguros.appspot.com",
+      messagingSenderId: "42121837662",
+      appId: "1:42121837662:web:0b31003128497adc0b08cf",
+      measurementId: "G-5SF7VHGESR"
+    };
+    firebase.initializeApp(firebaseConfig);
+  </script>
+</head>
+<body>
+  <script src="flutter.js" defer></script>
+  
+  <script>
+    window.addEventListener('load', function() {
+      // Configuração simplificada e garantida
+      _flutter.loader.load({
+        serviceWorker: {
+          serviceWorkerVersion: serviceWorkerVersion || null
+        },
+        onEntrypointLoaded: async function(engineInitializer) {
+          try {
+            const appRunner = await engineInitializer.initializeEngine();
+            await appRunner.runApp();
+          } catch (error) {
+            console.error('Flutter initialization error:', error);
+          }
+        }
+      });
+    });
+    
+    // Fallback seguro caso serviceWorkerVersion não exista
+    if (typeof serviceWorkerVersion === 'undefined') {
+      window.serviceWorkerVersion = null;
+    }
+  </script>
+</body>
+</html>

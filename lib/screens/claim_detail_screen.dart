@@ -1,0 +1,3905 @@
+// claim_detail_screen.dart
+import 'dart:async';
+import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_google_places_sdk/flutter_google_places_sdk.dart' hide LatLng;
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
+import 'package:upgrade_seguros/formatter/number_input_formatter.dart';
+import 'package:upgrade_seguros/models/employee_model.dart';
+import 'package:upgrade_seguros/models/third_party_model.dart';
+import 'package:upgrade_seguros/services/employee_service.dart';
+import 'package:upgrade_seguros/services/image_service_web.dart';
+import 'package:upgrade_seguros/services/pdf_services.dart';
+import 'package:upgrade_seguros/services/place_search_delegate.dart';
+import 'package:upgrade_seguros/widgets/notes_widget.dart';
+import 'package:upgrade_seguros/widgets/task_list_widget.dart';
+import 'package:upgrade_seguros/widgets/workshop_widget.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:url_launcher/url_launcher_string.dart';
+import '../models/client_model.dart';
+import '../models/claim_model.dart';
+import '../models/vehicle_model.dart';
+import '../services/firestore_service.dart';
+import '../services/auth_service.dart';
+import 'dart:convert';
+import '../models/claim_task_model.dart';
+import '../models/machinery_model.dart';
+
+class ClaimDetailScreen extends StatefulWidget {
+  final Claim claim;
+  const ClaimDetailScreen({super.key, required this.claim});
+
+  @override
+  State<ClaimDetailScreen> createState() => _ClaimDetailScreenState();
+}
+
+class SectionCard extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final Color color;
+  final Widget child;
+
+  const SectionCard({
+    super.key,
+    required this.title,
+    required this.icon,
+    required this.color,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.06), // 🔥 fundo leve
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            ),
+            child: Row(
+              children: [
+                Icon(icon, color: color, size: 18),
+                const SizedBox(width: 10),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: child,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
+  final FirestoreService _firestoreService = FirestoreService();
+  final AuthService _authService = AuthService();
+  late Claim _currentClaim;
+  bool _isLoading = false;
+
+  static const STATUS_ABERTA = 'Aberta';
+  static const STATUS_CONCLUIDA = 'Concluída';
+
+  bool _isStatusExterno(String status) {
+    return [
+      'Aguardando Peças',
+      'Reparo em Andamento',
+    ].contains(status);
+  }
+
+  // Controladores para campos editáveis
+  late TextEditingController _relatoController;
+  late TextEditingController _localController;
+  late TextEditingController _numeroSinistroController;
+  late TextEditingController _numeroSeguradoraController;
+  late TextEditingController _enderecoTerceiroController;
+  late TextEditingController _slaPrevistController;
+
+  List<ThirdParty> _currentTerceiros = [];
+
+  Client? _client;
+  String? _userRole;
+  Client? _originalClient;
+
+  // ignore: prefer_final_fields
+  List<String> _statusOptions = [
+    'Aberto',
+    'Vistoria em Andamento',
+    'Aguardando Aprovação',
+    'Aguardando Peças',
+    'Reparo em Andamento',
+    'Concluído',
+  ];
+
+  // Edição dos valores
+  bool _isEditing = false;
+  late TextEditingController _valorTotalSinistroController;
+
+  final NumberFormat decimalFormat = NumberFormat.decimalPattern('pt_BR');
+  late StreamSubscription<DocumentSnapshot> _sinistroSubscription;
+
+    // API Key para Google places - Mesma conta da Iron Máquinas
+  final _places = FlutterGooglePlacesSdk("AIzaSyCoE3ZT1_EMmET0RaSmBeFMWQiYwJcl1YE");
+  final String _apiKey = 'AIzaSyCoE3ZT1_EMmET0RaSmBeFMWQiYwJcl1YE';
+
+  LatLng? _enderecoTerceiroLatLng;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserRole();
+    _currentClaim = widget.claim;
+    _loadClient();
+    _listenToClaimUpdates();
+    _currentTerceiros = List.from(_currentClaim.terceiros); // Inicializa a lista
+    _valorTotalSinistroController = TextEditingController(
+    text: _currentClaim.valorTotalSinistro.toStringAsFixed(2));
+
+    // Inicializa os controladores para edição do sinistro
+    _relatoController = TextEditingController(text: _currentClaim.relatoEvento);
+    _localController = TextEditingController(text: _currentClaim.localOcorrencia);
+    _numeroSinistroController = TextEditingController(text: _currentClaim.numeroSinistro);
+    _numeroSeguradoraController = TextEditingController(text: _currentClaim.numeroSeguradora);
+    _enderecoTerceiroController = TextEditingController(text: _currentClaim.enderecoTerceiro);
+  
+    _slaPrevistController = TextEditingController(
+      text: _currentClaim.slaPrevisto != null
+          ? DateFormat('dd/MM/yyyy').format(_currentClaim.slaPrevisto!)
+          : 'Selecione',
+    );
+  
+  }
+
+  @override
+  void dispose() {
+    _valorTotalSinistroController.dispose();
+    _relatoController.dispose();
+    _localController.dispose();
+    _numeroSinistroController.dispose();
+    _numeroSeguradoraController.dispose();
+    _enderecoTerceiroController.dispose();
+    _slaPrevistController.dispose();
+    super.dispose();
+    _sinistroSubscription.cancel();
+  }
+
+  void _listenToClaimUpdates() {
+    _sinistroSubscription = _firestoreService
+        .getSinistrosCollection()
+        .doc(widget.claim.id)
+        .snapshots()
+        .listen((snapshot) {
+      if (snapshot.exists && snapshot.data() != null) {
+        final updatedClaim = Claim.fromMap(snapshot.data()!)..id = snapshot.id;
+        if (mounted) { // ✅ Verifica se o widget ainda está na árvore
+          setState(() {
+            _currentClaim = updatedClaim;
+            _valorTotalSinistroController.text =
+                decimalFormat.format(updatedClaim.valorTotalSinistro);
+            _enderecoTerceiroController.text = _currentClaim.enderecoTerceiro;
+          });
+        }
+      }
+    });
+  }
+
+  // Carrega usuário admin / user
+  Future<void> _loadUserRole() async {
+    final role = await _authService.getUserRole();
+    print('Role carregado: $role');
+    if (mounted) {
+      setState(() {
+        _userRole = role;
+      });
+    }
+  }
+
+  // UPDATE DE STATUS DE SINISTRO E COMUNICAÇÃO COM O CLIENTE
+  Future<void> _showStatusWithDeadlineDialog(String newStatus) async {
+    DateTime? selectedDate;
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text('Definir previsão'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Informe a previsão para "$newStatus"'),
+
+                  const SizedBox(height: 12),
+
+                  // 🔥 BOTÃO MELHORADO
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.calendar_today),
+                    label: Text(
+                      selectedDate != null
+                          ? DateFormat('dd/MM/yyyy').format(selectedDate!)
+                          : 'Selecionar data',
+                    ),
+                    onPressed: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: selectedDate ?? DateTime.now().add(const Duration(days: 7)),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime(2100),
+                      );
+
+                      if (picked != null) {
+                        setState(() {
+                          selectedDate = picked;
+                        });
+                      }
+                    },
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  // 🔥 TEXTO CONFIRMANDO DATA
+                  if (selectedDate != null)
+                    Text(
+                      'Data selecionada: ${DateFormat('dd/MM/yyyy').format(selectedDate!)}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.green.shade700,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  child: const Text('Cancelar'),
+                  onPressed: () => Navigator.pop(context),
+                ),
+                ElevatedButton(
+                  child: const Text('Salvar'),
+                  onPressed: () async {
+                    Navigator.pop(context);
+                    await _updateStatusWithDeadline(newStatus, selectedDate);
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // SALVAR STATUS + PREVISÃO DE COMUNICAÇÃO COM O CLIENTE DA MUDANÇA DE STATUS
+  Future<void> _updateStatusWithDeadline(
+    String newStatus,
+    DateTime? dataPrevisao,
+  ) async {
+    final userId = _authService.getUserId();
+    final userEmail = _authService.getUserEmail();
+
+    // 🔥 1. BUSCAR DATA ANTERIOR (ANTES DO UPDATE)
+    final doc = await _firestoreService
+        .getSinistrosCollection()
+        .doc(_currentClaim.id)
+        .get();
+
+    final dataAnterior = doc.data()?['data_previsao_conclusao'] != null
+        ? (doc.data()!['data_previsao_conclusao'] as Timestamp).toDate()
+        : null;
+
+    // 🔥 2. ATUALIZA STATUS
+    await _firestoreService.updateClaimStatus(
+      _currentClaim.id,
+      newStatus,
+      userId,
+      userEmail,
+    );
+
+    // 🔥 3. ATUALIZA PREVISÃO
+    await _firestoreService.getSinistrosCollection()
+        .doc(_currentClaim.id)
+        .update({
+      'data_previsao_conclusao': dataPrevisao,
+    });
+
+    // 🔥 4. CRIA TASK
+    final taskId = await _firestoreService.addTask(
+      ClaimTask(
+        id: '',
+        descricao: 'Informar status ao cliente: $newStatus',
+        status: STATUS_ABERTA,
+        prazo: dataPrevisao ?? DateTime.now().add(const Duration(days: 2)),
+        criadoEm: DateTime.now(),
+        claimId: _currentClaim.id,
+        responsavelId: userId,
+        numeroSinistro: _currentClaim.numeroSinistro,
+        responsavelEmail: userEmail,
+      ),
+    );
+
+    // 🔥 5. ABRE POPUP COM DATA ANTERIOR
+    _showCommunicationDialog(
+      newStatus,
+      dataPrevisao,
+      taskId,
+      dataAnterior,
+    );
+  }
+
+  // POP UP DE COMUNICAÇÃO DE ALTERAÇÃO DE STATUS DE SINISTRO
+  Future<void> _showCommunicationDialog(
+    String status,
+    DateTime? data,
+    String taskId,
+    DateTime? dataAnterior,
+  ) async {
+    final cliente = _client;
+
+    final email = cliente?.email ?? '';
+    final phone = cliente?.contato ?? '';
+    final phoneSanitized = phone.replaceAll(RegExp(r'\D'), '');
+
+    // 🔥 DATA NOVA
+    final dataNovaFormatada = data != null
+        ? DateFormat('dd/MM/yyyy').format(data)
+        : 'Não informada';
+
+    // 🔥 DATA ANTERIOR
+    final dataAnteriorFormatada = dataAnterior != null
+        ? DateFormat('dd/MM/yyyy').format(dataAnterior)
+        : null;
+
+    // 🔥 IDENTIFICAÇÃO DINÂMICA
+    String identificacao = '';
+    String referencia = '';
+
+    if (_currentClaim.veiculoSelecionado != null) {
+      final v = _currentClaim.veiculoSelecionado!;
+      identificacao = '${v.modelo ?? ''} (${v.placa ?? ''})';
+
+      referencia = '''
+  Referente a:
+  Veículo: ${v.modelo ?? '-'}
+  Placa: ${v.placa ?? '-'}
+  ''';
+    } else if (_currentClaim.life != null) {
+      final vida = _currentClaim.life!;
+      identificacao = vida.nomeSegurado;
+
+      referencia = '''
+  Referente a:
+  Segurado: ${vida.nomeSegurado}
+  CPF: ${vida.cpfSegurado}
+  ''';
+    } else if (_currentClaim.house != null) {
+      final casa = _currentClaim.house!;
+      identificacao = casa.localHouse;
+
+      referencia = '''
+  Referente a:
+  Endereço: ${casa.localHouse}
+  ''';
+    }
+
+    // 🔥 ASSUNTO
+    final assunto =
+        'Atualização do Sinistro ${_currentClaim.numeroSinistro}'
+        '${identificacao.isNotEmpty ? ' – $identificacao' : ''}';
+
+    // 🔥 COMPARAÇÃO CORRETA (IGNORA HORA)
+    bool datasDiferentes = false;
+
+    if (dataAnterior != null && data != null) {
+      datasDiferentes =
+          dataAnterior.day != data.day ||
+          dataAnterior.month != data.month ||
+          dataAnterior.year != data.year;
+    }
+
+    // 🔥 BLOCO DE PREVISÃO
+    String blocoPrevisao;
+
+    if (dataAnterior != null && datasDiferentes) {
+      blocoPrevisao = '''
+  Previsão anterior: $dataAnteriorFormatada
+  Nova previsão: $dataNovaFormatada
+  ''';
+    } else {
+      blocoPrevisao = 'Previsão de conclusão: $dataNovaFormatada';
+    }
+
+    // 🔥 MENSAGEM FINAL
+    final mensagem = '''
+  Prezado cliente,
+
+  Seu sinistro ${_currentClaim.numeroSinistro} foi atualizado para:
+
+  $status
+
+  ${referencia.isNotEmpty ? '$referencia\n' : ''}$blocoPrevisao
+
+  Estamos à disposição.
+  ''';
+
+    // 🟢 WHATSAPP
+    final whatsUrl =
+        'https://wa.me/$phoneSanitized?text=${Uri.encodeComponent(mensagem)}';
+
+    // 🔵 OUTLOOK
+    final outlookUrl =
+        'https://outlook.office.com/mail/deeplink/compose'
+        '?to=$email'
+        '&subject=${Uri.encodeComponent(assunto)}'
+        '&body=${Uri.encodeComponent(mensagem)}';
+
+    // 🔴 GMAIL
+    final gmailUrl =
+        'https://mail.google.com/mail/?view=cm&fs=1'
+        '&to=$email'
+        '&su=${Uri.encodeComponent(assunto)}'
+        '&body=${Uri.encodeComponent(mensagem)}';
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Comunicar cliente'),
+        content: const Text('Deseja enviar atualização ao cliente?'),
+        actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        actions: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // 🟢 WHATSAPP
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.chat),
+                label: const Text('WhatsApp'),
+                onPressed: () async {
+                  Navigator.pop(context);
+
+                  await launchUrlString(whatsUrl);
+
+                  final confirmou = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Confirmar envio'),
+                      content: const Text('Você enviou a mensagem ao cliente?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Não'),
+                        ),
+                        ElevatedButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Sim'),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (confirmou == true) {
+                    await _firestoreService.updateTaskStatus(taskId, 'Concluída');
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Tarefa concluída com sucesso')),
+                    );
+                  }
+                },
+              ),
+
+              const SizedBox(height: 8),
+
+              // 🔵 OUTLOOK
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.business),
+                label: const Text('Outlook'),
+                onPressed: () async {
+                  Navigator.pop(context);
+
+                  await launchUrlString(outlookUrl);
+
+                  final confirmou = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Confirmar envio'),
+                      content: const Text('Você enviou o email ao cliente?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Não'),
+                        ),
+                        ElevatedButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Sim'),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (confirmou == true) {
+                    await _firestoreService.updateTaskStatus(taskId, 'Concluída');
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Tarefa concluída com sucesso')),
+                    );
+                  }
+                },
+              ),
+
+              const SizedBox(height: 8),
+
+              // 🔴 GMAIL
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.email),
+                label: const Text('Gmail'),
+                onPressed: () async {
+                  Navigator.pop(context);
+
+                  await launchUrlString(gmailUrl);
+
+                  final confirmou = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Confirmar envio'),
+                      content: const Text('Você enviou o email ao cliente?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Não'),
+                        ),
+                        ElevatedButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Sim'),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (confirmou == true) {
+                    await _firestoreService.updateTaskStatus(taskId, 'Concluída');
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Tarefa concluída com sucesso')),
+                    );
+                  }
+                },
+              ),
+
+              const SizedBox(height: 8),
+
+              // ⚪ DEPOIS
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Fazer depois'),
+              ),
+            ],
+          )
+        ],
+      ),
+    );
+  }
+
+  // LOG DE MUDANÇA DE STATUS DE SINISTRO
+  Future<void> _updateStatus(String newStatus) async {
+    setState(() => _isLoading = true);
+
+    final userId = _authService.getUserId();
+    final userEmail = _authService.getUserEmail();
+
+    if (userId == 'anonymous_user') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Usuário não autenticado. Faça login.')),
+      );
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    try {
+      if (newStatus == 'Concluído') {
+        _currentClaim.dataConclusao = Timestamp.now();
+        await _firestoreService.updateClaim(_currentClaim);
+      }
+      await _firestoreService.updateClaimStatus(
+        _currentClaim.id,
+        newStatus,
+        userId,
+        userEmail,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Status atualizado para: $newStatus')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao atualizar status: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  // UPDATE DE STATUS ONLY PARA ALTERAÇÕES DE PRAZO EM PROCESSOS CRÍTICOS
+  Future<void> _showUpdateDeadlineOnlyDialog() async {
+    DateTime? selectedDate;
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Atualizar previsão'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Informe a nova previsão de conclusão'),
+
+                  const SizedBox(height: 12),
+
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.calendar_today),
+                    label: Text(
+                      selectedDate != null
+                          ? DateFormat('dd/MM/yyyy').format(selectedDate!)
+                          : 'Selecionar data',
+                    ),
+                    onPressed: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: selectedDate ?? DateTime.now().add(const Duration(days: 7)),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime(2100),
+                      );
+
+                      if (picked != null) {
+                        setState(() {
+                          selectedDate = picked;
+                        });
+                      }
+                    },
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  if (selectedDate != null)
+                    Text(
+                      'Data selecionada: ${DateFormat('dd/MM/yyyy').format(selectedDate!)}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.green.shade700,
+                      ),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancelar'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    Navigator.pop(context);
+                    await _updateDeadlineOnly(selectedDate);
+                  },
+                  child: const Text('Salvar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // FUNÇÃO COMPLEMENTAR DO UPDATE ACIMA
+  Future<void> _updateDeadlineOnly(DateTime? dataPrevisao) async {
+    final userId = _authService.getUserId();
+    final userEmail = _authService.getUserEmail();
+
+    final doc = await _firestoreService
+    .getSinistrosCollection()
+    .doc(_currentClaim.id)
+    .get();
+
+    final dataAnterior = doc.data()?['data_previsao_conclusao'] != null
+        ? (doc.data()!['data_previsao_conclusao'] as Timestamp).toDate()
+        : null;
+
+    await _firestoreService.getSinistrosCollection()
+        .doc(_currentClaim.id)
+        .update({
+      'data_previsao_conclusao': dataPrevisao,
+      'dataUltimaAtualizacao': DateTime.now(),
+    });
+
+    // 🔥 cria task
+    final taskId = await _firestoreService.addTask(
+      ClaimTask(
+        id: '',
+        descricao: 'Atualizar cliente: ${_currentClaim.statusAtual} (nova previsão)',
+        status: STATUS_ABERTA,
+        prazo: dataPrevisao ?? DateTime.now().add(const Duration(days: 2)),
+        criadoEm: DateTime.now(),
+        claimId: _currentClaim.id,
+        responsavelId: userId,
+        numeroSinistro: _currentClaim.numeroSinistro,
+        responsavelEmail: userEmail,
+      ),
+    );
+
+    // 🔥 abre comunicação
+    _showCommunicationDialog(
+      _currentClaim.statusAtual,
+      dataPrevisao,
+      taskId,
+      dataAnterior,
+    );
+  }
+
+  Future<void> _loadClient() async {
+    final userId = _authService.getUserId();
+    if (userId == 'anonymous_user') return;
+
+    try {
+      final client = await _firestoreService.getClientById(_currentClaim.idCliente);
+
+      if (mounted) {
+        setState(() {
+          _client = client;
+          _originalClient = client != null
+              ? Client.fromMap(client.toMap())
+              : null;
+        });
+      }
+    } catch (e) {
+      print('Erro ao buscar cliente: $e');
+    }
+  }
+
+  Future<void> _saveChanges() async {
+    setState(() => _isLoading = true);
+
+    final userId = _authService.getUserId();
+    if (userId == 'anonymous_user') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Usuário não autenticado.')),
+      );
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    bool clientChanged = false;
+
+    if (_client != null && _originalClient != null) {
+      if (_client!.nome != _originalClient!.nome ||
+          _client!.contato != _originalClient!.contato ||
+          _client!.email != _originalClient!.email) {
+        clientChanged = true;
+      }
+    }
+
+    try {
+      final updates = <String, dynamic>{};
+
+      // Campos básicos — só atualiza se mudou
+      if (_currentClaim.relatoEvento != widget.claim.relatoEvento) {
+        updates['relatoEvento'] = _currentClaim.relatoEvento;
+      }
+      if (_currentClaim.localOcorrencia != widget.claim.localOcorrencia) {
+        updates['local_ocorrencia'] = _currentClaim.localOcorrencia;
+      }
+      if (_currentClaim.numeroSinistro != widget.claim.numeroSinistro) {
+        updates['numero_sinistro'] = _currentClaim.numeroSinistro;
+      }
+      if (_currentClaim.numeroSeguradora != widget.claim.numeroSeguradora) {
+        updates['numero_seguradora'] = _currentClaim.numeroSeguradora;
+      }
+      if (_currentClaim.valorTotalSinistro != widget.claim.valorTotalSinistro) {
+        updates['valor_total_sinistro'] = _currentClaim.valorTotalSinistro;
+      }
+      if (_currentClaim.ramoSinistro != widget.claim.ramoSinistro) {
+        updates['ramo_sinistro'] = _currentClaim.ramoSinistro;
+      }
+      if (_currentClaim.seguradora != widget.claim.seguradora) {
+        updates['seguradora'] = _currentClaim.seguradora;
+      }
+      if (_currentClaim.tipoPerda != widget.claim.tipoPerda) {
+        updates['tipoPerda'] = _currentClaim.tipoPerda;
+      }
+      if (_currentClaim.slaPrevisto != widget.claim.slaPrevisto) {
+        updates['sla_previsto'] = _currentClaim.slaPrevisto;
+      }
+      if (_currentClaim.enderecoTerceiro != widget.claim.enderecoTerceiro) {
+        updates['endereco_terceiro'] = _currentClaim.enderecoTerceiro;
+      }
+
+      // Listas — compara por tamanho/conteúdo
+      if (_currentClaim.fotosUrls.length != widget.claim.fotosUrls.length ||
+          !_currentClaim.fotosUrls.every(widget.claim.fotosUrls.contains)) {
+        updates['fotos_urls'] = _currentClaim.fotosUrls;
+      }
+
+      if (_currentClaim.arquivosLaudosUrls.length != widget.claim.arquivosLaudosUrls.length ||
+          !_currentClaim.arquivosLaudosUrls.every(widget.claim.arquivosLaudosUrls.contains)) {
+        updates['arquivos_laudos_urls'] = _currentClaim.arquivosLaudosUrls;
+      }
+
+      // Terceiros — sempre salva (lista complexa, difícil comparar)
+      updates['terceiros'] = _currentClaim.terceiros.map((t) => t.toMap()).toList();
+
+      // Anotações — sempre salva
+      updates['anotacoes'] = _currentClaim.anotacoes;
+
+      // Objetos complexos — só salva se não for null (chave correta do Firestore)
+      updates['veiculo_selecionado'] = _currentClaim.veiculoSelecionado?.toMap();
+
+      if (_currentClaim.transporte != null) {
+        updates['transporte'] = _currentClaim.transporte!.toMap();
+      }
+
+      if (_currentClaim.maquinaria != null) {
+        updates['maquinaria'] = _currentClaim.maquinaria!.toMap();
+      }
+
+      if (_currentClaim.house != null) {
+        updates['house'] = _currentClaim.house!.toMap();
+      }
+
+      if (_currentClaim.life != null) {
+        updates['life'] = _currentClaim.life!.toMap();
+      }
+
+      if (_currentClaim.workshop != null) {
+        updates['workshop'] = _currentClaim.workshop!.toMap();
+      }
+
+      if (_currentClaim.oficinas.isNotEmpty) {
+        updates['oficinas'] = _currentClaim.oficinas.map((o) => o.toMap()).toList();
+      }
+
+      // 🔥 SALVA CLIENTE
+      if (clientChanged && _client != null) {
+        await _firestoreService.updateClient(_client!, userId);
+      }
+
+      // 🔥 SALVA SINISTRO
+      if (updates.isNotEmpty) {
+        await _firestoreService.getSinistrosCollection()
+            .doc(_currentClaim.id)
+            .update(updates);
+
+        await _firestoreService.addStatusHistory(
+          _currentClaim.id,
+          'Edição de dados',
+          userId,
+          _authService.getUserEmail(),
+        );
+      }
+
+      // 🔥 HISTÓRICO CLIENTE (opcional TOP)
+      if (clientChanged) {
+        await _firestoreService.addStatusHistory(
+          _currentClaim.id,
+          'Edição de cliente',
+          userId,
+          _authService.getUserEmail(),
+        );
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Alterações salvas com sucesso!')),
+      );
+
+      setState(() {
+        _isEditing = false;
+        _originalClient = _client != null
+            ? Client.fromMap(_client!.toMap())
+            : null;
+      });
+
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao salvar: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _uploadFoto() async {
+    final results = await ImagePicker().pickMultiImage();
+    if (results.isEmpty) return;
+
+    setState(() => _isLoading = true);
+    try {
+      // ✅ Garante que o XFile tem path e name
+      final xfiles = results.map((result) {
+        return XFile(
+          result.path,
+          name: result.name.isNotEmpty
+              ? result.name
+              : 'foto_${DateTime.now().millisecondsSinceEpoch}.jpg',
+          mimeType: 'image/jpeg',
+        );
+      }).toList();
+
+      final urls = await _firestoreService.uploadSinistroFotos(
+        _currentClaim.numeroSinistro,
+        xfiles,
+      );
+
+      if (urls.isNotEmpty) {
+        setState(() {
+          _currentClaim.fotosUrls.addAll(urls);
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao subir foto: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _uploadDocumento() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+    );
+    if (result == null) return;
+
+    _isLoading = true;
+    try {
+      // ✅ Usa diretamente result.files (que é List<PlatformFile>)
+      final urls = await _firestoreService.uploadArquivosLaudos(
+        _currentClaim.numeroSinistro,
+        result.files, // ✅ Correto: List<PlatformFile>
+      );
+
+      if (urls.isNotEmpty) {
+        setState(() {
+          _currentClaim.arquivosLaudosUrls.addAll(urls);
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao subir documento: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  // Funções para remover fotos e documentos
+  void _removeFoto(String url) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remover Foto'),
+        content: const Text('Tem certeza que deseja remover esta foto?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              setState(() {
+                _currentClaim.fotosUrls.remove(url);
+              });
+            },
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // FUNÇÃO PARA REMOVER DOCUMENTO
+  Future<void> _removeDocumento(String url) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remover Documento'),
+        content: const Text('Tem certeza que deseja remover este documento?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+        // 🔍 DEBUG
+        print('CLAIM ID: ${_currentClaim.id}');
+        print('NUMERO SINISTRO: ${_currentClaim.numeroSinistro}');
+
+      // 🔥 remove da lista local
+      _currentClaim.arquivosLaudosUrls.remove(url);
+
+      // 🔥 atualiza Firestore
+      await FirebaseFirestore.instance
+          .collection('sinistros')
+          .doc(_currentClaim.id)
+          .update({
+        'arquivos_laudos_urls': FieldValue.arrayRemove([url]),
+      });
+
+      // 🔥 remove do Storage via Cloud Function
+      await _firestoreService.deleteFileByUrl(url);
+
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao remover documento: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _updateValorTotalSinistro() async {
+    setState(() => _isLoading = true);
+    final userId = _authService.getUserId();
+
+    if (userId == 'anonymous_user') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Usuário não autenticado. Faça login.')));
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    final raw = _valorTotalSinistroController.text;
+    final clean = raw.replaceAll('.', '').replaceAll(',', '.');
+    final novoValor = double.tryParse(clean) ?? 0.0;
+
+    try {
+      _currentClaim.valorTotalSinistro = novoValor;
+      _currentClaim.dataConclusao = Timestamp.now();
+      await _firestoreService.getSinistrosCollection()
+        .doc(_currentClaim.id)
+        .update({'valor_total_sinistro': novoValor});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Valor atualizado com sucesso!')));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao atualizar valor: $e')));
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  // Excluir Sinistro
+  void _confirmDeleteClaim() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Excluir Sinistro'),
+        content: const Text('Tem certeza que deseja excluir este sinistro? TODOS os arquivos e dados serão permanentemente removidos. Esta ação não poderá ser desfeita.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Excluir Permanentemente'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        setState(() => _isLoading = true);
+        
+        // ✅ Agora passando o número do sinistro também
+        await _firestoreService.deleteClaim(
+          _currentClaim.id!, 
+          _currentClaim.numeroSinistro
+        );
+        
+        if (mounted) {
+          Navigator.of(context).pop(); // Fecha a tela de detalhes
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Sinistro e todos os arquivos excluídos com sucesso')),
+          );
+        }
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao excluir: $e')),
+        );
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  // Gerador de PDF
+  Future<void> _generateAndSharePdf() async {
+    setState(() => _isLoading = true);
+    try {
+      final pdfService = PdfService();
+      final logoBytes = await pdfService.loadLogo();
+
+      // 1️⃣ Obter dados do usuário logado
+      final usuarioLogado = await _obterDadosUsuarioLogado();
+
+      // 2️⃣ Passar dados dinâmicos
+      final pdfBytes = await pdfService.generateClaimPdf(
+        _currentClaim,
+        _client,
+        _currentClaim.terceiros,
+        logoBytes,
+        usuarioNome: usuarioLogado?.nome,       // ✅ Seu nome
+        usuarioEmail: usuarioLogado?.email,     // ✅ Seu email
+        usuarioTelefone: usuarioLogado?.telefone, // ✅ Seu telefone
+      );
+
+      final fileName = 'Upgrade Seguros - ${_currentClaim.numeroSinistro}.pdf';
+
+      await Printing.sharePdf(bytes: pdfBytes, filename: fileName);  // aqui sim passa os pdfBytes
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao gerar PDF: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+   // 🆕 Helper para obter dados do usuário logado
+  Future<Employee?> _obterDadosUsuarioLogado() async {
+    try {
+      final userId = _authService.getUserId();
+      print('═══════════════════════════════════════════════════');
+      print('🔍 DEBUG: Obtendo dados do usuário logado');
+      print('═══════════════════════════════════════════════════');
+      print('📍 userId: $userId');
+      
+      if (userId == 'anonymous_user' || userId.isEmpty) {
+        print('❌ Usuário é anônimo ou vazio!');
+        return null;
+      }
+      
+      final employeeService = EmployeeService();
+      final usuario = await employeeService.getUserById(userId);
+      
+      print('✅ Usuário obtido com sucesso!');
+      print('📋 Dados do usuário:');
+      print('   ├─ id: ${usuario?.id}');
+      print('   ├─ nome: ${usuario?.nome}');
+      print('   ├─ email: ${usuario?.email}');
+      print('   ├─ telefone: ${usuario?.telefone}');
+      print('   └─ perfil: ${usuario?.perfil}');
+      print('═══════════════════════════════════════════════════');
+      
+      if (usuario == null) {
+        print('⚠️ WARNING: usuário é null!');
+        return null;
+      }
+      
+      return usuario;
+    } catch (e, stackTrace) {
+      print('❌ ERRO ao obter dados do usuário: $e');
+      print('📍 StackTrace: $stackTrace');
+      print('═══════════════════════════════════════════════════');
+      return null;
+    }
+  }
+
+  // Generate EXCEL
+    Future<void> _generateExcel() async {
+    try {
+      // 🔥 1. IDENTIFICAR PLACA CORRETA
+      String placaSegurado = '';
+
+      if (_currentClaim.transporte != null) {
+        placaSegurado =
+            _currentClaim.transporte?.placaCarreta?.isNotEmpty == true
+                ? _currentClaim.transporte!.placaCarreta!
+                : (_currentClaim.transporte?.placaCavalo ?? '');
+      } else {
+        placaSegurado = _currentClaim.veiculoSelecionado?.placa ?? '';
+      }
+
+      // 🔥 2. MODELO / MARCA
+      String modeloMarca = '';
+
+      if (_currentClaim.transporte != null) {
+        modeloMarca = ''; // transporte geralmente não usa isso
+      } else {
+        final modelo = _currentClaim.veiculoSelecionado?.modelo ?? '';
+        final marca = _currentClaim.veiculoSelecionado?.marca ?? '';
+        modeloMarca = '$modelo / $marca';
+      }
+
+      // 🔥 3. DATAS FORMATADAS
+      final dataSinistro =
+          DateFormat('dd/MM/yyyy').format(_currentClaim.dataOcorrencia);
+
+      final dataAviso = _currentClaim.dataAviso != null
+          ? DateFormat('dd/MM/yyyy').format(_currentClaim.dataAviso!)
+          : '';
+
+      // 🔥 4. HEADERS EXATOS DO CLIENTE
+      final headers = [
+        'Empresa Segurada',
+        'Placa do Segurado',
+        'Reclamado',
+        'Modelo/Marca',
+        'Data do Sinistro',
+        'Data do Aviso',
+        'Tipo de Perda',
+        'Numero de sinistro da seguradora',
+        'Status',
+        'Valor do sinistro',
+      ];
+
+      // 🔥 5. LINHA DE DADOS
+      final row = [
+        _client?.nome ?? '',
+        placaSegurado,
+        placaSegurado, // 🔥 duplicado conforme sua necessidade
+        modeloMarca,
+        dataSinistro,
+        dataAviso,
+        _currentClaim.tipoPerda ?? '',
+        _currentClaim.numeroSeguradora ?? '',
+        _currentClaim.statusAtual ?? '',
+        _currentClaim.valorTotalSinistro.toStringAsFixed(2),
+      ];
+
+      // 🔥 6. CSV FINAL
+      final csv = StringBuffer();
+      csv.writeln(headers.join(';'));
+      csv.writeln(row.join(';'));
+
+      final bytes = utf8.encode(csv.toString());
+
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: 'sinistro_${_currentClaim.numeroSinistro}.csv',
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao gerar Excel: $e')),
+      );
+    }
+  }
+
+  Future<void> _showConfirmCloseDialog() async {
+    final controller = TextEditingController(
+      text: _currentClaim.valorTotalSinistro.toStringAsFixed(2),
+    );
+    final userId = _authService.getUserId();
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Confirmar Encerramento'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('O valor total dos serviços deste sinistro:'),
+              const SizedBox(height: 8),
+              TextFormField(
+              enabled: _isEditing,
+                controller: controller,
+                keyboardType: TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Valor Total (R\$)',
+                  prefixText: 'R\$ ',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              child: const Text('Cancelar'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            ElevatedButton(
+              child: const Text('Confirmar e Encerrar'),
+              onPressed: () async {
+                Navigator.of(context).pop();
+                final novoValor = double.tryParse(
+                  controller.text.replaceAll(',', '.')) ?? 0.0;
+
+                setState(() => _isLoading = true);
+                try {
+                  _currentClaim.valorTotalSinistro = novoValor;
+                  await _firestoreService.updateClaim(_currentClaim);
+                  await _firestoreService.atualizarRecomendacaoManutencao(
+                    _currentClaim.idCliente);
+                  await _updateStatus('Concluído');
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Erro ao encerrar sinistro: $e')));
+                } finally {
+                  setState(() => _isLoading = false);
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showImageViewer(ImageProvider imageProvider) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          insetPadding: const EdgeInsets.all(10),
+          child: InteractiveViewer(
+            panEnabled: true,
+            minScale: 0.5,
+            maxScale: 4,
+            child: Container(
+              color: Colors.black,
+              child: Image(
+                image: imageProvider,
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showAddThirdPartyDialog() async {
+    final _thirdPartyFormKey = GlobalKey<FormState>();
+
+    // Controllers
+    final TextEditingController _tpNomeController = TextEditingController();
+    final TextEditingController _tpCpfController = TextEditingController();
+    final TextEditingController _tpContatoController = TextEditingController();
+    final TextEditingController _tpEmailController = TextEditingController();
+    final TextEditingController _tpPlacaController = TextEditingController();
+    final TextEditingController _tpChassiController = TextEditingController();
+    final TextEditingController _tpCorController = TextEditingController();
+    final TextEditingController _marcaTerceiroController = TextEditingController();
+    final TextEditingController _tpModeloController = TextEditingController();
+    final TextEditingController _tpAnoController = TextEditingController();
+    final TextEditingController _tpAnoModeloController = TextEditingController();
+    final TextEditingController _tpRelatoController = TextEditingController();
+    final TextEditingController _enderecoTerceiroController = TextEditingController();
+
+    final List<XFile> _thirdPartyPhotos = [];
+    final List<XFile> _thirdPartyDocuments = [];
+    final ImagePicker _picker = ImagePicker();
+
+    final novoTerceiro = await showDialog<ThirdParty>(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
+          child: StatefulBuilder(
+            builder: (context, setModalState) {
+              return Container(
+                width: MediaQuery.of(context).size.width * 0.9,
+                padding: const EdgeInsets.all(16.0),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(width: 16),
+                      const Text('Adicionar Terceiro', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      Form(
+                        key: _thirdPartyFormKey,
+                        child: Column(
+                          children: [
+                            TextFormField(
+              enabled: _isEditing,
+                              controller: _tpNomeController,
+                              decoration: const InputDecoration(labelText: 'Nome do Terceiro'),
+                              validator: (value) => value!.isEmpty ? 'Campo obrigatório' : null,
+                            ),
+                            TextFormField(
+              enabled: _isEditing,
+                              controller: _tpCpfController,
+                              decoration: const InputDecoration(labelText: 'CPF do Terceiro'),
+                              keyboardType: TextInputType.number,
+                              validator: (value) => value!.isEmpty ? 'Campo obrigatório' : null,
+                            ),
+                            TextFormField(
+              enabled: _isEditing,
+                              controller: _tpContatoController,
+                              decoration: const InputDecoration(labelText: 'Contato do Terceiro'),
+                              keyboardType: TextInputType.phone,
+                            ),
+                            TextFormField(
+              enabled: _isEditing,
+                              controller: _tpEmailController,
+                              decoration: const InputDecoration(labelText: 'Email do Terceiro'),
+                              keyboardType: TextInputType.emailAddress,
+                            ),
+                            
+                            TextFormField(
+                              controller: _enderecoTerceiroController,
+                              readOnly: true,
+                              decoration: InputDecoration(
+                                labelText: 'Endereço',
+                                suffixIcon: Icon(Icons.search),
+                              ),
+                              onTap: () => _openPlaceSearchTerceiro(
+                                'Endereço',
+                                _enderecoTerceiroController,
+                              ),
+                            ),
+
+                            const Divider(),
+                            buildRow([
+                              TextFormField(
+                                controller: _marcaTerceiroController,
+                                decoration: InputDecoration(labelText: 'Marca'),
+                              ),
+                              TextFormField(
+                                controller: _tpModeloController,
+                                decoration: InputDecoration(labelText: 'Modelo'),
+                              ),
+                              TextFormField(
+                                controller: _tpCorController,
+                                decoration: InputDecoration(labelText: 'Cor'),
+                              ),
+                            ]),
+                            buildRow([
+                              TextFormField(
+                                controller: _tpAnoController,
+                                decoration: InputDecoration(labelText: 'Ano Fab'),
+                              ),
+                              TextFormField(
+                                controller: _tpAnoModeloController,
+                                decoration: InputDecoration(labelText: 'Ano Mod'),
+                              ),
+                              TextFormField(
+                                controller: _tpPlacaController,
+                                decoration: InputDecoration(labelText: 'Placa'),
+                              ),
+                              TextFormField(
+                                controller: _tpChassiController,
+                                decoration: InputDecoration(labelText: 'Chassi'),
+                              ),
+                            ]),
+                            TextFormField(
+              enabled: _isEditing,
+                              controller: _tpPlacaController,
+                              decoration: const InputDecoration(labelText: 'Placa do Terceiro'),
+                            ),
+                            TextFormField(
+              enabled: _isEditing,
+                              controller: _tpRelatoController,
+                              decoration: const InputDecoration(labelText: 'Relato do Terceiro sobre o Evento'),
+                              maxLines: 3,
+                            ),
+                            const SizedBox(height: 16),
+                            const Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text('Fotos do Veículo', style: TextStyle(fontWeight: FontWeight.bold)),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                ..._thirdPartyPhotos.map((photo) => Stack(
+                                  alignment: Alignment.topRight,
+                                  children: [
+                                    GestureDetector(
+                                      onTap: () {
+                                        final ImageProvider imageProvider = kIsWeb
+                                            ? NetworkImage(photo.path)
+                                            : FileImage(File(photo.path));
+                                        _showImageViewer(imageProvider);
+                                      },
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: kIsWeb
+                                            ? Image.network(
+                                          photo.path,
+                                          width: 160,
+                                          height: 160,
+                                          fit: BoxFit.cover,
+                                        )
+                                            : Image.file(
+                                          File(photo.path),
+                                          width: 80,
+                                          height: 80,
+                                          fit: BoxFit.cover,
+                                        ),
+                                      ),
+                                    ),
+                                    GestureDetector(
+                                      onTap: () {
+                                        setModalState(() {
+                                          _thirdPartyPhotos.remove(photo);
+                                        });
+                                      },
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: Colors.black54,
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: const Icon(Icons.close, color: Colors.white, size: 20),
+                                      ),
+                                    ),
+                                  ],
+                                )),
+                                InkWell(
+                                  onTap: () async {
+                                    final List<XFile>? pickedFiles = await _picker.pickMultiImage();
+                                    if (pickedFiles != null && pickedFiles.isNotEmpty) {
+                                      final compressedFiles = await ImageService().compressImages(pickedFiles);
+                                      setModalState(() {
+                                        _thirdPartyPhotos.addAll(compressedFiles);
+                                      });
+                                    }
+                                  },
+                                  child: Container(
+                                    width: 80,
+                                    height: 80,
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey[300],
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Icon(Icons.add_a_photo),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'Arquivos/Laudos (PDF, etc.)',
+                                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              children: [
+                                ..._thirdPartyDocuments.map((file) => Chip(
+                                  label: Text(file.name),
+                                  onDeleted: () {
+                                    setModalState(() {
+                                      _thirdPartyDocuments.remove(file);
+                                    });
+                                  },
+                                )).toList(),
+                                ActionChip(
+                                  avatar: const Icon(Icons.attach_file),
+                                  label: const Text('Adicionar Arquivo'),
+                                  onPressed: () async {
+                                    final result = await FilePicker.platform.pickFiles(
+                                      allowMultiple: true,
+                                      type: FileType.custom,
+                                      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'doc', 'docx'],
+                                    );
+                                    if (result != null && result.files.isNotEmpty) {
+                                      final xFiles = result.files.map((pf) => XFile(pf.path!, name: pf.name)).toList();
+                                      setModalState(() {
+                                        _thirdPartyDocuments.addAll(xFiles);
+                                      });
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            child: const Text('Cancelar'),
+                            onPressed: () => Navigator.of(context).pop(),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton(
+                            child: const Text('Adicionar'),
+                            onPressed: () async {
+                              if (_thirdPartyFormKey.currentState!.validate()) {
+                                // Mostra loading
+                                showDialog(
+                                  context: context,
+                                  barrierDismissible: false,
+                                  builder: (context) => const AlertDialog(
+                                    content: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        CircularProgressIndicator(),
+                                        SizedBox(height: 16),
+                                        Text('Fazendo upload dos arquivos...'),
+                                      ],
+                                    ),
+                                  ),
+                                );
+
+                                try {
+                                  // ✅ 1. Upload de fotos
+                                  List<String> fotoUrls = [];
+                                  if (_thirdPartyPhotos.isNotEmpty) {
+                                    fotoUrls = await _firestoreService.uploadSinistroFotos(
+                                      _currentClaim.numeroSinistro,
+                                      _thirdPartyPhotos,
+                                    );
+                                  }
+
+                                  // ✅ 2. Upload de documentos - USANDO A NOVA FUNÇÃO
+                                  List<String> documentoUrls = [];
+                                  if (_thirdPartyDocuments.isNotEmpty) {
+                                    final terceiroId = 'terceiro_${_currentClaim.terceiros.length}';
+                                    documentoUrls = await _firestoreService.uploadThirdPartyDocuments(
+                                      _currentClaim.numeroSinistro,
+                                      terceiroId,
+                                      _thirdPartyDocuments,
+                                    );
+                                  }
+
+                                  // Fechar diálogo de loading
+                                  Navigator.of(context).pop();
+
+                                  final novoTerceiro = ThirdParty(
+                                    nome: _tpNomeController.text,
+                                    cpf: _tpCpfController.text,
+                                    contato: _tpContatoController.text,
+                                    email: _tpEmailController.text,
+                                    placa: _tpPlacaController.text,
+                                    chassi: _tpChassiController.text,
+                                    cor: _tpCorController.text,
+                                    marcaTerceiro: _marcaTerceiroController.text,
+                                    modeloTerceiro: _tpModeloController.text,
+                                    anoFabricacaoTerceiro: _tpAnoController.text,
+                                    anoModeloTerceiro: _tpAnoModeloController.text,
+                                    numeroSinistroTerceiro: '', // ou algum valor se tiver
+
+                                    veiculo: Vehicle(
+                                      marca: _marcaTerceiroController.text,
+                                      modelo: _tpModeloController.text,
+                                      ano: int.tryParse(_tpAnoController.text) ?? 0,
+                                      anomodelo: int.tryParse(_tpAnoModeloController.text) ?? 0,
+                                      chassi: _tpChassiController.text,
+                                    ),
+
+                                    relato: _tpRelatoController.text,
+                                    enderecoTerceiro: _enderecoTerceiroController.text,
+
+                                    fotosUrls: fotoUrls,
+                                    documentosUrls: documentoUrls,
+                                  );
+                                  
+                                  Navigator.of(context).pop(novoTerceiro);
+                                } catch (e) {
+                                  // Fechar diálogo de loading em caso de erro
+                                  Navigator.of(context).pop();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Erro ao fazer upload: $e')),
+                                  );
+                                }
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+
+    // ✅ Correção: Adiciona ao _currentClaim.terceiros
+    if (novoTerceiro != null && mounted) {
+      setState(() {
+        _currentClaim.terceiros.add(novoTerceiro);
+      });
+
+      // ✅ Salva no Firestore
+      try {
+        final docRef = _firestoreService.getSinistrosCollection().doc(_currentClaim.id);
+        await docRef.update({
+          'terceiros': FieldValue.arrayUnion([novoTerceiro.toMap()]),
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Terceiro adicionado com sucesso!')),
+        );
+      } catch (e) {
+        // ✅ Remove do estado se falhar
+        setState(() {
+          _currentClaim.terceiros.remove(novoTerceiro);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao salvar terceiro: $e')),
+        );
+      }
+    }
+  }
+
+  // Busca lugar pelo autocomplete e retorna endereço de TERCEIRO
+  Future<void> _openPlaceSearchTerceiro(String label, TextEditingController controller) async {
+    final Place? place = await showSearch<Place?>(
+      context: context,
+      delegate: PlaceSearchDelegate(_places),
+    );
+
+    if (place != null) {
+      setState(() {
+        controller.text = place.address ?? place.name ?? '';
+        
+        // ✅ Extraia latitude e longitude diretamente
+        if (place.latLng != null) {
+          _enderecoTerceiroLatLng = LatLng(
+            place.latLng!.lat,
+            place.latLng!.lng,
+          );
+        }
+      });
+    }
+  }
+
+  Future<void> _showEditThirdPartyDialog(ThirdParty terceiro, int index) async {
+    final _thirdPartyFormKey = GlobalKey<FormState>();
+    final ImagePicker _picker = ImagePicker();
+
+    // Controllers para os campos do terceiro
+    final TextEditingController _tpNomeController = TextEditingController(text: terceiro.nome);
+    final TextEditingController _tpCpfController = TextEditingController(text: terceiro.cpf);
+    final TextEditingController _tpContatoController = TextEditingController(text: terceiro.contato);
+    final TextEditingController _tpEmailController = TextEditingController(text: terceiro.email);
+    final TextEditingController _tpPlacaController = TextEditingController(text: terceiro.placa);
+    final TextEditingController _tpChassiController = TextEditingController(text: terceiro.chassi);
+    final TextEditingController _tpCorController = TextEditingController(text: terceiro.cor);
+    final TextEditingController _tpMarcaController = TextEditingController(text: terceiro.veiculo.marca);
+    final TextEditingController _tpModeloController = TextEditingController(text: terceiro.veiculo.modelo);
+    final TextEditingController _tpAnoController = TextEditingController(text: terceiro.veiculo.ano.toString());
+    final TextEditingController _tpAnoModeloController = TextEditingController(text: terceiro.veiculo.anomodelo.toString());
+    final TextEditingController _tpRelatoController = TextEditingController(text: terceiro.relato ?? '');
+    final TextEditingController _enderecoTerceiroController = TextEditingController(text: terceiro.enderecoTerceiro);
+
+    // Listas para gerenciar fotos e documentos
+    List<XFile> _thirdPartyPhotos = [];
+    List<PlatformFile> _thirdPartyDocuments = []; // Alterado para PlatformFile
+    List<String> _photosToDelete = [];
+    List<String> _documentsToDelete = [];
+
+    // Variáveis para controle de carregamento
+    bool _isLoadingPhotos = false;
+    bool _isLoadingDocuments = false;
+
+    // Função para carregar fotos existentes
+    Future<void> _loadExistingPhotos() async {
+      if (terceiro.fotosUrls != null && terceiro.fotosUrls!.isNotEmpty) {
+        setState(() => _isLoadingPhotos = true);
+        try {
+          for (String url in terceiro.fotosUrls!) {
+            // Para URLs, criamos XFile com a URL como path
+            _thirdPartyPhotos.add(XFile(url, name: Uri.parse(url).pathSegments.last));
+          }
+        } catch (e) {
+          print('Erro ao carregar fotos: $e');
+        } finally {
+          setState(() => _isLoadingPhotos = false);
+        }
+      }
+    }
+
+    // Função para carregar documentos existentes
+    Future<void> _loadExistingDocuments() async {
+      if (terceiro.documentosUrls != null && terceiro.documentosUrls!.isNotEmpty) {
+        setState(() => _isLoadingDocuments = true);
+        try {
+          for (String url in terceiro.documentosUrls!) {
+            // Cria PlatformFile fake para documentos existentes (apenas para exibição)
+            _thirdPartyDocuments.add(PlatformFile(
+              name: getFileNameFromUrl(url),
+              size: 0,
+              path: url, // Usa a URL como path para identificar como existente
+            ));
+          }
+        } catch (e) {
+          print('Erro ao carregar documentos: $e');
+        } finally {
+          setState(() => _isLoadingDocuments = false);
+        }
+      }
+    }
+
+    // Carregar dados iniciais
+    await _loadExistingPhotos();
+    await _loadExistingDocuments();
+
+    final atualizado = await showDialog<ThirdParty>(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
+              child: Container(
+                width: MediaQuery.of(context).size.width * 0.9,
+                padding: const EdgeInsets.all(16.0),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Editar Terceiro',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 16),
+                      
+                      if (_isLoadingPhotos || _isLoadingDocuments)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 16.0),
+                          child: CircularProgressIndicator(),
+                        ),
+                      
+                      Form(
+                        key: _thirdPartyFormKey,
+                        child: Column(
+                          children: [
+                            buildRow([
+                              TextFormField(
+                                enabled: _isEditing,
+                                controller: _tpNomeController,
+                                decoration: const InputDecoration(labelText: 'Nome do Terceiro'),
+                                validator: (value) => value!.isEmpty ? 'Campo obrigatório' : null,
+                              ),
+                              TextFormField(
+                                enabled: _isEditing,
+                                controller: _tpCpfController,
+                                decoration: const InputDecoration(labelText: 'CPF do Terceiro'),
+                              ),
+                            ]),
+                            buildRow([
+                              TextFormField(
+                                controller: _tpContatoController,
+                                decoration: InputDecoration(labelText: 'Contato'),
+                              ),
+                              TextFormField(
+                                controller: _tpEmailController,
+                                decoration: InputDecoration(labelText: 'Email'),
+                              ),
+                            ]),
+                            TextFormField(
+              enabled: _isEditing,
+                                controller: _enderecoTerceiroController,
+                                readOnly: true,
+                                decoration: const InputDecoration(
+                                  labelText: 'Endereço do Terceiro',
+                                  suffixIcon: Icon(Icons.search),
+                                  //border: OutlineInputBorder(),
+                                ),
+                                onTap: () => _openPlaceSearchTerceiro('Endereço do Terceiro', _enderecoTerceiroController),
+                                validator: (value) {
+                                  if (value == null || value.isEmpty) return 'Campo obrigatório';
+                                  return null;
+                                },
+                              ),
+                            const Divider(),
+                            const Text('Veículo do Terceiro', style: TextStyle(fontWeight: FontWeight.bold)),
+                            TextFormField(
+              enabled: _isEditing,
+                              controller: _tpMarcaController,
+                              decoration: const InputDecoration(labelText: 'Marca do Veículo'),
+                            ),
+                            TextFormField(
+              enabled: _isEditing,
+                              controller: _tpModeloController,
+                              decoration: const InputDecoration(labelText: 'Modelo do Veículo'),
+                            ),
+                            Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextFormField(
+              enabled: _isEditing,
+                                        controller: _tpAnoController,
+                                        decoration: const InputDecoration(labelText: 'Ano de Fabricação'),
+                                        keyboardType: TextInputType.number,
+                                        validator: (value) => value == null || value.isEmpty ? 'Campo obrigatório' : null,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 16),
+                                    Expanded(
+                                      child: TextFormField(
+              enabled: _isEditing,
+                                        controller: _tpAnoModeloController,
+                                        decoration: const InputDecoration(labelText: 'Ano Modelo'),
+                                        keyboardType: TextInputType.number,
+                                        validator: (value) => value == null || value.isEmpty ? 'Campo obrigatório' : null,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+
+                            TextFormField(
+              enabled: _isEditing,
+                              controller: _tpPlacaController,
+                              decoration: const InputDecoration(labelText: 'Placa do Veículo'),
+                            ),
+                            TextFormField(
+              enabled: _isEditing,
+                              controller: _tpRelatoController,
+                              decoration: const InputDecoration(labelText: 'Relato do Terceiro sobre o Evento'),
+                              maxLines: 3,
+                            ),
+
+                            const SizedBox(height: 20),
+                            const Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'Fotos do Veículo',
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                // Fotos existentes
+                                ..._thirdPartyPhotos.map((photo) {
+                                  final isUrl = photo.path.startsWith('http');
+                                  return Stack(
+                                    alignment: Alignment.topRight,
+                                    children: [
+                                      Container(
+                                        width: 80,
+                                        height: 80,
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(8),
+                                          color: Colors.grey[200],
+                                        ),
+                                        child: isUrl
+                                            ? Image.network(
+                                                photo.path,
+                                                width: 80,
+                                                height: 80,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+                                              )
+                                            : FutureBuilder<Uint8List>(
+                                                future: photo.readAsBytes(),
+                                                builder: (context, snapshot) {
+                                                  if (snapshot.hasData) {
+                                                    return Image.memory(
+                                                      snapshot.data!,
+                                                      width: 80,
+                                                      height: 80,
+                                                      fit: BoxFit.cover,
+                                                    );
+                                                  } else if (snapshot.hasError) {
+                                                    return const Icon(Icons.error);
+                                                  } else {
+                                                    return const CircularProgressIndicator();
+                                                  }
+                                                },
+                                              ),
+                                      ),
+                                      GestureDetector(
+                                        onTap: () {
+                                          setModalState(() {
+                                            if (isUrl) {
+                                              _photosToDelete.add(photo.path);
+                                            }
+                                            _thirdPartyPhotos.remove(photo);
+                                          });
+                                        },
+                                        child: Container(
+                                          margin: const EdgeInsets.all(4),
+                                          decoration: const BoxDecoration(
+                                            color: Colors.red,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(Icons.close, color: Colors.white, size: 16),
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                }),
+                                
+                                // Botão para adicionar nova foto
+                                InkWell(
+                                  onTap: () async {
+                                    final picked = await _picker.pickImage(source: ImageSource.gallery);
+                                    if (picked != null) {
+                                      setModalState(() {
+                                        _thirdPartyPhotos.add(picked);
+                                      });
+                                    }
+                                  },
+                                  child: Container(
+                                    width: 80,
+                                    height: 80,
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey[300],
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.grey),
+                                    ),
+                                    child: const Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.add_a_photo, size: 24),
+                                        SizedBox(height: 4),
+                                        Text('Adicionar', style: TextStyle(fontSize: 10)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                            // Seção de documentos
+                            const SizedBox(height: 20),
+                            const Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'Documentos/Laudos',
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                // Documentos existentes
+                                ..._thirdPartyDocuments.map((file) {
+                                  final isUrl = file.path != null && file.path!.startsWith('http');
+                                  return Chip(
+                                    label: Text(
+                                      file.name,
+                                      style: TextStyle(
+                                        color: isUrl ? Colors.blue : Colors.orange,
+                                      ),
+                                    ),
+                                    deleteIcon: const Icon(Icons.close, size: 16),
+                                    onDeleted: () {
+                                      setModalState(() {
+                                        if (isUrl) {
+                                          _documentsToDelete.add(file.path!);
+                                        }
+                                        _thirdPartyDocuments.remove(file);
+                                      });
+                                    },
+                                  );
+                                }),
+                                
+                                // Botão para adicionar novo documento
+                                ActionChip(
+                                  avatar: const Icon(Icons.attach_file, size: 16),
+                                  label: const Text('Adicionar Arquivo'),
+                                  onPressed: () async {
+                                    final result = await FilePicker.platform.pickFiles(
+                                      allowMultiple: true,
+                                      type: FileType.custom,
+                                      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'doc', 'docx'],
+                                    );
+                                    
+                                    if (result != null && result.files.isNotEmpty) {
+                                      setModalState(() {
+                                        _thirdPartyDocuments.addAll(result.files);
+                                      });
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 24),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Text('Cancelar'),
+                          ),
+                          const SizedBox(width: 12),
+                          ElevatedButton(
+                            onPressed: () async {
+                              if (_thirdPartyFormKey.currentState!.validate()) {
+                                // Mostrar loading durante o upload
+                                showDialog(
+                                  context: context,
+                                  barrierDismissible: false,
+                                  builder: (context) => const AlertDialog(
+                                    content: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        CircularProgressIndicator(),
+                                        SizedBox(height: 16),
+                                        Text('Fazendo upload dos arquivos...'),
+                                      ],
+                                    ),
+                                  ),
+                                );
+
+                                try {
+                                  // Separar fotos novas das existentes
+                                  List<XFile> newPhotos = _thirdPartyPhotos
+                                      .where((photo) => !photo.path.startsWith('http'))
+                                      .toList();
+                                  
+                                  // Separar documentos novos dos existentes
+                                  List<PlatformFile> newDocuments = _thirdPartyDocuments
+                                      .where((doc) => doc.path == null || !doc.path!.startsWith('http'))
+                                      .toList();
+
+                                  // Upload de novas fotos (usando a mesma função dos veículos segurados)
+                                  List<String> newPhotoUrls = [];
+                                  if (newPhotos.isNotEmpty) {
+                                    newPhotoUrls = await _firestoreService.uploadSinistroFotos(
+                                      _currentClaim.numeroSinistro,
+                                      newPhotos,
+                                    );
+                                  }
+
+                                  // Upload de novos documentos (usando a mesma função dos veículos segurados)
+                                  List<String> newDocumentUrls = [];
+                                  if (newDocuments.isNotEmpty) {
+                                    newDocumentUrls = await _firestoreService.uploadArquivosLaudos(
+                                      _currentClaim.numeroSinistro,
+                                      newDocuments,
+                                    );
+                                  }
+
+                                  // Combinar URLs existentes com novas URLs
+                                  List<String> finalPhotoUrls = [
+                                    ...terceiro.fotosUrls?.where((url) => !_photosToDelete.contains(url)) ?? [],
+                                    ...newPhotoUrls
+                                  ];
+                                  
+                                  List<String> finalDocumentUrls = [
+                                    ...terceiro.documentosUrls?.where((url) => !_documentsToDelete.contains(url)) ?? [],
+                                    ...newDocumentUrls
+                                  ];
+
+                                  // Fechar diálogo de loading
+                                  Navigator.of(context).pop();
+
+                                  final novoTerceiro = ThirdParty(
+                                    nome: _tpNomeController.text,
+                                    cpf: _tpCpfController.text,
+                                    contato: _tpContatoController.text,
+                                    email: _tpEmailController.text,
+                                    placa: _tpPlacaController.text,
+                                    chassi: _tpChassiController.text,
+                                    cor: _tpCorController.text,
+                                    veiculo: Vehicle(
+                                      marca: _tpMarcaController.text,
+                                      modelo: _tpModeloController.text,
+                                      ano: int.tryParse(_tpAnoController.text) ?? 0,
+                                      anomodelo: int.tryParse(_tpAnoModeloController.text) ?? 0,
+                                      chassi: '',
+                                    ),
+                                    relato: _tpRelatoController.text,
+                                    fotosUrls: finalPhotoUrls,
+                                    documentosUrls: finalDocumentUrls,
+                                    enderecoTerceiro: _enderecoTerceiroController.text,
+                                  );
+                                  
+                                  Navigator.of(context).pop(novoTerceiro);
+                                } catch (e) {
+                                  // Fechar diálogo de loading em caso de erro
+                                  Navigator.of(context).pop();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Erro ao fazer upload: $e')),
+                                  );
+                                }
+                              }
+                            },
+                            child: const Text('Salvar Alterações'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (atualizado != null && mounted) {
+      setState(() {
+        _currentClaim.terceiros[index] = atualizado;
+      });
+      
+      // Atualizar no Firestore
+      try {
+        await _firestoreService.getSinistrosCollection()
+            .doc(_currentClaim.id)
+            .update({
+              'terceiros': _currentClaim.terceiros.map((t) => t.toMap()).toList()
+            });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Terceiro atualizado com sucesso!')),
+        );
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao atualizar terceiro: $e')),
+        );
+      }
+    }
+  }
+
+  Future<bool> _showExitConfirmationDialog() async {
+    return await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Sair sem salvar?'),
+          content: const Text('Você tem alterações não salvas. Deseja realmente sair?'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Sair'),
+            ),
+          ],
+        );
+      },
+    ) ?? false; // Retorna false se o diálogo for fechado sem resposta
+  }
+
+  // WIDGET PARA FORMATAR O HEADER
+  
+  Widget _infoItem(String label, String? value) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 12), // 👈 IMPORTANTE
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.grey[500],
+            ),
+          ),
+          Text(
+            value ?? '-',
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // WIDGET PARA FORMATAR TERCEIROS
+
+  Widget buildRow(List<Widget> children) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: children
+            .map((e) => Expanded(child: Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: e,
+                )))
+            .toList(),
+      ),
+    );
+  }
+
+  // WIDGET PARA O NOVO LAYOUT DO HEADER
+
+  Widget sectionContentWrapper(Widget child) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: child,
+    );
+  }
+
+  // WIDGET PARA PADRONIZAR O BOTÃO '+'
+
+  String getFileNameFromUrl(String url) {
+    try {
+      final String path = url.split('?').first;
+      final String rawName = path.split('/').last;
+      final String decodedName = Uri.decodeComponent(rawName);
+      return decodedName.trim().replaceAll(RegExp(r'\s+'), ' ');
+    } catch (e) {
+      final rawName = url.split('/').last.split('?').first;
+      return rawName.trim().replaceAll(RegExp(r'\s+'), ' ');
+    }
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'Aberto': return Colors.red.shade400;
+      case 'Vistoria em Andamento': return Colors.orange.shade400;
+      case 'Aguardando Aprovação': return Colors.yellow.shade700;
+      case 'Aguardando Peças': return Colors.blueGrey.shade400;
+      case 'Reparo em Andamento': return Colors.blue.shade400;
+      case 'Concluído': return Colors.green.shade400;
+      default: return Colors.grey;
+    }
+  }
+
+  IconData _getStatusIcon(String status) {
+    switch (status) {
+      case 'Aberto': return Icons.event;
+      case 'Vistoria em Andamento': return Icons.search;
+      case 'Aguardando Aprovação': return Icons.pending_actions;
+      case 'Aguardando Peças': return Icons.widgets;
+      case 'Reparo em Andamento': return Icons.build;
+      case 'Concluído': return Icons.check_circle;
+      default: return Icons.info_outline;
+    }
+  }
+
+  Widget buildInfoCard({
+    required String title,
+    required IconData icon,
+    required Color color,
+    required List<Widget> children,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: color),
+              const SizedBox(width: 6),
+              Text(
+                title,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget buildField(String label, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            color: Colors.grey[500],
+          ),
+        ),
+        Text(
+          value.isEmpty ? '-' : value,
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 13,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Widget para editar os campos
+
+  Widget buildEditableField({
+    required String label,
+    required String? value,
+    required Function(String) onChanged,
+    int maxLines = 1,
+  }) {
+    if (_isEditing) {
+      return TextFormField(
+        initialValue: value ?? '',
+        maxLines: maxLines,
+        decoration: InputDecoration(
+          labelText: label,
+          isDense: true,
+          filled: true,
+          fillColor: Colors.amber.withOpacity(0.12), // 👈 leve destaque
+        ),
+        onChanged: onChanged,
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            color: Colors.grey[500],
+          ),
+        ),
+        Text(
+          (value == null || value.isEmpty) ? '-' : value,
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 13,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // 🆕 Widget para dropdown de ramo (com todas as opções)
+  Widget buildEditableRamoDropdown({
+    required String? value,
+    required Function(String) onChanged,
+  }) {
+    const ramoOptions = [
+      'Frota',
+      'Veículo Individual',
+      'Transporte',
+      'Residencial',
+      'Vidas',
+      'Máquinas',  // 🆕 NOVO
+    ];
+
+    if (_isEditing) {
+      return DropdownButtonFormField<String>(
+        value: value ?? 'Frota',
+        decoration: const InputDecoration(
+          labelText: 'Ramo',
+          isDense: true,
+          filled: true,
+          fillColor: Color.fromARGB(255, 255, 205, 86),
+          border: OutlineInputBorder(),
+        ),
+        items: ramoOptions.map((ramo) {
+          return DropdownMenuItem(
+            value: ramo,
+            child: Text(ramo),
+          );
+        }).toList(),
+        onChanged: (v) {
+          if (v != null) {
+            onChanged(v);
+          }
+        },
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Ramo',
+          style: TextStyle(
+            fontSize: 11,
+            color: Colors.grey,
+          ),
+        ),
+        Text(
+          value ?? 'Frota',
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 13,
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+Widget build(BuildContext context) {
+  // ✅ 1. Função para limpar strings (agora segura)
+  String clean(String? s) => (s ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
+
+  // ✅ 2. Valores limpos para uso em URLs
+  final seguradora = clean(_currentClaim.seguradora);
+  final reguladora = clean(_currentClaim.transporte?.reguladora) ?? 'Não informado';
+  final nomeMotorista = clean(_currentClaim.transporte?.nomeMotorista) ?? 'Não informado';
+  final ramo = _currentClaim.ramoSinistro ?? 'Frota';
+  bool isTransporte = ramo == 'Transporte';
+  bool isVeiculo = ramo == 'Frota' || ramo == 'Veículo Individual';
+  bool isResidencial = ramo == 'Residencial';
+  bool isVida = ramo == 'Vidas';
+  bool isMaquinas = ramo == 'Máquinas';
+
+  return Scaffold(
+    backgroundColor: const Color(0xFFF8F9FB),
+    appBar: AppBar(
+      title: const Text('Detalhes do Sinistro'),
+      actions: [
+        if (!_isEditing && _authService.getUserId() != 'anonymous_user')
+          IconButton(
+            icon: const Icon(Icons.edit),
+            onPressed: () {
+              setState(() {
+                _isEditing = true;
+              });
+            },
+            tooltip: 'Editar',
+          ),
+        if (_isEditing)
+          IconButton(
+            icon: const Icon(Icons.save),
+            onPressed: _saveChanges,
+            tooltip: 'Salvar',
+          ),
+        if (_isEditing)
+          IconButton(
+            icon: const Icon(Icons.cancel),
+            onPressed: () {
+              setState(() {
+                _isEditing = false;
+                _relatoController.text = widget.claim.relatoEvento;
+                _localController.text = widget.claim.localOcorrencia;
+                _numeroSinistroController.text = widget.claim.numeroSinistro;
+                _numeroSeguradoraController.text = widget.claim.numeroSeguradora;
+              });
+            },
+            tooltip: 'Cancelar',
+          ),
+      ],
+    ),
+
+    body: WillPopScope(
+          onWillPop: () async {
+            // Intercepta o gesto de voltar
+            if (_isEditing) {
+              // Mostra diálogo de confirmação
+              final shouldPop = await _showExitConfirmationDialog();
+              return shouldPop;
+            }
+            return true; // Permite voltar normalmente se não estiver editando
+          },
+      child: _isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : LayoutBuilder(
+            builder: (context, constraints) {
+              final isLargeScreen = constraints.maxWidth > 600;
+              return SingleChildScrollView(
+                padding: const EdgeInsets.all(16.0),
+                child: Align(
+                  alignment: isLargeScreen ? Alignment.centerLeft : Alignment.center,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: isLargeScreen ? 800 : double.infinity),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SectionCard(
+                          title: 'Sinistro',
+                          icon: Icons.description_outlined,
+                          color: const Color(0xFF1565C0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+
+                              // 🔵 HEADER ORIGINAL (INALTERADO)
+                              Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[50],
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.grey.shade200),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: _getStatusColor(_currentClaim.statusAtual).withOpacity(0.1),
+                                            borderRadius: BorderRadius.circular(20),
+                                          ),
+                                          child: Text(
+                                            _currentClaim.statusAtual,
+                                            style: TextStyle(
+                                              color: _getStatusColor(_currentClaim.statusAtual),
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+
+                                    const SizedBox(height: 10),
+
+                                    Text(
+                                      _currentClaim.numeroSinistro,
+                                      style: const TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+
+                                    const SizedBox(height: 12),
+
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+
+                                        /// 🔵 LINHA 1
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableRamoDropdown(  // ✅ Muda o método
+                                                value: _currentClaim.ramoSinistro,
+                                                onChanged: (v) => _currentClaim.ramoSinistro = v,
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Sinistro',
+                                                value: _currentClaim.numeroSinistro,
+                                                onChanged: (v) => _currentClaim.numeroSinistro = v,
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Data Ocorrência',
+                                                value: DateFormat('dd/MM/yyyy').format(_currentClaim.dataOcorrencia),
+                                                onChanged: (v) {}, // ⚠️ não editar direto (explico abaixo)
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Data Aviso',
+                                                value: _currentClaim.dataAviso != null
+                                                    ? DateFormat('dd/MM/yyyy').format(_currentClaim.dataAviso!)
+                                                    : '',
+                                                onChanged: (v) {}, // ⚠️ idem
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+
+                                        const SizedBox(height: 12),
+
+                                        /// 🔵 LINHA 2
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Seguradora',
+                                                value: _currentClaim.seguradora,
+                                                onChanged: (v) => _currentClaim.seguradora = v,
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Registro Seguradora',
+                                                value: _currentClaim.numeroSeguradora,
+                                                onChanged: (v) => _currentClaim.numeroSeguradora = v,
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Reguladora',
+                                                value: _currentClaim.transporte?.reguladora,
+                                                onChanged: (v) {
+                                                  if (_currentClaim.transporte != null) {
+                                                    _currentClaim.transporte!.reguladora = v;
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+
+                                        const SizedBox(height: 12),
+
+                                        /// 🔵 LINHA 3
+                                        buildEditableField(
+                                          label: 'Endereço',
+                                          value: _currentClaim.localOcorrencia,
+                                          onChanged: (v) => _currentClaim.localOcorrencia = v,
+                                        ),
+
+                                        const SizedBox(height: 12),
+                                          Row(
+                                          children: [
+                                            Expanded(
+                                              child: _isEditing
+                                                  ? TextFormField(
+                                                      controller: _valorTotalSinistroController,
+                                                      keyboardType: TextInputType.number,
+                                                      decoration: const InputDecoration(
+                                                        labelText: 'Valor Total do Sinistro',
+                                                        prefixText: 'R\$ ',
+                                                        isDense: true,
+                                                        filled: true,
+                                                      ),
+                                                      onChanged: (v) {
+                                                        final clean = v.replaceAll('.', '').replaceAll(',', '.');
+                                                        _currentClaim.valorTotalSinistro =
+                                                            double.tryParse(clean) ?? 0.0;
+                                                      },
+                                                    )
+                                                  : buildField(
+                                                      'Valor Total do Sinistro',
+                                                      'R\$ ${decimalFormat.format(_currentClaim.valorTotalSinistro)}',
+                                                    ),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            Expanded(
+                                              child: _isEditing
+                                                  ? GestureDetector(
+                                                      onTap: () async {
+                                                        final picked = await showDatePicker(
+                                                          context: context,
+                                                          initialDate: _currentClaim.slaPrevisto ?? DateTime.now(),
+                                                          firstDate: DateTime.now(),
+                                                          lastDate: DateTime(2100),
+                                                        );
+                                                        if (picked != null) {
+                                                          setState(() {
+                                                            _currentClaim.slaPrevisto = picked;
+                                                            _slaPrevistController.text = DateFormat('dd/MM/yyyy').format(picked);
+                                                          });
+                                                        }
+                                                      },
+                                                      child: TextFormField(
+                                                        controller: _slaPrevistController,
+                                                        enabled: false,
+                                                        decoration: const InputDecoration(
+                                                          labelText: 'Tempo Previsto',
+                                                          suffixIcon: Icon(Icons.calendar_today),
+                                                          isDense: true,
+                                                          filled: true,
+                                                        ),
+                                                      ),
+                                                    )
+                                                  : _buildTempoPrevisto(),  // ← NOVO WIDGET
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    )
+                                  ],
+                                ),
+                              ),
+
+                              const SizedBox(height: 12),
+
+                              // 🚛 TRANSPORTE (INALTERADO)
+                              if (isTransporte && _currentClaim.transporte != null) ...[
+                                
+                                Column(
+                                  children: [
+
+                                    // 👤 MOTORISTA
+                                    buildInfoCard(
+                                      title: 'Motorista',
+                                      icon: Icons.person,
+                                      color: Colors.blue,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Nome',
+                                                value: nomeMotorista,
+                                                onChanged: (v) {
+                                                  _currentClaim.transporte!.nomeMotorista = v;
+                                                },
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'CPF',
+                                                value: clean(_currentClaim.transporte!.cpfMotorista),
+                                                onChanged: (v) {
+                                                  _currentClaim.transporte!.cpfMotorista = v;
+                                                },
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+
+                                    // 🚛 CAVALO
+                                    buildInfoCard(
+                                      title: 'Cavalo',
+                                      icon: Icons.local_shipping,
+                                      color: Colors.green,
+                                      children: [
+
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Placa',
+                                                value: clean(_currentClaim.transporte!.placaCavalo),
+                                                onChanged: (v) => _currentClaim.transporte!.placaCavalo = v,
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Chassi',
+                                                value: clean(_currentClaim.transporte!.chassi),
+                                                onChanged: (v) => _currentClaim.transporte!.chassi = v,
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Cor',
+                                                value: clean(_currentClaim.transporte!.cor),
+                                                onChanged: (v) => _currentClaim.transporte!.cor = v,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+
+                                        const SizedBox(height: 8),
+
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Ano',
+                                                value: '${_currentClaim.transporte!.ano ?? ''}',
+                                                onChanged: (v) =>
+                                                    _currentClaim.transporte!.ano = int.tryParse(v) ?? 0,
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Modelo',
+                                                value: '${_currentClaim.transporte!.anomodelo ?? ''}',
+                                                onChanged: (v) =>
+                                                    _currentClaim.transporte!.anomodelo = int.tryParse(v) ?? 0,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+
+                                    // 🚚 CARRETA
+                                    buildInfoCard(
+                                      title: 'Carreta',
+                                      icon: Icons.fire_truck,
+                                      color: Colors.orange,
+                                      children: [
+
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Placa',
+                                                value: clean(_currentClaim.transporte!.placaCarreta),
+                                                onChanged: (v) =>
+                                                    _currentClaim.transporte!.placaCarreta = v,
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Chassi',
+                                                value: clean(_currentClaim.transporte!.chassiCarreta),
+                                                onChanged: (v) =>
+                                                    _currentClaim.transporte!.chassiCarreta = v,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+
+                                        const SizedBox(height: 8),
+
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Ano',
+                                                value: '${_currentClaim.transporte!.anoCarreta ?? ''}',
+                                                onChanged: (v) =>
+                                                    _currentClaim.transporte!.anoCarreta =
+                                                        int.tryParse(v) ?? 0,
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Modelo',
+                                                value: '${_currentClaim.transporte!.anoModeloCarreta ?? ''}',
+                                                onChanged: (v) =>
+                                                    _currentClaim.transporte!.anoModeloCarreta =
+                                                        int.tryParse(v) ?? 0,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+
+                                    // 📦 CARGA
+                                    buildInfoCard(
+                                      title: 'Carga',
+                                      icon: Icons.inventory_2,
+                                      color: Colors.purple,
+                                      children: [
+
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'NFE',
+                                                value: clean(_currentClaim.transporte!.nfe),
+                                                onChanged: (v) =>
+                                                    _currentClaim.transporte!.nfe = v,
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'CTe',
+                                                value: clean(_currentClaim.transporte!.cte),
+                                                onChanged: (v) =>
+                                                    _currentClaim.transporte!.cte = v,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+
+                                        const SizedBox(height: 8),
+
+                                        buildEditableField(
+                                          label: 'Averbação',
+                                          value: clean(_currentClaim.transporte!.numeroAverbacao),
+                                          onChanged: (v) =>
+                                              _currentClaim.transporte!.numeroAverbacao = v,
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                )
+
+                              ] else if (isVeiculo) ...[
+                                buildInfoCard(
+                                  title: 'Veículo',
+                                  icon: Icons.directions_car,
+                                  color: Colors.blueGrey,
+                                  children: [
+
+                                    // 🚗 DADOS PRINCIPAIS
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: buildEditableField(
+                                            label: 'Placa',
+                                            value: clean(_currentClaim.veiculoSelecionado?.placa),
+                                            onChanged: (v) {
+                                              if (_currentClaim.veiculoSelecionado != null) {
+                                                _currentClaim.veiculoSelecionado!.placa = v;
+                                              }
+                                            },
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: buildEditableField(
+                                            label: 'Marca',
+                                            value: clean(_currentClaim.veiculoSelecionado?.marca),
+                                            onChanged: (v) {
+                                              if (_currentClaim.veiculoSelecionado != null) {
+                                                _currentClaim.veiculoSelecionado!.marca = v;
+                                              }
+                                            },
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: buildEditableField(
+                                            label: 'Modelo',
+                                            value: clean(_currentClaim.veiculoSelecionado?.modelo),
+                                            onChanged: (v) {
+                                              if (_currentClaim.veiculoSelecionado != null) {
+                                                _currentClaim.veiculoSelecionado!.modelo = v;
+                                              }
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+
+                                    const SizedBox(height: 8),
+
+                                    // 🎨 COR + CHASSI
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: buildEditableField(
+                                            label: 'Cor',
+                                            value: clean(_currentClaim.veiculoSelecionado?.cor),
+                                            onChanged: (v) {
+                                              if (_currentClaim.veiculoSelecionado != null) {
+                                                _currentClaim.veiculoSelecionado!.cor = v;
+                                              }
+                                            },
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: buildEditableField(
+                                            label: 'Chassi',
+                                            value: clean(_currentClaim.veiculoSelecionado?.chassi),
+                                            onChanged: (v) {
+                                              if (_currentClaim.veiculoSelecionado != null) {
+                                                _currentClaim.veiculoSelecionado!.chassi = v;
+                                              }
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+
+                                    const SizedBox(height: 8),
+
+                                    // 📅 ANOS
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: buildEditableField(
+                                            label: 'Ano Fab.',
+                                            value: '${_currentClaim.veiculoSelecionado?.ano ?? ''}',
+                                            onChanged: (v) {
+                                              if (_currentClaim.veiculoSelecionado != null) {
+                                                _currentClaim.veiculoSelecionado!.ano = int.tryParse(v) ?? 0;
+                                              }
+                                            },
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: buildEditableField(
+                                            label: 'Ano Mod.',
+                                            value: '${_currentClaim.veiculoSelecionado?.anomodelo ?? ''}',
+                                            onChanged: (v) {
+                                              if (_currentClaim.veiculoSelecionado != null) {
+                                                _currentClaim.veiculoSelecionado!.anomodelo = int.tryParse(v) ?? 0;
+                                              }
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+
+                                  ],
+                                ),
+
+                                                            ] else if (isMaquinas) ...[
+                                // 🆕 SEÇÃO DE MÁQUINAS
+                                buildInfoCard(
+                                  title: 'Máquina e Equipamento',
+                                  icon: Icons.settings_outlined,
+                                  color: Colors.orange,
+                                  children: [
+ 
+                                    // 📋 DADOS PRINCIPAIS
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: buildEditableField(
+                                            label: 'Descrição',
+                                            value: clean(_currentClaim.maquinaria?.descricao),
+                                            onChanged: (v) {
+                                              if (_currentClaim.maquinaria != null) {
+                                                _currentClaim.maquinaria!.descricao = v;
+                                              }
+                                            },
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: buildEditableField(
+                                            label: 'Número de Série',
+                                            value: clean(_currentClaim.maquinaria?.numeroSerie),
+                                            onChanged: (v) {
+                                              if (_currentClaim.maquinaria != null) {
+                                                _currentClaim.maquinaria!.numeroSerie = v;
+                                              }
+                                            },
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: buildEditableField(
+                                            label: 'Modelo',
+                                            value: clean(_currentClaim.maquinaria?.modelo),
+                                            onChanged: (v) {
+                                              if (_currentClaim.maquinaria != null) {
+                                                _currentClaim.maquinaria!.modelo = v;
+                                              }
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+ 
+                                    const SizedBox(height: 8),
+ 
+                                    // 📝 DESCRIÇÃO DO SINISTRO
+                                    buildEditableField(
+                                      label: 'Descrição do Sinistro',
+                                      value: clean(_currentClaim.maquinaria?.descricaoSinistro),
+                                      onChanged: (v) {
+                                        if (_currentClaim.maquinaria != null) {
+                                          _currentClaim.maquinaria!.descricaoSinistro = v;
+                                        }
+                                      },
+                                      maxLines: 3,
+                                    ),
+ 
+                                  ],
+                                ),
+ 
+                              const SizedBox(height: 16),
+
+                              // 📝 RELATO (INALTERADO)
+                              Text('Relato do Evento:',
+                                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+
+                              if (_isEditing)
+                                TextFormField(
+                                  enabled: _isEditing,
+                                  controller: _relatoController,
+                                  maxLines: 3,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Relato do Evento',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  onChanged: (value) {
+                                    _currentClaim.relatoEvento = value;
+                                  },
+                                )
+                              else
+                                Text(_currentClaim.relatoEvento),
+
+                              const Divider(height: 30),
+
+                              // 👤 CLIENTE (INALTERADO)
+                              buildInfoCard(
+                                title: 'Cliente',
+                                icon: Icons.business,
+                                color: Colors.indigo,
+                                children: [
+
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: buildEditableField(
+                                          label: 'Nome',
+                                          value: _client?.nome,
+                                          onChanged: (v) {
+                                            if (_client != null) {
+                                              _client!.nome = v;
+                                            }
+                                          },
+                                        ),
+                                      ),                                    ],
+                                  ),
+
+                                  const SizedBox(height: 8),
+
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: buildEditableField(
+                                          label: 'Contato',
+                                          value: _client?.contato,
+                                          onChanged: (v) {
+                                            if (_client != null) {
+                                              _client!.contato = v;
+                                            }
+                                          },
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: buildEditableField(
+                                          label: 'Email',
+                                          value: _client?.email,
+                                          onChanged: (v) {
+                                            if (_client != null) {
+                                              _client!.email = v;
+                                            }
+                                          },
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+
+                                  const SizedBox(height: 12),
+
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                    children: [
+                                      ElevatedButton.icon(
+                                        icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Colors.green),
+                                        label: const Text('WhatsApp'),
+                                        onPressed: () async {
+                                          final phone = (_client?.contato ?? '').replaceAll(RegExp(r'\D'), '');
+                                          final text = Uri.encodeFull('Atualização do sinistro número ${_currentClaim.numeroSinistro}');
+                                          final url = 'https://wa.me/$phone?text=$text';
+
+                                          if (await canLaunchUrlString(url)) {
+                                            await launchUrlString(url, mode: LaunchMode.externalApplication);
+                                          }
+                                        },
+                                      ),
+                                      ElevatedButton.icon(
+                                        icon: const Icon(Icons.email, color: Colors.redAccent),
+                                        label: const Text('E-mail'),
+                                        onPressed: () async {
+                                          final email = _client?.email ?? '';
+                                          final subject = Uri.encodeFull('${_currentClaim.numeroSinistro} - Atualização de Status');
+                                          final url = 'mailto:$email?subject=$subject';
+
+                                          if (await canLaunchUrlString(url)) {
+                                            await launchUrlString(url);
+                                          }
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+
+                              // 📸 FOTOS (INALTERADO)
+                              Text(
+                                'Fotos da Ocorrência:',
+                                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                              ),
+
+                              if (_currentClaim.fotosUrls.isNotEmpty)
+                                const SizedBox(height: 8),
+
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: _currentClaim.fotosUrls.map((url) {
+                                  final cleanedUrl = url.trim();
+                                  return GestureDetector(
+                                    onTap: () {
+                                      showDialog(
+                                        context: context,
+                                        builder: (_) => Dialog(
+                                          child: Stack(
+                                            children: [
+                                              InteractiveViewer(
+                                                child: Image.network(
+                                                  cleanedUrl,
+                                                  errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+                                                ),
+                                              ),
+                                              Positioned(
+                                                top: 8,
+                                                right: 8,
+                                                child: IconButton(
+                                                  icon: const Icon(Icons.close, color: Colors.white),
+                                                  onPressed: () => Navigator.of(context).pop(),
+                                                ),
+                                              ),
+                                              if (_isEditing)
+                                                Positioned(
+                                                  top: 8,
+                                                  left: 8,
+                                                  child: IconButton(
+                                                    icon: const Icon(Icons.delete, color: Colors.red),
+                                                    onPressed: () {
+                                                      Navigator.of(context).pop();
+                                                      _removeFoto(url);
+                                                    },
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.network(
+                                        cleanedUrl,
+                                        width: 100,
+                                        height: 100,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+
+                              const SizedBox(height: 8),
+
+                              if (_isEditing)
+                                ElevatedButton.icon(
+                                  onPressed: _uploadFoto,
+                                  icon: const Icon(Icons.add_a_photo),
+                                  label: const Text('Adicionar Foto'),
+                                ),
+
+                              const SizedBox(height: 16),
+
+                              // 📎 ARQUIVOS (INALTERADO)
+                              Text(
+                                'Arquivos/Laudos:',
+                                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                              ),
+
+                              const SizedBox(height: 8),
+
+                              if (_currentClaim.arquivosLaudosUrls.isNotEmpty)
+                                ..._currentClaim.arquivosLaudosUrls.map((url) {
+                                  final nomeArquivo = getFileNameFromUrl(url);
+
+                                  return ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: const Icon(Icons.insert_drive_file, color: Colors.blue),
+                                    title: Text(nomeArquivo),
+                                    trailing: _isEditing
+                                        ? IconButton(
+                                            icon: const Icon(Icons.delete, color: Colors.red),
+                                            onPressed: () => _removeDocumento(url),
+                                          )
+                                        : null,
+                                    onTap: () async {
+                                      final cleanedUrl = url.trim();
+                                      try {
+                                        if (await canLaunchUrlString(cleanedUrl)) {
+                                          await launchUrlString(cleanedUrl, mode: LaunchMode.externalApplication);
+                                        } else {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(content: Text('Não foi possível abrir o arquivo')),
+                                          );
+                                        }
+                                      } catch (e) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('Erro ao abrir arquivo: link inválido')),
+                                        );
+                                      }
+                                    },
+                                  );
+                                }),
+
+                              const SizedBox(height: 8),
+
+                              if (_isEditing)
+                                ElevatedButton.icon(
+                                  onPressed: _uploadDocumento,
+                                  icon: const Icon(Icons.attach_file),
+                                  label: const Text('Anexar Documento'),
+                                ),
+
+                              const SizedBox(height: 16),
+                              const SizedBox(width: 16),
+
+                              if (_isEditing)
+                                ElevatedButton.icon(
+                                  onPressed: _showAddThirdPartyDialog,
+                                  icon: const Icon(Icons.person_add),
+                                  label: const Text('Adicionar Terceiro'),
+                                ),
+                            ],
+                            ]
+                          ),
+                        ),
+                        // Widget para terceiros
+                        /// 👥 TERCEIROS (REFATORADO VISUAL — MESMA LÓGICA)
+                        if (_currentClaim.terceiros.isNotEmpty) ...[
+                          const Divider(height: 30),
+
+                          SectionCard(
+                            title: 'Terceiros Envolvidos',
+                            icon: Icons.people_outline,
+                            color: const Color(0xFF6A1B9A),
+                            child: Column(
+                              children: [
+
+                                ..._currentClaim.terceiros.map((tp) => Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(color: Colors.grey.shade200),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.04),
+                                          blurRadius: 6,
+                                          offset: const Offset(0, 2),
+                                        )
+                                      ],
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+
+                                        /// 🔵 HEADER
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                          child: Row(
+                                            children: [
+                                              const Icon(Icons.person, size: 18, color: Colors.deepPurple),
+                                              const SizedBox(width: 8),
+
+                                              Expanded(
+                                                child: Text(
+                                                  tp.nome,
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 14,
+                                                  ),
+                                                ),
+                                              ),
+
+                                              if (_isEditing)
+                                                IconButton(
+                                                  icon: const Icon(Icons.edit, size: 18),
+                                                  onPressed: () => _showEditThirdPartyDialog(
+                                                    tp,
+                                                    _currentClaim.terceiros.indexOf(tp),
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+
+                                        const Divider(height: 1),
+
+                                        /// 🔵 BODY (SEU CÓDIGO ORIGINAL — REORGANIZADO)
+                                        Padding(
+                                          padding: const EdgeInsets.all(12.0),
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+
+                                              if (tp.cpf.isNotEmpty)
+                                                Text('CPF: ${tp.cpf}'),
+
+                                              if (tp.contato.isNotEmpty)
+                                                Row(
+                                                  children: [
+                                                    Expanded(child: Text('Telefone: ${tp.contato}')),
+                                                    IconButton(
+                                                      icon: const Icon(Icons.phone, color: Colors.green),
+                                                      onPressed: () async {
+                                                        final uri = Uri(scheme: 'tel', path: tp.contato);
+                                                        if (await canLaunchUrl(uri)) {
+                                                          await launchUrl(uri);
+                                                        }
+                                                      },
+                                                    ),
+                                                  ],
+                                                ),
+
+                                              if (tp.email.isNotEmpty)
+                                                Text('Email: ${tp.email}'),
+
+                                              if (tp.enderecoTerceiro.isNotEmpty)
+                                                Text('Endereço: ${tp.enderecoTerceiro}'),
+
+                                              const SizedBox(height: 8),
+
+                                              /// 🚗 VEÍCULO
+                                              buildInfoCard(
+                                                title: 'Veículo',
+                                                icon: Icons.directions_car,
+                                                color: Colors.deepPurple,
+                                                children: [
+
+                                                  Row(
+                                                    children: [
+                                                      Expanded(child: buildField('Placa', tp.placa)),
+                                                      Expanded(child: buildField('Chassi', tp.chassi)),
+                                                      Expanded(child: buildField('Cor', tp.cor)),
+                                                    ],
+                                                  ),
+
+                                                  const SizedBox(height: 8),
+
+                                                  Row(
+                                                    children: [
+                                                      Expanded(child: buildField('Marca', tp.marcaTerceiro)),
+                                                      Expanded(child: buildField('Modelo', tp.modeloTerceiro)),
+                                                    ],
+                                                  ),
+
+                                                  const SizedBox(height: 8),
+
+                                                  Row(
+                                                    children: [
+                                                      Expanded(child: buildField('Ano Fab.', tp.anoFabricacaoTerceiro)),
+                                                      Expanded(child: buildField('Ano Mod.', tp.anoModeloTerceiro)),
+                                                    ],
+                                                  ),
+
+                                                  if (tp.numeroSinistroTerceiro.isNotEmpty) ...[
+                                                    const SizedBox(height: 8),
+                                                    buildField('Sinistro Terceiro', tp.numeroSinistroTerceiro),
+                                                  ],
+                                                ],
+                                              ),
+
+                                              const SizedBox(height: 8),
+
+                                              /// 📝 RELATO
+                                              if ((tp.relato ?? '').isNotEmpty) ...[
+                                                const Text(
+                                                  'Relato:',
+                                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                                ),
+                                                Text(tp.relato!),
+                                                const SizedBox(height: 8),
+                                              ],
+
+                                              /// 📸 FOTOS
+                                              if (tp.fotosUrls != null && tp.fotosUrls!.isNotEmpty) ...[
+                                                Text(
+                                                  'Fotos do veículo:',
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .bodySmall
+                                                      ?.copyWith(fontWeight: FontWeight.bold),
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Wrap(
+                                                  spacing: 8,
+                                                  runSpacing: 8,
+                                                  children: tp.fotosUrls!.map((url) {
+                                                    final cleanedUrl = url.trim();
+
+                                                    return GestureDetector(
+                                                      onTap: () {
+                                                        _showImageViewer(NetworkImage(cleanedUrl));
+                                                      },
+                                                      child: ClipRRect(
+                                                        borderRadius: BorderRadius.circular(8),
+                                                        child: Image.network(
+                                                          cleanedUrl,
+                                                          width: 100,
+                                                          height: 100,
+                                                          fit: BoxFit.cover,
+                                                        ),
+                                                      ),
+                                                    );
+                                                  }).toList(),
+                                                ),
+                                              ],
+
+                                              /// 📄 DOCUMENTOS
+                                              if (tp.documentosUrls != null &&
+                                                  tp.documentosUrls!.isNotEmpty) ...[
+                                                const SizedBox(height: 12),
+                                                Text(
+                                                  'Documentos:',
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .bodySmall
+                                                      ?.copyWith(fontWeight: FontWeight.bold),
+                                                ),
+                                                ...tp.documentosUrls!.map((url) => ListTile(
+                                                  contentPadding: EdgeInsets.zero,
+                                                  leading: const Icon(Icons.insert_drive_file, color: Colors.blue),
+                                                  title: Text(getFileNameFromUrl(url)),
+                                                  onTap: () async {
+                                                    final cleanedUrl = url.trim();
+                                                    if (await canLaunchUrlString(cleanedUrl)) {
+                                                      await launchUrlString(
+                                                        cleanedUrl,
+                                                        mode: LaunchMode.externalApplication,
+                                                      );
+                                                    }
+                                                  },
+                                                )),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                )),
+
+                                const SizedBox(height: 8),
+
+                                if (_isEditing)
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.blue,
+                                      foregroundColor: Colors.white,
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
+                                    onPressed: _showAddThirdPartyDialog,
+                                    icon: const Icon(Icons.person_add),
+                                    label: const Text('Adicionar Terceiro'),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 24),
+                        // 📝 ANOTAÇÕES
+                        SectionCard(
+                          title: 'Anotações',
+                          icon: Icons.note_alt_outlined,
+                          color: Colors.grey,
+                          child: _currentClaim.id != null
+                              ? NotesWidget(
+                                  claimId: _currentClaim.id!,
+                                  anotacoes: _currentClaim.anotacoes,
+                                  isAdmin: _userRole == 'admin',
+                                )
+                              : const Text("Carregando ID do sinistro..."),
+                        ),
+
+                        // ✅ TAREFAS
+                        SectionCard(
+                          title: 'Lista de Tarefas',
+                          icon: Icons.checklist,
+                          color: Colors.orange,
+                          child: TaskListWidget(
+                            numeroSinistro: _currentClaim.numeroSinistro.isNotEmpty
+                                ? _currentClaim.numeroSinistro
+                                : 'SEM_NUMERO',
+                            clientId: _currentClaim.idCliente,
+                            clientNome: _currentClaim.clientNome,
+                            clientCnpjCpf: _currentClaim.clientCnpjCpf,
+                            sinistroId: _currentClaim.id,
+                          ),
+                        ),
+
+                        // 🔧 OFICINAS
+                        SectionCard(
+                          title: 'Oficinas Envolvidas',
+                          icon: Icons.build,
+                          color: Colors.blue,
+                          child: WorkshopWidget(
+                            claimId: _currentClaim.id!,
+                            oficinas: _currentClaim.oficinas,
+                            clientNome: '',
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        ElevatedButton.icon(
+                          onPressed: _generateAndSharePdf,
+                          icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
+                          label: const Text('Gerar PDF', style: TextStyle(color: Colors.white)),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            backgroundColor: Colors.blueAccent,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        ElevatedButton.icon(
+                          onPressed: _generateExcel,
+                          icon: const Icon(Icons.table_chart, color: Colors.white),
+                          label: const Text('Gerar Excel', style: TextStyle(color: Colors.white)),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            backgroundColor: Colors.green,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        Text('Atualizar Status',
+                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<String>(
+                          value: _currentClaim.statusAtual,
+                          decoration: const InputDecoration(
+                            labelText: 'Novo Status',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: _statusOptions.map((status) =>
+                            DropdownMenuItem(value: status, child: Text(status))).toList(),
+                          onChanged: (value) {
+                            if (value != null && value != _currentClaim.statusAtual) {
+                              if (_isStatusExterno(value)) {
+                                _showStatusWithDeadlineDialog(value);
+                              } else if (value == 'Concluído') {
+                                _showConfirmCloseDialog();
+                              } else {
+                                _updateStatus(value);
+                              }
+                            }
+                          }
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            icon: const Icon(Icons.edit_calendar, size: 16),
+                            label: const Text('Atualizar previsão'),
+                            onPressed: _showUpdateDeadlineOnlyDialog,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        Text('Histórico de Status',
+                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 12),
+                        if (_currentClaim.historicoStatus.isEmpty)
+                          const Text('Nenhum histórico de status.')
+                        else
+                          ListView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: _currentClaim.historicoStatus.length,
+                            itemBuilder: (context, index) {
+                              final entry = _currentClaim.historicoStatus[index];
+                              final status = entry['status'] as String;
+                              final date = (entry['data'] as Timestamp).toDate();
+                              final responsavelEmail = entry['responsavelEmail'] as String?;
+                              final responsavel = responsavelEmail ?? (entry['responsavel'] as String? ?? 'N/A');
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(_getStatusIcon(status), color: _getStatusColor(status)),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(status, style: Theme.of(context)
+                                              .textTheme.titleMedium?.copyWith(
+                                                fontWeight: FontWeight.bold,
+                                                color: _getStatusColor(status))),
+                                          Text('Data: ${DateFormat('dd/MM/yyyy HH:mm').format(date)}',
+                                              style: Theme.of(context).textTheme.bodySmall),
+                                          Text('Responsável: $responsavel',
+                                              style: Theme.of(context).textTheme.bodySmall),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        if (_userRole == 'admin') ...[
+                          const SizedBox(height: 16),
+                          ElevatedButton.icon(
+                            onPressed: _confirmDeleteClaim,
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            label: const Text('Excluir Sinistro'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red.shade100,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+  )
+  );
+}
+
+  // Formatação de cor de SLA
+  Widget _buildTempoPrevisto() {
+    if (_currentClaim.slaPrevisto == null) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.grey[100],
+          border: Border.all(color: Colors.grey[300]!),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: const Text('Não definido'),
+      );
+    }
+
+    final diasRestantes = _currentClaim.slaPrevisto!.difference(DateTime.now()).inDays;
+    final dataFormatada = DateFormat('dd/MM/yyyy').format(_currentClaim.slaPrevisto!);
+
+    Color textColor;
+    if (diasRestantes < 0) {
+      textColor = Colors.red;  // 🔴 Vencido
+    } else if (diasRestantes <= 3) {
+      textColor = Colors.orange;  // 🟠 Atenção
+    } else {
+      textColor = Colors.green;  // 🟢 OK
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: textColor.withOpacity(0.1),
+        border: Border.all(color: textColor),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('Tempo Previsto', style: TextStyle(fontSize: 12, color: Colors.grey)),
+          SizedBox(height: 4),
+          Text(
+            '$diasRestantes dias ($dataFormatada)',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: textColor,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+}
