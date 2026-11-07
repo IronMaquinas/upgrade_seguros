@@ -2,7 +2,7 @@
 
 > Plataforma web/mobile para corretoras de seguros gerenciarem sinistros, assistências, clientes, tarefas e métricas de desempenho em tempo real.
 
-**Versão do documento:** Etapa 05 (GitHub `2c48c4c` = Etapas 01–04)
+**Versão do documento:** Etapa 06 (GitHub `c489e4b` = Etapas 01–05)
 **Última atualização:** 07/11/2026
 **Status:** app em uso; ciclo de entregas com verificação por md5 em andamento. Etapa 02: terceiros identificados por personagem (proprietário / motorista / contato) e **histórico de valores do sinistro** (lançamentos com nota fiscal, segurado + terceiros). Pendências de segurança abertas — ver [🔐 Pendências de Segurança](#-pendências-de-segurança).
 
@@ -530,7 +530,7 @@ Levantadas na revisão da base (07/11/2026). O repositório no GitHub está **p�
 - [ ] **S4 — Restringir a chave do Google Maps/Places** no Google Cloud Console (referenciadores HTTP do domínio + package/bundle dos apps Android/iOS + só as APIs usadas). Hoje a chave está escrita em 8 arquivos de tela; numa etapa futura, centralizar em `utils/constants.dart` (uma chave, um lugar). *Restrição no console não exige entrega; a centralização entra quando alguma etapa mexer nessas telas.*
 - [ ] **S5 — Regras do Firestore no repositório.** Não há `firestore.rules` no projeto: conferir no console do Firebase o que está publicado, trazer para o repositório e registrar no `firebase.json`, para que regra também passe pelo ciclo de entrega. As regras do Storage (`storage.rules`) exigem só "estar logado" — avaliar restrição por corretora/usuário.
 - [ ] **S6 — URLs públicas dos anexos.** `makePublic()` deixa fotos e laudos acessíveis a quem tiver o link. Trocar por URL assinada com expiração ou download autenticado. **Pré-requisito para a Europa (GDPR) e reforça a LGPD.**
-- [ ] **S7 — Tirar `node_modules/` do git** (~15 mil arquivos versionados na raiz): `git rm -r --cached node_modules`, acrescentar no `.gitignore`. Não muda o funcionamento; deixa o repositório leve e o diff legível.
+- [x] **S7 — Tirar `node_modules/` do git** (Etapa 06, junto com `android/build/`) (~15 mil arquivos versionados na raiz): `git rm -r --cached node_modules`, acrescentar no `.gitignore`. Não muda o funcionamento; deixa o repositório leve e o diff legível.
 
 ---
 
@@ -543,6 +543,7 @@ Levantadas na revisão da base (07/11/2026). O repositório no GitHub está **p�
 - **Marca/modelo do terceiro editado antes da Etapa 02:** o diálogo de edição antigo gravava marca, modelo e anos só dentro de `veiculo` (a tela mostrava vazio). O `ThirdParty.fromMap` agora cai para `veiculo` quando o campo próprio está vazio; ao salvar de novo, os dois ficam preenchidos.
 - **Pacote importado sem estar no `pubspec.yaml`:** `latlong2` é importado em `widgets/workshop_widget.dart`, mas só chega como dependência de outro pacote. Compila hoje; quebra se o outro pacote deixar de usá-lo. Corrigir quando a etapa mexer nesse arquivo (o import parece não ser usado — `hide LatLng`).
 - **Import com barra no início:** `screens/client_form_screen.dart` importa `'/widgets/vigencia_date_range_widget.dart'`. Trocar por `package:upgrade_seguros/widgets/...` quando a etapa mexer nesse arquivo.
+- **Modal "Tipo de Assistência" é um componente só** (Etapa 06): `lib/widgets/assist_tipo_picker.dart` → `mostrarSeletorTipoAssistencia()`, usado pelo Dashboard e pelo botão laranja "Nova Assistência" da lista. Cor padrão das assistências: `corAssistencia` (`Colors.orange.shade600`).
 - **Arquivos auxiliares na raiz/lib:** `ROTEIRO_REFATORACAO_PICKER_RAMO.md` (o picker global já existe em `dashboard_screen.dart` — confirmar que o roteiro foi concluído e apagar) e `lib/readme.dart` (anotações soltas em comentário).
 
 ---
@@ -578,6 +579,7 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 
 | Etapa | Data | Base | O que mudou |
 |---|---|---|---|
+| 06 | 07/11/2026 | `c489e4b` | **Botão laranja "Nova Assistência"** de volta na lista de Assistências, abrindo o modal padrão Veicular/Residencial — agora um componente único com o Dashboard (`assist_tipo_picker.dart`). No Dashboard, o "Cancelar" desse modal fechava duas telas (podia fechar o app no Android); agora fecha só o modal. **Limpeza do git:** `node_modules/` (≈15 mil arquivos) e `android/build/` (cache) saem do repositório e entram no `.gitignore`. |
 | 05 | 07/11/2026 | `2c48c4c` | **Filtro de status nas listas de Sinistros e Assistências:** "Em curso" (padrão, inclui Rascunho) · "Todos" (todos mesmo, inclusive Concluído/Cancelado) · cada status. Acabou o "Todos" duplicado em Sinistros. **Carregamento:** abre buscando só o que está em curso; o histórico é baixado quando o filtro pede. Regra única em `lib/utils/filtro_status.dart` + teste `test/filtro_status_test.dart`. |
 | 04 | 07/11/2026 | `7295764` | **Abertura:** "Anexos e Documentos" logo após o bem segurado (antes de Terceiros). **Detalhe:** Veículo Segurado espelhando a abertura (Proprietário legal / Veículo / Motorista / Contato do sinistro); Proprietário legal passa a ser exibido; contato do sinistro com WhatsApp. |
 | 03 | 07/11/2026 | `fdb7ce6` + 01 + 02 | **Harmonia visual da abertura:** Terceiros com o mesmo campo da planilha (rótulo em cima, caixa cinza); Veículo Segurado com os títulos e ícones dos Terceiros (Proprietário legal / Veículo / Motorista / Contato do sinistro); título "Veículo" também no terceiro (planilha e diálogos); checkbox do motorista no mesmo estilo nos dois. **CNH do motorista do terceiro** (planilha, diálogos, detalhe, PDF). |
@@ -666,14 +668,14 @@ apolices: [
 - [ ] 🟠 S4 — Restringir e centralizar a chave do Google Maps/Places
 - [ ] 🟠 S5 — Regras do Firestore no repositório
 - [ ] 🟠 S6 — Anexos com URL assinada em vez de pública
-- [ ] 🟠 S7 — `node_modules/` fora do git
+- [x] 🟠 S7 — `node_modules/` fora do git (Etapa 06)
 
 ### ⏳ Próximo
 - [ ] **Melhorias solicitadas pela cliente** (próximas etapas)
 - [ ] Relatórios: separar segurado × terceiros nos gráficos de valor/sinistralidade (os dados já existem em `valor_segurado` / `valor_terceiros`)
 - [ ] Danos materiais / corporais com lançamentos próprios (hoje o lançamento é do segurado ou de um terceiro de veículo)
 - [ ] Detalhe do sinistro, próximos passos de harmonia (avaliados na Etapa 04, deixados para depois): mesma ordem de cards da abertura (Anexos em card próprio), modo edição no estilo da planilha (rótulo em cima, caixa cinza), cores/ícones dos cards iguais aos da abertura
-- [ ] Tirar `android/build/` e `node_modules/` do git (subiram no commit `535f7bd`) — junto com S7
+- [x] Tirar `android/build/` e `node_modules/` do git (Etapa 06)
 - [ ] Escala: Dashboard e Relatórios com totais pré-calculados (hoje baixam todos os sinistros e assistências); listas com paginação do histórico se "Todos" ficar lento
 - [ ] **Confirmar estrutura de apólices** com cliente
 - [ ] **Testar SLA** com dados novos

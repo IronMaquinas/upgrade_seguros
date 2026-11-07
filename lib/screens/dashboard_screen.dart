@@ -18,6 +18,7 @@ import '../screens/task_list_screen.dart';
 import '../screens/assist_list_screen.dart';
 import '../widgets/dashboard_content.dart';
 import '../widgets/option_picker_dialog.dart';
+import '../widgets/assist_tipo_picker.dart';
 import '../services/firestore_service.dart';
 import '../models/client_model.dart';
 import '../screens/claim_list_screen.dart';
@@ -603,153 +604,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // MODAL PARA ASSISTÊNCIA
+  // Etapa 06: modal padrão compartilhado com a lista de Assistências.
   Future<void> _showAssistTipoPickerGlobal() async {
-    const tipos = [
-        PickerOption(
-          label: 'Veicular',
-          value: 'veiculo',
-          icon: Icons.directions_car_outlined,
-          color: Color(0xFFFF6F00),  // Laranja (bem diferente!)
-          description: 'Guincho, vidro, combustível...',
-        ),
-        PickerOption(
-          label: 'Residencial',
-          value: 'residencial',
-          icon: Icons.home_outlined,
-          color: Color(0xFF6A1B9A),  // Roxo (bem diferente!)
-          description: 'Eletricista, encanador, chaveiro...',
-        ),
-      ];
-
-    final tipo = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 60),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Tipo de Assistência',
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF1A1A2E),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Selecione o tipo de atendimento',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey.shade500,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                // Opções
-                ...tipos.map((opt) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Material(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(10),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(10),
-                      onTap: () => Navigator.of(context).pop(opt.value),
-                      child: Container(
-                        padding: const EdgeInsets.all(13),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.grey.shade200, width: 0.8),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 36,
-                              height: 36,
-                              decoration: BoxDecoration(
-                                color: opt.color.withOpacity(0.08),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Icon(opt.icon, color: opt.color, size: 18),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    opt.label,
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                      color: Color(0xFF1A1A2E),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    opt.description ?? '',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey.shade500,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Icon(Icons.chevron_right, size: 16, color: Colors.grey.shade300),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                )),
-                const SizedBox(height: 16),
-                // Botão Voltar + Cancelar
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.of(context).pop(); // Fecha Modal 2b
-                          _showNewItemDialog(); // Reabre Modal 1
-                        },
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        child: const Text('Voltar'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.of(context).pop();
-                          Navigator.of(context).pop(); // Fecha Modal 2b + volta ao dashboard
-                        },
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        child: const Text('Cancelar'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+    final tipo = await mostrarSeletorTipoAssistencia(
+      context,
+      onVoltar: _showNewItemDialog, // reabre "Novo Registro"
     );
 
     if (tipo == 'veiculo' && mounted) {

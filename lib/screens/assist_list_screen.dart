@@ -7,7 +7,7 @@ import 'package:upgrade_seguros/services/auth_service.dart';
 import '../models/claim_model.dart';
 import '../services/firestore_service.dart';
 import '../utils/filtro_status.dart';
-import '../widgets/option_picker_dialog.dart';
+import '../widgets/assist_tipo_picker.dart';
 import 'assist_detail_screen.dart';
 import 'spreadsheet_assist_screen.dart';
 import 'spreadsheet_assist_residencial_screen.dart';
@@ -798,33 +798,9 @@ class AssistListScreenState extends State<AssistListScreen> {
   }
   // ─── FAB para Nova Assistência ──────────────────────────────────
 
+  // Etapa 06: mesmo modal "Tipo de Assistência" do Dashboard.
   Future<void> _mostrarSeletorTipoAssist() async {
-    const options = [
-      PickerOption(
-        label: 'Assistência Veicular',
-        value: 'veiculo',
-        icon: Icons.directions_car_outlined,
-        color: Color(0xFF1565C0),
-        description: 'Guincho, vidro, combustível, pane...',
-      ),
-      PickerOption(
-        label: 'Assistência Residencial',
-        value: 'residencial',
-        icon: Icons.home_outlined,
-        color: Color(0xFF2E7D32),
-        description: 'Eletricista, encanador, chaveiro...',
-      ),
-    ];
-
-    final tipo = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => OptionPickerDialog(
-        title: 'Nova Assistência',
-        subtitle: 'Selecione o tipo de atendimento',
-        options: options,
-      ),
-    );
+    final tipo = await mostrarSeletorTipoAssistencia(context);
 
     if (tipo != null && mounted) {
       late final Widget tela;
@@ -1055,6 +1031,15 @@ class AssistListScreenState extends State<AssistListScreen> {
             ),
           );
         },
+      ),
+      // Etapa 06: botão "Nova Assistência" (laranja padrão das assistências)
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _mostrarSeletorTipoAssist,
+        label: const Text('Nova Assistência'),
+        icon: const Icon(Icons.add),
+        backgroundColor: corAssistencia,
+        foregroundColor: Colors.white,
+        heroTag: 'newAssistInList',
       ),
     );
   }
