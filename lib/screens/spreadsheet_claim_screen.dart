@@ -2566,6 +2566,16 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
     }
   }
 
+  // Etapa 04: "Anexos e Documentos" vem logo depois do bem segurado (veículo,
+  // carga, imóvel, empresa, máquina ou vida) e antes de Terceiros / Danos /
+  // Acompanhamento. Sem nenhum desses grupos, fica no fim (antes do botão).
+  List<Widget> _inserirAnexos(List<Widget> grupos, Widget anexos) {
+    const depoisDosAnexos = {'terceiros', 'danoscorporais', 'danosmateriais', 'acomp'};
+    final i = _groups.indexWhere((g) => depoisDosAnexos.contains(g.id));
+    final pos = i < 0 ? grupos.length : i;
+    return [...grupos.take(pos), anexos, ...grupos.skip(pos)];
+  }
+
   // ── Métodos de anexo ─────────────────────────────────────────────────────
 
   void _adicionarArquivos(
@@ -3770,8 +3780,8 @@ Future<void> _uploadDocumentoMaterialDamage(int danoIndex) async {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // ── Grupos de campos ─────────────────────────────────────────
-            ..._groups.map((g) {
+            // ── Grupos de campos (Anexos entra logo após o bem segurado — Etapa 04) ──
+            ..._inserirAnexos(_groups.map((g) {
               // 🆕 Se for grupo de terceiros, renderizar widget customizado
               if (g.id == 'terceiros') {
                 return Container(
@@ -3966,7 +3976,6 @@ Future<void> _uploadDocumentoMaterialDamage(int danoIndex) async {
                       : null,
               );
             }).toList(),
-
             // ── Grupo de Anexos ──────────────────────────────────────────
             _AnexosCard(
               anexos: _anexos,
@@ -3988,7 +3997,7 @@ Future<void> _uploadDocumentoMaterialDamage(int danoIndex) async {
               onDragExited: (cat, val) =>
                   setState(() => _dragOver[cat] = val),
               isImageFile: _isImageFile,
-            ),
+            )),
 
             const SizedBox(height: 24),
 

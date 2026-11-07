@@ -2332,6 +2332,24 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
 
   // WIDGET PARA FORMATAR TERCEIROS
 
+  // ── Etapa 04: campo do veículo segurado (leitura ou edição) ─────────────
+  Widget _campoVeiculoSegurado(
+    String label,
+    String Function(Vehicle v) ler,
+    void Function(Vehicle v, String valor) gravar, {
+    List<TextInputFormatter>? formatters,
+  }) {
+    final v = _currentClaim.veiculoSelecionado;
+    return buildEditableField(
+      label: label,
+      value: v == null ? '' : ler(v).trim(),
+      inputFormatters: formatters,
+      onChanged: (valor) {
+        if (_currentClaim.veiculoSelecionado != null) gravar(_currentClaim.veiculoSelecionado!, valor);
+      },
+    );
+  }
+
   // ── Etapa 02: abre nota fiscal / evidência de um lançamento ─────────────
   Future<void> _abrirAnexoLancamento(String url) async {
     final limpa = url.trim();
@@ -3469,149 +3487,83 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                     ),
                                   ] else if (isVeiculo) ...[
                                     // 🚗 VEÍCULO
-                                     buildInfoCard(
-                                      title: 'Veículo',
-                                      icon: Icons.directions_car,
+                                    // Etapa 04: espelha a abertura — Proprietário legal / Veículo /
+                                    // Motorista / Contato do sinistro (mesmos ícones dos Terceiros).
+                                    buildInfoCard(
+                                      title: 'Proprietário legal (CRLV)',
+                                      icon: Icons.badge_outlined,
                                       color: Colors.blueGrey,
                                       children: [
-                                        // Linha 1: Placa, Marca, Modelo
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Placa',
-                                                value: clean(_currentClaim.veiculoSelecionado?.placa),
-                                                onChanged: (v) {
-                                                  if (_currentClaim.veiculoSelecionado != null) {
-                                                    _currentClaim.veiculoSelecionado!.placa = v;
-                                                  }
-                                                },
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Marca',
-                                                value: clean(_currentClaim.veiculoSelecionado?.marca),
-                                                onChanged: (v) {
-                                                  if (_currentClaim.veiculoSelecionado != null) {
-                                                    _currentClaim.veiculoSelecionado!.marca = v;
-                                                  }
-                                                },
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Modelo',
-                                                value: clean(_currentClaim.veiculoSelecionado?.modelo),
-                                                onChanged: (v) {
-                                                  if (_currentClaim.veiculoSelecionado != null) {
-                                                    _currentClaim.veiculoSelecionado!.modelo = v;
-                                                  }
-                                                },
-                                              ),
-                                            ),
-                                          ],
-                                        ),
+                                        Row(children: [
+                                          Expanded(flex: 3, child: _campoVeiculoSegurado('Nome', (v) => v.nomeCondutor, (v, s) => v.nomeCondutor = s)),
+                                          Expanded(flex: 2, child: _campoVeiculoSegurado('CPF / CNPJ', (v) => v.cpfCondutor, (v, s) => v.cpfCondutor = s,
+                                              formatters: [BRFormatters.cpfCnpjFormatter])),
+                                        ]),
+                                      ],
+                                    ),
+                                    buildInfoCard(
+                                      title: 'Veículo',
+                                      icon: Icons.directions_car_outlined,
+                                      color: Colors.blueGrey,
+                                      children: [
+                                        Row(children: [
+                                          Expanded(child: _campoVeiculoSegurado('Placa', (v) => v.placa, (v, s) => v.placa = s)),
+                                          Expanded(child: _campoVeiculoSegurado('Marca', (v) => v.marca, (v, s) => v.marca = s)),
+                                          Expanded(child: _campoVeiculoSegurado('Modelo', (v) => v.modelo, (v, s) => v.modelo = s)),
+                                        ]),
                                         const SizedBox(height: 8),
-
-                                        // Linha 2: Cor, Chassi
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Cor',
-                                                value: clean(_currentClaim.veiculoSelecionado?.cor),
-                                                onChanged: (v) {
-                                                  if (_currentClaim.veiculoSelecionado != null) {
-                                                    _currentClaim.veiculoSelecionado!.cor = v;
-                                                  }
-                                                },
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Chassi',
-                                                value: clean(_currentClaim.veiculoSelecionado?.chassi),
-                                                onChanged: (v) {
-                                                  if (_currentClaim.veiculoSelecionado != null) {
-                                                    _currentClaim.veiculoSelecionado!.chassi = v;
-                                                  }
-                                                },
-                                              ),
-                                            ),
-                                          ],
-                                        ),
+                                        Row(children: [
+                                          Expanded(child: _campoVeiculoSegurado('Cor', (v) => v.cor, (v, s) => v.cor = s)),
+                                          Expanded(flex: 2, child: _campoVeiculoSegurado('Chassi', (v) => v.chassi, (v, s) => v.chassi = s)),
+                                        ]),
                                         const SizedBox(height: 8),
-
-                                        // Linha 3: Ano Fab., Ano Mod.
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Ano Fab.',
-                                                value: '${_currentClaim.veiculoSelecionado?.ano ?? ''}',
-                                                onChanged: (v) {
-                                                  if (_currentClaim.veiculoSelecionado != null) {
-                                                    _currentClaim.veiculoSelecionado!.ano = int.tryParse(v) ?? 0;
-                                                  }
-                                                },
-                                              ),
+                                        Row(children: [
+                                          Expanded(child: _campoVeiculoSegurado('Ano Fab.', (v) => v.ano > 0 ? '${v.ano}' : '',
+                                              (v, s) => v.ano = int.tryParse(s) ?? 0)),
+                                          Expanded(child: _campoVeiculoSegurado('Ano Mod.', (v) => v.anomodelo > 0 ? '${v.anomodelo}' : '',
+                                              (v, s) => v.anomodelo = int.tryParse(s) ?? 0)),
+                                        ]),
+                                      ],
+                                    ),
+                                    buildInfoCard(
+                                      title: 'Motorista',
+                                      icon: Icons.airline_seat_recline_normal,
+                                      color: Colors.blueGrey,
+                                      children: [
+                                        Row(children: [
+                                          Expanded(flex: 2, child: _campoVeiculoSegurado('Condutor do Veículo', (v) => v.nomeCondutorMotorista,
+                                              (v, s) => v.nomeCondutorMotorista = s)),
+                                          Expanded(child: _campoVeiculoSegurado('CPF do Condutor', (v) => v.cpfCondutorMotorista,
+                                              (v, s) => v.cpfCondutorMotorista = s, formatters: [BRFormatters.cpfCnpjFormatter])),
+                                          Expanded(child: _campoVeiculoSegurado('CNH do Condutor', (v) => v.cnhCondutorMotorista,
+                                              (v, s) => v.cnhCondutorMotorista = s, formatters: [FilteringTextInputFormatter.digitsOnly])),
+                                        ]),
+                                      ],
+                                    ),
+                                    buildInfoCard(
+                                      title: 'Contato do sinistro',
+                                      icon: Icons.contact_phone_outlined,
+                                      color: Colors.blueGrey,
+                                      children: [
+                                        Row(children: [
+                                          Expanded(
+                                            child: buildEditableField(
+                                              label: 'Nome do Contato do Sinistro',
+                                              value: _currentClaim.nomeContatoSinistro ?? '',
+                                              onChanged: (v) => _currentClaim.nomeContatoSinistro = v,
                                             ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Ano Mod.',
-                                                value: '${_currentClaim.veiculoSelecionado?.anomodelo ?? ''}',
-                                                onChanged: (v) {
-                                                  if (_currentClaim.veiculoSelecionado != null) {
-                                                    _currentClaim.veiculoSelecionado!.anomodelo = int.tryParse(v) ?? 0;
-                                                  }
-                                                },
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 8),
-
-                                        // 🔥 NOVA LINHA: Condutor Motorista, CPF e CNH
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Condutor do Veículo',
-                                                value: _currentClaim.veiculoSelecionado?.nomeCondutorMotorista ?? '',
-                                                onChanged: (v) {
-                                                  if (_currentClaim.veiculoSelecionado != null) {
-                                                    _currentClaim.veiculoSelecionado!.nomeCondutorMotorista = v;
-                                                  }
-                                                },
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'CPF do Condutor',
-                                                value: _currentClaim.veiculoSelecionado?.cpfCondutorMotorista ?? '',
-                                                onChanged: (v) {
-                                                  if (_currentClaim.veiculoSelecionado != null) {
-                                                    _currentClaim.veiculoSelecionado!.cpfCondutorMotorista = v;
-                                                  }
-                                                },
-                                                inputFormatters: [BRFormatters.cpfCnpjFormatter],
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'CNH do Condutor',
-                                                value: _currentClaim.veiculoSelecionado?.cnhCondutorMotorista ?? '',
-                                                onChanged: (v) {
-                                                  if (_currentClaim.veiculoSelecionado != null) {
-                                                    _currentClaim.veiculoSelecionado!.cnhCondutorMotorista = v;
-                                                  }
-                                                },
-                                                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                              ),
-                                            ),
-                                          ],
-                                        ),
+                                          ),
+                                          Expanded(
+                                            child: _isEditing
+                                                ? buildEditableField(
+                                                    label: 'Telefone de Contato',
+                                                    value: _currentClaim.telefoneContatoSinistro ?? '',
+                                                    onChanged: (v) => _currentClaim.telefoneContatoSinistro = v,
+                                                    inputFormatters: [BRFormatters.telefoneFormatter],
+                                                  )
+                                                : _telefoneComWhatsApp('Telefone de Contato', _currentClaim.telefoneContatoSinistro ?? ''),
+                                          ),
+                                        ]),
                                       ],
                                     ),
                                   ],
@@ -3752,6 +3704,9 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                         ],
                                       ),
                                       const SizedBox(height: 8),
+                                      // Etapa 04: nos ramos de veículo o contato do sinistro aparece
+                                      // em "Veículo Segurado → Contato do sinistro".
+                                      if (!isVeiculo)
                                       Row(
                                         children: [
                                           Expanded(child: buildEditableField(label: 'Nome do Contato do Cliente', value: _currentClaim.nomeContatoSinistro ?? '', onChanged: (v) => _currentClaim.nomeContatoSinistro = v)),

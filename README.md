@@ -2,7 +2,7 @@
 
 > Plataforma web/mobile para corretoras de seguros gerenciarem sinistros, assistências, clientes, tarefas e métricas de desempenho em tempo real.
 
-**Versão do documento:** Etapa 03 (base `fdb7ce6` + Etapas 01 e 02)
+**Versão do documento:** Etapa 04 (GitHub `7295764` = Etapas 01–03)
 **Última atualização:** 07/11/2026
 **Status:** app em uso; ciclo de entregas com verificação por md5 em andamento. Etapa 02: terceiros identificados por personagem (proprietário / motorista / contato) e **histórico de valores do sinistro** (lançamentos com nota fiscal, segurado + terceiros). Pendências de segurança abertas — ver [🔐 Pendências de Segurança](#-pendências-de-segurança).
 
@@ -177,6 +177,8 @@ Cada terceiro é identificado por personagem (Etapa 02), na abertura (planilha),
 - O botão **Auto** (CRLV) preenche o proprietário (nome/CPF do CRLV) e o veículo; a pergunta "condutor é o proprietário?" marca o grupo Motorista.
 - Cada terceiro tem um `id` estável, que liga os lançamentos de valor a ele. Terceiros antigos ganham o `id` no primeiro lançamento.
 - **Padrão visual (Etapa 03):** a planilha de abertura usa o mesmo campo em todos os grupos (rótulo em cima, caixa cinza) e os mesmos títulos com ícone. Veículo Segurado e Terceiros ficam espelhados: 🪪 Proprietário (CRLV) → 🚗 Veículo → 🧍 Motorista → 📇 Contato. Para um título novo dentro de um grupo da planilha, use `_Field(isHeader: true, headerIcon: …, label: …, hint: subtítulo)`.
+- **Ordem dos cards na abertura (Etapa 04):** Apólice/Seguro → bem segurado (Veículo Segurado, Transporte, Imóvel, Empresa, Máquina ou Vida) → **Anexos e Documentos** → Terceiros → Danos → Acompanhamento → *Concluir e Salvar*. A regra fica em `_inserirAnexos()`: Anexos entra antes do primeiro grupo entre terceiros/danos/acompanhamento.
+- **Detalhe do sinistro (Etapa 04):** o Veículo Segurado espelha a abertura — Proprietário legal (CRLV) / Veículo / Motorista / Contato do sinistro, com os mesmos ícones. O Proprietário legal passou a aparecer (antes não era exibido). Nos ramos de veículo, o contato do sinistro saiu do card Cliente e foi para "Contato do sinistro" (com WhatsApp).
 
 ---
 
@@ -557,6 +559,7 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 
 | Etapa | Data | Base | O que mudou |
 |---|---|---|---|
+| 04 | 07/11/2026 | `7295764` | **Abertura:** "Anexos e Documentos" logo após o bem segurado (antes de Terceiros). **Detalhe:** Veículo Segurado espelhando a abertura (Proprietário legal / Veículo / Motorista / Contato do sinistro); Proprietário legal passa a ser exibido; contato do sinistro com WhatsApp. |
 | 03 | 07/11/2026 | `fdb7ce6` + 01 + 02 | **Harmonia visual da abertura:** Terceiros com o mesmo campo da planilha (rótulo em cima, caixa cinza); Veículo Segurado com os títulos e ícones dos Terceiros (Proprietário legal / Veículo / Motorista / Contato do sinistro); título "Veículo" também no terceiro (planilha e diálogos); checkbox do motorista no mesmo estilo nos dois. **CNH do motorista do terceiro** (planilha, diálogos, detalhe, PDF). |
 | 02 | 07/11/2026 | `fdb7ce6` + 01 | **Terceiros por personagem** (proprietário CRLV / motorista / contato / sinistro do terceiro) na abertura, nos diálogos e no PDF. **Histórico de valores do sinistro**: lançamentos com data, tipo, valor, segurado ou terceiro, NF/evidências, quem registrou; cancelamento com motivo; total = segurado + terceiros; encerramento exige lançamento; valor da abertura vira 1º lançamento. Correções: telefone do terceiro não aparecia ao reabrir a planilha; editar terceiro apagava marca/modelo/anos da tela; WhatsApp do contato abria o telefone do proprietário. Teste novo: `test/lancamento_model_test.dart`. |
 | 01 | 07/11/2026 | `fdb7ce6` | README reorganizado (seções duplicadas unificadas, sem perder informação); novas seções de Pendências de Segurança, Armadilhas, Processo de Entrega e Histórico; Cloud Function do Telegram e estrutura de `lib/` documentadas; `verificar-entrega.js` no `.gitignore`. Sem mudança de código. |
@@ -633,6 +636,7 @@ apolices: [
 - [x] Terceiros identificados por proprietário / motorista / contato (Etapa 02)
 - [x] Histórico de valores do sinistro com NF e cancelamento rastreável (Etapa 02)
 - [x] Abertura com padrão visual único entre Veículo Segurado e Terceiros + CNH do motorista do terceiro (Etapa 03)
+- [x] Anexos logo após o bem segurado na abertura; Veículo Segurado espelhado no detalhe (Etapa 04)
 
 ### 🔐 Segurança (ver [Pendências de Segurança](#-pendências-de-segurança))
 - [ ] 🔴 S1 — Trocar token do Telegram e tirar o arquivo do git
@@ -647,6 +651,8 @@ apolices: [
 - [ ] **Melhorias solicitadas pela cliente** (próximas etapas)
 - [ ] Relatórios: separar segurado × terceiros nos gráficos de valor/sinistralidade (os dados já existem em `valor_segurado` / `valor_terceiros`)
 - [ ] Danos materiais / corporais com lançamentos próprios (hoje o lançamento é do segurado ou de um terceiro de veículo)
+- [ ] Detalhe do sinistro, próximos passos de harmonia (avaliados na Etapa 04, deixados para depois): mesma ordem de cards da abertura (Anexos em card próprio), modo edição no estilo da planilha (rótulo em cima, caixa cinza), cores/ícones dos cards iguais aos da abertura
+- [ ] Tirar `android/build/` e `node_modules/` do git (subiram no commit `535f7bd`) — junto com S7
 - [ ] **Confirmar estrutura de apólices** com cliente
 - [ ] **Testar SLA** com dados novos
 - [ ] Gráficos comparativos (year-over-year)
