@@ -34,6 +34,7 @@ class PdfService {
       String? usuarioNome,
       String? usuarioEmail,
       String? usuarioTelefone,
+      bool isAdmin = false,
     }
   ) async {
     final pdf = pw.Document();
@@ -471,14 +472,106 @@ class PdfService {
             pw.SizedBox(height: 20),
           ],
 
-          // ─ Linha Decorativa ─────────────────────────────────────────────────────
+          // ═══════════════════════════════════════════════════════════════
+          // SEÇÃO: ANOTAÇÕES
+          // ═══════════════════════════════════════════════════════════════
+          if (claim.anotacoes.isNotEmpty) ...[
+            pw.Text('Anotações',
+                style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold, color: _colorBlue)),
+            pw.SizedBox(height: 8),
+            ...claim.anotacoes.map((a) {
+              final autor = a['autor'] as String? ?? '';
+              final conteudo = a['conteudo'] as String? ?? '';
+              final data = a['data'] as String? ?? '';
+              DateTime? dataObj;
+              try { dataObj = DateTime.parse(data); } catch (_) {}
+              return pw.Container(
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.white,
+                  border: pw.Border.all(color: _colorGrayBorder),
+                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+                ),
+                padding: const pw.EdgeInsets.all(10),
+                margin: const pw.EdgeInsets.only(bottom: 8),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Text(autor, style: pw.TextStyle(fontSize: 8, color: _colorGray, fontWeight: pw.FontWeight.bold)),
+                        if (dataObj != null)
+                          pw.Text(DateFormat('dd/MM/yyyy HH:mm').format(dataObj),
+                              style: pw.TextStyle(fontSize: 8, color: _colorGray)),
+                      ],
+                    ),
+                    pw.SizedBox(height: 4),
+                    pw.Text(conteudo, style: pw.TextStyle(fontSize: 10, color: const PdfColor.fromInt(0xFF424242))),
+                  ],
+                ),
+              );
+            }),
+            pw.SizedBox(height: 16),
+          ],
+
+          // ═══════════════════════════════════════════════════════════════
+          // SEÇÃO: HISTÓRICO (somente admin)
+          // ═══════════════════════════════════════════════════════════════
+          if (isAdmin && claim.historicoStatus.isNotEmpty) ...[
+            pw.Container(
+              decoration: pw.BoxDecoration(
+                color: const PdfColor.fromInt(0xFFFFF9C4),
+                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+                border: pw.Border.all(color: const PdfColor.fromInt(0xFFF9A825)),
+              ),
+              padding: const pw.EdgeInsets.all(12),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('HISTÓRICO DE MOVIMENTAÇÕES — USO INTERNO',
+                      style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold,
+                          color: const PdfColor.fromInt(0xFFE65100))),
+                  pw.SizedBox(height: 8),
+                  ...claim.historicoStatus.map((h) {
+                    final status = h['status'] as String? ?? '';
+                    final data = h['data'] as String? ?? '';
+                    DateTime? dataObj;
+                    try { dataObj = DateTime.parse(data); } catch (_) {}
+                    return pw.Padding(
+                      padding: const pw.EdgeInsets.only(bottom: 4),
+                      child: pw.Row(
+                        children: [
+                          pw.Container(width: 6, height: 6,
+                              decoration: const pw.BoxDecoration(
+                                  color: PdfColor.fromInt(0xFFE65100),
+                                  shape: pw.BoxShape.circle)),
+                          pw.SizedBox(width: 6),
+                          pw.Expanded(child: pw.Text(status,
+                              style: pw.TextStyle(fontSize: 9, color: const PdfColor.fromInt(0xFF1A1A2E)))),
+                          if (dataObj != null)
+                            pw.Text(DateFormat('dd/MM/yyyy HH:mm').format(dataObj),
+                                style: pw.TextStyle(fontSize: 8, color: _colorGray)),
+                        ],
+                      ),
+                    );
+                  }),
+                  pw.SizedBox(height: 4),
+                  pw.Text('Abertura: ${dateTimeFormat.format(claim.dataAbertura)}',
+                      style: pw.TextStyle(fontSize: 8, color: _colorGray)),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 16),
+          ],
+
+          // ─ Linha Decorativa ──────────────────────────────────────────────
           pw.Divider(color: _colorGrayBorder, height: 1),
 
           pw.SizedBox(height: 16),
 
-          // ═════════════════════════════════════════════════════════════════════════
-          // RODAPÉ
-          // ═════════════════════════════════════════════════════════════════════════
+          // ═════════════════════════════════════════════════════════════════
+          // RODAPÉ / ASSINATURA
+          // ═════════════════════════════════════════════════════════════════
           pw.Container(
             decoration: pw.BoxDecoration(
               color: _colorGrayLight,
@@ -489,63 +582,37 @@ class PdfService {
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                pw.Text(
-                  'Assinatura e Contato',
-                  style: pw.TextStyle(
-                    fontSize: 10,
-                    fontWeight: pw.FontWeight.bold,
-                    color: _colorBlue,
-                  ),
-                ),
+                pw.Text('Assinatura e Contato',
+                    style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: _colorBlue)),
                 pw.SizedBox(height: 6),
-                // Nome do responsável (com fallback)
+                
+                // Nome (já vem correto do _generateAndSharePdf)
                 pw.Text(
-                  'Nome: ${usuarioNome ?? 'Upgrade Seguros'}',
-                  style: pw.TextStyle(
-                    fontSize: 9,
-                    fontWeight: pw.FontWeight.bold,
-                    color: const PdfColor.fromInt(0xFF1A1A2E),
-                  ),
+                  'Nome: ${usuarioNome ?? 'Sem assinatura'}',
+                  style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: const PdfColor.fromInt(0xFF1A1A2E)),
                 ),
-                pw.SizedBox(height: 3),
-                // Email do responsável
-                if (usuarioEmail != null && usuarioEmail.isNotEmpty) ...[
-                  pw.Text(
-                    'Email: $usuarioEmail',
-                    style: pw.TextStyle(
-                      fontSize: 9,
-                      color: _colorGray,
-                    ),
-                  ),
-                  pw.SizedBox(height: 3),
+
+                if ((usuarioEmail ?? '').isNotEmpty) ...[
+                  pw.SizedBox(height: 2),
+                  pw.Text('Email: $usuarioEmail', style: pw.TextStyle(fontSize: 9, color: _colorGray)),
                 ],
-                // Telefone do responsável
-                if (usuarioTelefone != null && usuarioTelefone.isNotEmpty) ...[
-                  pw.Text(
-                    'Telefone: $usuarioTelefone',
-                    style: pw.TextStyle(
-                      fontSize: 9,
-                      color: _colorGray,
-                    ),
-                  ),
-                  pw.SizedBox(height: 3),
+
+                if ((usuarioTelefone ?? '').isNotEmpty) ...[
+                  pw.SizedBox(height: 2),
+                  pw.Text('Telefone: $usuarioTelefone', style: pw.TextStyle(fontSize: 9, color: _colorGray)),
                 ],
+                
                 pw.SizedBox(height: 8),
                 pw.Text(
-                  'Este relatório é confidencial e não pode ser divulgado sem o consentimento da Upgrade Seguros.',
-                  style: pw.TextStyle(
-                    fontSize: 8,
-                    color: _colorGray,
-                    fontStyle: pw.FontStyle.italic,
-                  ),
+                  isAdmin
+                      ? 'Documento interno — não distribuir sem autorização da Upgrade Seguros.'
+                      : 'Este relatório é confidencial e não pode ser divulgado sem o consentimento da Upgrade Seguros.',
+                  style: pw.TextStyle(fontSize: 8, color: _colorGray, fontStyle: pw.FontStyle.italic),
                 ),
-                pw.SizedBox(height: 6),
+                pw.SizedBox(height: 4),
                 pw.Text(
-                  'Emitido em: ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}',
-                  style: pw.TextStyle(
-                    fontSize: 8,
-                    color: _colorGray,
-                  ),
+                  'Emitido em: ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}${isAdmin ? ' — VERSÃO ADMIN' : ''}',
+                  style: pw.TextStyle(fontSize: 8, color: _colorGray),
                 ),
               ],
             ),
@@ -625,72 +692,98 @@ class PdfService {
   }
 
   pw.Widget _buildSinistroInfoSection(Claim claim) {
-    if (claim.ramoSinistro == 'Transporte' && claim.transporte != null) {
-      final t = claim.transporte!;
-      return pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Text(
-            'Informações do Transporte',
-            style: pw.TextStyle(
-              fontSize: 13,
-              fontWeight: pw.FontWeight.bold,
-              color: _colorBlue,
-            ),
-          ),
-          pw.SizedBox(height: 12),
-          pw.Container(
-            decoration: pw.BoxDecoration(
-              color: PdfColors.white,
-              borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-              border: pw.Border.all(color: _colorGrayBorder, width: 1),
-            ),
-            padding: const pw.EdgeInsets.all(12),
-            child: pw.Table(
-              columnWidths: {
-                0: const pw.FlexColumnWidth(1),
-                1: const pw.FlexColumnWidth(1),
-              },
-              children: _buildTransportRows(t),
-            ),
-          ),
-        ],
-      );
-    } else if ((claim.ramoSinistro == 'Frota' || claim.ramoSinistro == 'Veículo Individual') &&
+    final ramo = claim.ramoSinistro;
+
+    // ── Transporte ─────────────────────────────────────────────────────────
+    if (ramo == 'Transporte' && claim.transporte != null) {
+      return _buildInfoSectionWrapper('Informações do Transporte', _buildTransportRows(claim.transporte!));
+    }
+
+    // ── Veículo Individual / Frota / Civil Ônibus (RCO) ───────────────────
+    if ((ramo == 'Frota' || ramo == 'Veículo Individual' || ramo == 'Civil Ônibus (RCO)') &&
         claim.veiculoSelecionado != null) {
       final v = claim.veiculoSelecionado!;
-      return pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Text(
-            'Informações do Veículo',
-            style: pw.TextStyle(
-              fontSize: 13,
-              fontWeight: pw.FontWeight.bold,
-              color: _colorBlue,
-            ),
-          ),
-          pw.SizedBox(height: 12),
-          pw.Container(
-            decoration: pw.BoxDecoration(
-              color: PdfColors.white,
-              borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-              border: pw.Border.all(color: _colorGrayBorder, width: 1),
-            ),
-            padding: const pw.EdgeInsets.all(12),
-            child: pw.Table(
-              columnWidths: {
-                0: const pw.FlexColumnWidth(1),
-                1: const pw.FlexColumnWidth(1),
-              },
-              children: _buildVehicleRows(v),
-            ),
-          ),
-        ],
-      );
-    } else {
-      return pw.SizedBox();
+      final titulo = ramo == 'Civil Ônibus (RCO)' ? 'Dados do Veículo (RCO)' : 'Informações do Veículo';
+      return _buildInfoSectionWrapper(titulo, _buildVehicleRows(v));
     }
+
+    // ── Máquinas ───────────────────────────────────────────────────────────
+    if (ramo == 'Máquinas' && claim.maquinaria != null) {
+      final m = claim.maquinaria!;
+      return _buildInfoSectionWrapper('Informações da Máquina / Equipamento', [
+        _buildTableRow('Descrição', m.descricao),
+        _buildTableRow('Modelo', m.modelo),
+        _buildTableRow('Número de Série', m.numeroSerie),
+        _buildTableRow('Descrição do Sinistro', m.descricaoSinistro),
+      ]);
+    }
+
+    // ── Residencial ────────────────────────────────────────────────────────
+    if (ramo == 'Residencial' && claim.house != null) {
+      final h = claim.house!;
+      return _buildInfoSectionWrapper('Informações do Imóvel', [
+        _buildTableRow('Endereço / Local', h.localHouse),
+        _buildTableRow('Tipo de Imóvel', h.tipoImovel ?? ''),
+        _buildTableRow('Valor do Imóvel', h.valorImovel != null
+            ? 'R\$ ${h.valorImovel!.toStringAsFixed(2)}' : ''),
+      ]);
+    }
+
+    // ── Vidas ──────────────────────────────────────────────────────────────
+    if (ramo == 'Vidas' && claim.life != null) {
+      final l = claim.life!;
+      return _buildInfoSectionWrapper('Informações da Vida Segurada', [
+        _buildTableRow('Nome do Segurado', l.nomeSegurado),
+        _buildTableRow('CPF', l.cpfSegurado),
+        _buildTableRow('Idade', l.idadeSegurado.toString()),
+        _buildTableRow('Causa', l.causaMorte),
+        _buildTableRow('Parentesco', l.parentesco ?? ''),
+        _buildTableRow('Telefone', l.telefone ?? ''),
+        _buildTableRow('Email', l.email ?? ''),
+        _buildTableRow('Local', l.localLife),
+      ]);
+    }
+    return pw.SizedBox();
+  }
+
+  pw.Widget _buildInfoSectionWrapper(String titulo, List<pw.TableRow> rows) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Text(titulo,
+            style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold, color: _colorBlue)),
+        pw.SizedBox(height: 12),
+        pw.Container(
+          decoration: pw.BoxDecoration(
+            color: PdfColors.white,
+            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+            border: pw.Border.all(color: _colorGrayBorder, width: 1),
+          ),
+          padding: const pw.EdgeInsets.all(12),
+          child: pw.Table(
+            columnWidths: {
+              0: const pw.FlexColumnWidth(1),
+              1: const pw.FlexColumnWidth(1),
+            },
+            children: rows,
+          ),
+        ),
+      ],
+    );
+  }
+
+  pw.TableRow _buildTableRow(String label, String value) {
+    return pw.TableRow(
+      children: [
+        pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+          pw.Text(label, style: _labelStyle()),
+          pw.SizedBox(height: 2),
+          pw.Text(value.isNotEmpty ? value : '—', style: _valueStyle()),
+          pw.SizedBox(height: 8),
+        ]),
+        pw.SizedBox(),
+      ],
+    );
   }
 
   List<pw.TableRow> _buildTransportRows(dynamic t) {
@@ -750,7 +843,8 @@ class PdfService {
       ('Chassi', v.chassi ?? ''),
       ('Marca', v.marca ?? ''),
       ('Modelo', v.modelo ?? ''),
-      ('Ano', '${v.ano ?? ""} / ${v.anomodelo ?? ""}'),
+      ('Cor', v.cor ?? ''),
+      ('Ano Fab. / Modelo', '${v.ano ?? ""} / ${v.anomodelo ?? ""}'),
     ];
 
     for (int i = 0; i < fields.length; i += 2) {

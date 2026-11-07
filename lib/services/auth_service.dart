@@ -20,6 +20,62 @@ class AuthService {
     return _auth.currentUser?.email ?? 'desconhecido';
   }
 
+  Future<String> getUserName() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return 'Desconhecido';
+ 
+      // 1️⃣ PRIORIDADE 1: Busca o nome em Firestore (collection: users ou employees)
+      try {
+        // Tenta buscar em 'users' collection
+        final userDoc = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .get();
+ 
+        if (userDoc.exists) {
+          final nome = userDoc.data()?['nome'] ?? userDoc.data()?['name'];
+          if (nome != null && nome.toString().isNotEmpty) {
+            return nome.toString();
+          }
+        }
+      } catch (e) {
+        print('Erro ao buscar em users collection: $e');
+      }
+ 
+      // Se não achou em 'users', tenta buscar em 'employees' (by email)
+      try {
+        final employeeDoc = await _firestore
+            .collection('employees')
+            .where('email', isEqualTo: user.email)
+            .limit(1)
+            .get();
+ 
+        if (employeeDoc.docs.isNotEmpty) {
+          final nome = employeeDoc.docs.first.data()['nome'] ?? 
+                       employeeDoc.docs.first.data()['name'];
+          if (nome != null && nome.toString().isNotEmpty) {
+            return nome.toString();
+          }
+        }
+      } catch (e) {
+        print('Erro ao buscar em employees collection: $e');
+      }
+ 
+      // 2️⃣ PRIORIDADE 2: Se não encontrou nome, usa displayName do Firebase
+      if (user.displayName != null && user.displayName!.isNotEmpty) {
+        return user.displayName!;
+      }
+ 
+      // 3️⃣ PRIORIDADE 3: Como último recurso, retorna "Desconhecido" (NÃO o email!)
+      // Isto evita expor emails pessoais de funcionários
+      return 'Desconhecido';
+    } catch (e) {
+      print('❌ Erro ao obter nome do usuário: $e');
+      return 'Desconhecido';
+    }
+  }
+
   // Faz logout
   Future<void> signOut() async {
     await _auth.signOut();
@@ -129,7 +185,7 @@ class AuthService {
     }
   }
 
-  // LOGIN PARA DIFERENTES CREDENCIAIS
+   // LOGIN PARA DIFERENTES CREDENCIAIS
   Future<UserCredential> signInSmart(
     String login,
     String password,

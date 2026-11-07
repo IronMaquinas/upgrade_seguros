@@ -6,6 +6,9 @@ class Vehicle {
   String modelo;
   String nomeCondutor;
   String cpfCondutor;
+  String nomeCondutorMotorista;
+  String cpfCondutorMotorista;
+  String cnhCondutorMotorista;
   String cor;
   int ano;
   int anomodelo;
@@ -20,6 +23,9 @@ class Vehicle {
     required this.modelo,
     this.nomeCondutor = '',
     this.cpfCondutor = '',
+    this.nomeCondutorMotorista = '', 
+    this.cpfCondutorMotorista = '',
+    this.cnhCondutorMotorista = '',
     this.cor = '',
     required this.ano,
     required this.anomodelo,
@@ -35,6 +41,9 @@ class Vehicle {
       'modelo': modelo,
       'nomeCondutor': nomeCondutor,
       'cpfCondutor': cpfCondutor,
+      'nomeCondutorMotorista': nomeCondutorMotorista, 
+      'cpfCondutorMotorista': cpfCondutorMotorista,
+      'cnhCondutorMotorista': cnhCondutorMotorista,
       'cor': cor,
       'ano': ano,
       'anomodelo': anomodelo,
@@ -50,6 +59,9 @@ class Vehicle {
       modelo: map['modelo'] ?? '',
       nomeCondutor: map['nomeCondutor'] ?? '',
       cpfCondutor: map['cpfCondutor'] ?? '',
+      nomeCondutorMotorista: map['nomeCondutorMotorista'] ?? '', 
+      cpfCondutorMotorista: map['cpfCondutorMotorista'] ?? '',
+      cnhCondutorMotorista: map['cnhCondutorMotorista'] ?? '',
       cor: map['cor'] ?? '',
       ano: map['ano'] ?? 0,
       anomodelo: map['anomodelo'] ?? 0,

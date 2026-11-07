@@ -1,9 +1,11 @@
 // screens/task_list_screen.dart
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:upgrade_seguros/screens/assist_detail_screen.dart';
-import 'package:upgrade_seguros/screens/claim_detail_screen.dart';
-import '../services/firestore_service.dart';
 import 'package:intl/intl.dart';
+import 'package:upgrade_seguros/services/auth_service.dart';
+import '../services/firestore_service.dart';
+import '../screens/assist_detail_screen.dart';
+import '../screens/claim_detail_screen.dart';
 
 class TaskListScreen extends StatefulWidget {
   const TaskListScreen({super.key});
@@ -13,22 +15,63 @@ class TaskListScreen extends StatefulWidget {
 }
 
 class _TaskListScreenState extends State<TaskListScreen> {
-  final _firestoreService = FirestoreService();
-  final _dateFormat = DateFormat('dd/MM/yyyy');
-  bool? _selectedPrazoFilter; // null=Todos, true=No prazo, false=Fora do prazo
+  final FirestoreService _firestoreService = FirestoreService();
+  final TextEditingController _searchController = TextEditingController();
+  final DateFormat _dateFormat = DateFormat('dd/MM/yyyy');
 
   List<Map<String, dynamic>> _allTasks = [];
   List<Map<String, dynamic>> _filteredTasks = [];
-
-  final TextEditingController _searchController = TextEditingController();
-  String? _selectedStatus;
   bool _isLoading = true;
+
+  // Filtros
+  String? _selectedStatus;
+  String? _selectedPrazoFilter; // null=Todos, 'No prazo', 'Fora do prazo'
+
+  final List<String> _statusOptions = ['Todas', 'Aberta', 'Pendente', 'Concluída'];
+  final List<String> _prazoOptions = ['Todos', 'No prazo', 'Fora do prazo'];
+
+  // Filtro de Funcionário
+  String? _selectedFuncionarioId;
+  List<Map<String, dynamic>> _funcionarios = [];
+  bool _isAdmin = false;
+  final AuthService _authService = AuthService();
 
   @override
   void initState() {
     super.initState();
     _loadTasks();
     _searchController.addListener(_filterTasks);
+    _loadUserRole(); // <-- ADICIONADO
+    _carregarFuncionarios().then((_) {
+      // Se for admin, NÃO pré-seleciona funcionário
+      if (_isAdmin) {
+        return;
+      }
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null) {
+        final exists = _funcionarios.any((f) => f['id'] == currentUser.uid);
+        if (exists) {
+          setState(() {
+            _selectedFuncionarioId = currentUser.uid;
+            _filterTasks();
+          });
+        } else {
+          final userEmail = currentUser.email;
+          if (userEmail != null) {
+            final funcionarioPorEmail = _funcionarios.firstWhere(
+              (f) => f['email'] == userEmail,
+              orElse: () => {},
+            );
+            if (funcionarioPorEmail.isNotEmpty) {
+              setState(() {
+                _selectedFuncionarioId = funcionarioPorEmail['id'] as String;
+                _filterTasks();
+              });
+            }
+          }
+        }
+      }
+    });
   }
 
   @override
@@ -38,7 +81,123 @@ class _TaskListScreenState extends State<TaskListScreen> {
     super.dispose();
   }
 
-  // ✅ Função para obter ícone baseado no status
+  Future<void> _loadUserRole() async {
+    final role = await _authService.getUserRole();
+    setState(() {
+      _isAdmin = role == 'admin';
+    });
+  }
+
+  // --- MÉTODO PARA CARREGAR FUNCIONÁRIOS ---
+  Future<void> _carregarFuncionarios() async {
+    try {
+      final users = await _firestoreService.getFuncionarios();
+      setState(() {
+        _funcionarios = users.map((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final nome = data['nome'] as String? ?? 'Sem nome';
+          final email = data['email'] as String? ?? '';
+          return {
+            'id': doc.id,
+            'nome': nome,
+            'email': email,
+          };
+        }).toList();
+      });
+      print('Funcionários carregados: ${_funcionarios.length}');
+    } catch (e) {
+      print('Erro ao carregar funcionários: $e');
+    }
+  }
+
+  // ─── Busca e Filtros ─────────────────────────────────────────────
+  Future<void> _loadTasks() async {
+    try {
+      final tasks = await _firestoreService.getAllTasksWithClaims();
+      setState(() {
+        _allTasks = tasks;
+        _filterTasks();
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao carregar tarefas: $e')),
+        );
+      }
+    }
+  }
+
+  void _filterTasks() {
+    final query = _searchController.text.toLowerCase().trim();
+
+    setState(() {
+      _filteredTasks = _allTasks.where((task) {
+        // Busca textual (mantido)
+        final matchesSearch = query.isEmpty ||
+            (task['numeroSinistro'] ?? '').toString().toLowerCase().contains(query) ||
+            (task['clientNome'] ?? '').toString().toLowerCase().contains(query) ||
+            (task['clientCnpjCpf'] ?? '').toString().toLowerCase().contains(query) ||
+            (task['responsavelEmail'] ?? '').toString().toLowerCase().contains(query) ||
+            (task['descricao'] ?? '').toString().toLowerCase().contains(query);
+
+        // Filtro status (mantido)
+        final matchesStatus = _selectedStatus == null ||
+            _selectedStatus == 'Todas' ||
+            task['status'] == _selectedStatus;
+
+        // Filtro prazo (mantido)
+        final prazo = task['prazo'] as DateTime?;
+        final atrasada = prazo?.isBefore(DateTime.now()) ?? false;
+        final matchesPrazo = _selectedPrazoFilter == null ||
+            _selectedPrazoFilter == 'Todos' ||
+            (_selectedPrazoFilter == 'No prazo' && !atrasada) ||
+            (_selectedPrazoFilter == 'Fora do prazo' && atrasada);
+
+        // ── Filtro por Funcionário ──
+        bool matchesFuncionario = true;
+        if (_selectedFuncionarioId != null) {
+          // Busca o funcionário de forma segura sem firstWhere com orElse problemático
+          Map<String, dynamic>? funcionario;
+          for (var f in _funcionarios) {
+            if (f['id'] == _selectedFuncionarioId) {
+              funcionario = f;
+              break;
+            }
+          }
+          
+          // Se não encontrou, tenta por email (fallback)
+          if (funcionario == null) {
+            // Busca pelo email do funcionário
+            final userEmail = FirebaseAuth.instance.currentUser?.email;
+            for (var f in _funcionarios) {
+              if (f['email'] == userEmail) {
+                funcionario = f;
+                break;
+              }
+            }
+          }
+
+          if (funcionario != null) {
+            final emailFuncionario = funcionario['email'] as String?;
+            // Usa o email da task (responsavelEmail) ou ID (se tiver)
+            final responsavelEmail = task['responsavelEmail'] as String?;
+            final responsavelId = task['responsavelId'] as String?;
+            matchesFuncionario = responsavelId == _selectedFuncionarioId ||
+                (emailFuncionario != null && responsavelEmail == emailFuncionario);
+          } else {
+            matchesFuncionario = false; // funcionário não encontrado, não filtra
+          }
+        }
+
+        return matchesSearch && matchesStatus && matchesPrazo && matchesFuncionario;
+      }).toList();
+    });
+  }
+
+  // ─── Helpers de UI ────────────────────────────────────────────────
+
   IconData _getStatusIcon(String status) {
     switch (status) {
       case 'Concluída':
@@ -52,7 +211,6 @@ class _TaskListScreenState extends State<TaskListScreen> {
     }
   }
 
-  // ✅ Função para obter cor baseada no status
   Color _getStatusColor(String status) {
     switch (status) {
       case 'Concluída':
@@ -66,70 +224,107 @@ class _TaskListScreenState extends State<TaskListScreen> {
     }
   }
 
-  // ✅ Função para obter cor baseada no prazo (CORRIGIDA)
   Color _getPrazoColor(DateTime? prazo, String status) {
     if (prazo == null) return Colors.grey;
-    
-    // Se a tarefa está concluída, mostra em verde independente do prazo
-    if (status == 'Concluída') {
-      return Colors.green.shade400;
-    }
-    
+    if (status == 'Concluída') return Colors.green.shade400;
+
     final agora = DateTime.now();
     final diferenca = prazo.difference(agora);
-    
+
     if (prazo.isBefore(agora)) {
-      return Colors.red.shade400; // Fora do prazo (não concluída)
+      return Colors.red.shade400;
     } else if (diferenca.inDays <= 2) {
-      return Colors.orange.shade400; // Próximo do prazo (2 dias ou menos)
+      return Colors.orange.shade400;
     } else {
-      return Colors.green.shade400; // No prazo
+      return Colors.green.shade400;
     }
   }
 
-  Future<void> _loadTasks() async {
-    try {
-      final tasks = await _firestoreService.getAllTasksWithClaims();
-      setState(() {
-        _allTasks = tasks;
-        _filterTasks();
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao carregar tarefas: $e')),
-      );
-    }
+  // ─── Widgets de Filtros ──────────────────────────────────────────
+  Widget _buildFilterDropdown<T>({
+    required T? value,
+    required List<T> items,
+    required String hint,
+    required IconData icon,
+    required void Function(T?) onChanged,
+  }) {
+    return DropdownButtonFormField<T>(
+      value: value,
+      isDense: true,
+      decoration: InputDecoration(
+        hintText: hint,
+        prefixIcon: Icon(icon, size: 18, color: Colors.grey.shade600),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8.0),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8.0),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
+        ),
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      ),
+      items: items.map((item) {
+        return DropdownMenuItem(
+          value: item,
+          child: Text(item.toString()),
+        );
+      }).toList(),
+      onChanged: onChanged,
+    );
   }
 
-  void _filterTasks() {
-    final query = _searchController.text.toLowerCase();
-    setState(() {
-      _filteredTasks = _allTasks.where((task) {
-        final matchesSearch = query.isEmpty ||
-            (task['numeroSinistro'] ?? '').toString().toLowerCase().contains(query) ||
-            (task['clientNome'] ?? '').toString().toLowerCase().contains(query) ||
-            (task['clientCnpjCpf'] ?? '').toString().toLowerCase().contains(query) ||
-            (task['responsavelEmail'] ?? '').toString().toLowerCase().contains(query) ||
-            (task['descricao'] ?? '').toString().toLowerCase().contains(query);
-
-        final matchesStatus = _selectedStatus == null || task['status'] == _selectedStatus;
-
-        final prazo = task['prazo'] as DateTime?;
-        final atrasada = prazo?.isBefore(DateTime.now()) ?? false;
-        final matchesPrazo = _selectedPrazoFilter == null ||
-            (_selectedPrazoFilter == true && !atrasada) ||
-            (_selectedPrazoFilter == false && atrasada);
-
-        return matchesSearch && matchesStatus && matchesPrazo;
-      }).toList();
-    });
+  // --- WIDGET DE FUNCIONÁRIOS ---
+  Widget _buildFuncionarioDropdown() {
+    return DropdownButtonFormField<String?>(
+      value: _selectedFuncionarioId,
+      isDense: true,
+      decoration: InputDecoration(
+        hintText: 'Funcionário',
+        prefixIcon: const Icon(Icons.person, size: 18, color: Colors.grey),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8.0),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8.0),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
+        ),
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      ),
+      items: [
+        const DropdownMenuItem(value: null, child: Text('Todos')),
+        ..._funcionarios.map<DropdownMenuItem<String?>>((f) {
+          final nome = f['nome'] as String? ?? 'Sem nome';
+          final email = f['email'] as String?;
+          return DropdownMenuItem(
+            value: f['id'] as String?,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(nome, style: const TextStyle(fontWeight: FontWeight.w500)),
+                if (email != null && email.isNotEmpty)
+                  Text(email, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+              ],
+            ),
+          );
+        }).toList(),
+      ],
+      onChanged: (val) {
+        setState(() {
+          _selectedFuncionarioId = val;
+          _filterTasks();
+        });
+      },
+    );
   }
 
-  // ✅ Card atualizado no mesmo estilo dos sinistros
+  // ─── Widgets de Card ─────────────────────────────────────────────
+
   Widget _buildTaskCard(Map<String, dynamic> task) {
     final prazo = task['prazo'] as DateTime?;
     final status = task['status'] as String? ?? 'Pendente';
@@ -157,14 +352,14 @@ class _TaskListScreenState extends State<TaskListScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => AssistDetailScreen(assistId: claim.id),
+                    builder: (_) => AssistDetailScreen(assistId: claim.id),
                   ),
                 );
               } else {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => ClaimDetailScreen(claim: claim),
+                    builder: (_) => ClaimDetailScreen(claim: claim),
                   ),
                 );
               }
@@ -184,7 +379,6 @@ class _TaskListScreenState extends State<TaskListScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ✅ CABEÇALHO COM ÍCONE DE STATUS
               Row(
                 children: [
                   CircleAvatar(
@@ -192,7 +386,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
                     backgroundColor: _getStatusColor(status).withOpacity(0.2),
                     child: Icon(
                       _getStatusIcon(status),
-                      size: 18, 
+                      size: 18,
                       color: _getStatusColor(status),
                     ),
                   ),
@@ -210,8 +404,6 @@ class _TaskListScreenState extends State<TaskListScreen> {
                 ],
               ),
               const SizedBox(height: 12),
-              
-              // ✅ DESCRIÇÃO DA TAREFA
               Text(
                 descricao,
                 style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
@@ -219,8 +411,6 @@ class _TaskListScreenState extends State<TaskListScreen> {
                 maxLines: 2,
               ),
               const SizedBox(height: 8),
-              
-              // ✅ NOME DO CLIENTE
               Text(
                 clientNome,
                 style: const TextStyle(fontSize: 13, color: Colors.black87),
@@ -228,27 +418,19 @@ class _TaskListScreenState extends State<TaskListScreen> {
                 maxLines: 1,
               ),
               const SizedBox(height: 8),
-              
-              // ✅ PRAZO (CORRIGIDO)
               Text(
                 prazo != null ? _dateFormat.format(prazo) : 'Prazo não definido',
                 style: TextStyle(
                   fontSize: 12,
-                  color: prazo != null ? _getPrazoColor(prazo, status) : Colors.grey,
+                  color: _getPrazoColor(prazo, status),
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              
               const SizedBox(height: 10),
-              
-              // ✅ CHIP DE STATUS
               Row(
                 children: [
                   Chip(
-                    label: Text(
-                      status,
-                      style: const TextStyle(fontSize: 12),
-                    ),
+                    label: Text(status, style: const TextStyle(fontSize: 12)),
                     backgroundColor: _getStatusColor(status).withOpacity(0.2),
                     labelStyle: TextStyle(
                       color: _getStatusColor(status),
@@ -256,7 +438,6 @@ class _TaskListScreenState extends State<TaskListScreen> {
                     ),
                   ),
                   const Spacer(),
-                  // ✅ Ícone de warning só aparece se estiver atrasada E não concluída
                   if (prazo != null && prazo.isBefore(DateTime.now()) && status != 'Concluída')
                     const Icon(Icons.warning, color: Colors.red, size: 20),
                 ],
@@ -268,57 +449,74 @@ class _TaskListScreenState extends State<TaskListScreen> {
     );
   }
 
+  // ─── Build ────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FB),
       appBar: AppBar(
-        automaticallyImplyLeading: false,
-        title: const Text('Todas as Tarefas'),
+        backgroundColor: Colors.white,
+        elevation: 0.5,
+        title: const Text(
+          'Tarefas',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF1A1A2E),
+          ),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh_outlined),
+            onPressed: _loadTasks,
+            tooltip: 'Atualizar',
+          ),
+        ],
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(160.0),
+          preferredSize: const Size.fromHeight(120.0), // Aumente para caber a nova linha
           child: Padding(
-            padding: const EdgeInsets.all(8.0),
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
             child: Column(
               children: [
-                TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    hintText: 'Buscar por Sinistro, Cliente, Responsável ou Descrição',
-                    prefixIcon: const Icon(Icons.search),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10.0),
-                      borderSide: BorderSide.none,
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 8),
+                // Linha 1: Busca (mantido)
                 Row(
                   children: [
                     Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: _selectedStatus ?? 'Todas',
+                      child: TextField(
+                        controller: _searchController,
                         decoration: InputDecoration(
-                          hintText: 'Status',
-                          prefixIcon: const Icon(Icons.filter_list),
+                          hintText: 'Buscar por Sinistro, Cliente, Responsável ou Descrição',
+                          prefixIcon: const Icon(Icons.search),
                           border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10.0),
-                            borderSide: BorderSide.none,
+                            borderRadius: BorderRadius.circular(8.0),
+                            borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8.0),
+                            borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
                           ),
                           filled: true,
                           fillColor: Colors.white,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         ),
-                        items: ['Todas', 'Aberta', 'Pendente', 'Concluída']
-                            .map((status) => DropdownMenuItem(
-                                  value: status,
-                                  child: Text(status),
-                                ))
-                            .toList(),
-                        onChanged: (value) {
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                // Linha 2: Status + Prazo (mantido)
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildFilterDropdown<String>(
+                        value: _selectedStatus ?? 'Todas',
+                        items: _statusOptions,
+                        hint: 'Status',
+                        icon: Icons.filter_list,
+                        onChanged: (val) {
                           setState(() {
-                            _selectedStatus = value == 'Todas' ? null : value;
+                            _selectedStatus = val == 'Todas' ? null : val;
                             _filterTasks();
                           });
                         },
@@ -326,41 +524,22 @@ class _TaskListScreenState extends State<TaskListScreen> {
                     ),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: _selectedPrazoFilter == null
-                            ? 'Todos'
-                            : _selectedPrazoFilter == true
-                                ? 'No prazo'
-                                : 'Fora do prazo',
-                        decoration: InputDecoration(
-                          hintText: 'Prazo',
-                          prefixIcon: const Icon(Icons.calendar_today),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10.0),
-                            borderSide: BorderSide.none,
-                          ),
-                          filled: true,
-                          fillColor: Colors.white,
-                        ),
-                        items: ['Todos', 'No prazo', 'Fora do prazo']
-                            .map((prazo) => DropdownMenuItem(
-                                  value: prazo,
-                                  child: Text(prazo),
-                                ))
-                            .toList(),
-                        onChanged: (value) {
+                      child: _buildFilterDropdown<String>(
+                        value: _selectedPrazoFilter ?? 'Todos',
+                        items: _prazoOptions,
+                        hint: 'Prazo',
+                        icon: Icons.calendar_today,
+                        onChanged: (val) {
                           setState(() {
-                            if (value == 'Todos') {
-                              _selectedPrazoFilter = null;
-                            } else if (value == 'No prazo') {
-                              _selectedPrazoFilter = true;
-                            } else {
-                              _selectedPrazoFilter = false;
-                            }
+                            _selectedPrazoFilter = val == 'Todos' ? null : val;
                             _filterTasks();
                           });
                         },
                       ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildFuncionarioDropdown(),
                     ),
                   ],
                 ),
@@ -371,12 +550,16 @@ class _TaskListScreenState extends State<TaskListScreen> {
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          if (_isLoading) return const Center(child: CircularProgressIndicator());
+          if (_isLoading) {
+            return const Center(child: CircularProgressIndicator());
+          }
 
           if (_filteredTasks.isEmpty) {
             return Center(
               child: Text(
-                _searchController.text.isEmpty && _selectedStatus == null && _selectedPrazoFilter == null
+                _searchController.text.isEmpty &&
+                        _selectedStatus == null &&
+                        _selectedPrazoFilter == null
                     ? 'Nenhuma tarefa registrada.'
                     : 'Nenhuma tarefa encontrada com os filtros aplicados.',
                 style: const TextStyle(fontSize: 16),
@@ -386,17 +569,15 @@ class _TaskListScreenState extends State<TaskListScreen> {
 
           if (constraints.maxWidth > 600) {
             final availableWidth = constraints.maxWidth;
-            final crossAxisCount = (availableWidth / 400).floor();
-            final effectiveCount = crossAxisCount.clamp(2, 4);
+            final crossAxisCount = (availableWidth / 400).floor().clamp(2, 4);
 
             return Padding(
               padding: const EdgeInsets.all(16.0),
               child: GridView.builder(
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: effectiveCount,
+                  crossAxisCount: crossAxisCount,
                   crossAxisSpacing: 16,
                   mainAxisSpacing: 16,
-                  childAspectRatio: 1.2,
                   mainAxisExtent: 225,
                 ),
                 itemCount: _filteredTasks.length,

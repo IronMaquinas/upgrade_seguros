@@ -100,27 +100,26 @@ class EmployeeService {
     required String email,
     String? matricula,
     required String role,
+    String? telefone,  // ← ADICIONE ISTO
   }) async {
     final auth = FirebaseAuth.instance;
 
     try {
-      // 1. Criar usuário no Firebase Auth
       final cred = await auth.createUserWithEmailAndPassword(
         email: email,
-        password: '123456', // senha temporária
+        password: '123456',
       );
 
-      // 2. Salvar no Firestore
       await _users.doc(cred.user!.uid).set({
         'nome': nome,
         'email': email,
         'matricula': matricula,
         'role': role,
+        'telefone': telefone,  // ← ADICIONE ISTO
         'ativo': true,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // 3. Enviar email de reset de senha
       await auth.sendPasswordResetEmail(email: email);
     } catch (e) {
       rethrow;

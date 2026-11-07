@@ -18,11 +18,11 @@ class ClientListScreen extends StatefulWidget {
 class _ClientListScreenState extends State<ClientListScreen> {
   final FirestoreService _firestoreService = FirestoreService();
   final AuthService _authService = AuthService();
+  final TextEditingController _searchController = TextEditingController();
 
   List<Client> _clients = [];
   List<Client> _filteredClients = [];
   bool _isLoading = false;
-  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -37,6 +37,8 @@ class _ClientListScreenState extends State<ClientListScreen> {
     _searchController.dispose();
     super.dispose();
   }
+
+  // ─── Busca e Filtros ─────────────────────────────────────────────
 
   Future<void> _fetchClients() async {
     setState(() => _isLoading = true);
@@ -76,6 +78,29 @@ class _ClientListScreenState extends State<ClientListScreen> {
     }
   }
 
+  void _filterClients() {
+    final query = _searchController.text.toLowerCase().trim();
+    final queryDigits = query.replaceAll(RegExp(r'\D'), '');
+
+    setState(() {
+      _filteredClients = _clients.where((client) {
+        final telefoneDigits = client.contatoTelefone.replaceAll(RegExp(r'\D'), '');
+        final nomeMatch = client.nome.toLowerCase().contains(query);
+        final cpfMatch = client.cnpjCpf.toLowerCase().contains(query);
+        final telefoneMatch = queryDigits.isNotEmpty && telefoneDigits.contains(queryDigits);
+
+        // Log para debug (opcional)
+        // if (telefoneMatch) {
+        //   print('✅ Match por telefone: ${client.nome} - $telefoneDigits');
+        // }
+
+        return nomeMatch || cpfMatch || telefoneMatch;
+      }).toList();
+    });
+  }
+
+  // ─── Helpers de UI ────────────────────────────────────────────────
+
   String calcularRecomendacaoManutencao(double valorApolice, List<Claim> claims) {
     final totalSinistros = claims.fold<double>(0.0, (sum, c) => sum + c.valorTotalSinistro);
     if (valorApolice <= 0) return 'Não recomendado';
@@ -85,16 +110,6 @@ class _ClientListScreenState extends State<ClientListScreen> {
     if (percentual >= 0.5 && percentual < 0.75) return 'Regular';
     if (percentual >= 0.75 && percentual < 1.0) return 'Atenção';
     return 'Não recomendado';
-  }
-
-  void _filterClients() {
-    final query = _searchController.text.toLowerCase();
-    setState(() {
-      _filteredClients = _clients.where((client) {
-        return client.nome.toLowerCase().contains(query) ||
-            client.cnpjCpf.toLowerCase().contains(query);
-      }).toList();
-    });
   }
 
   Color _getRecommendationColor(String recommendation) {
@@ -117,7 +132,8 @@ class _ClientListScreenState extends State<ClientListScreen> {
     }
   }
 
-  // ✅ CARD ATUALIZADO NO MESMO ESTILO
+  // ─── Widgets de Card ─────────────────────────────────────────────
+
   Widget _buildClientCard(Client client) {
     final now = DateTime.now();
     final thirtyDaysFromNow = now.add(const Duration(days: 30));
@@ -126,7 +142,6 @@ class _ClientListScreenState extends State<ClientListScreen> {
     ).toList();
     final isExpiringSoon = apolicesVencendo.isNotEmpty;
     
-    // Pega a apólice mais próxima de vencer para exibir
     final apoliceProxVencer = client.apolices.isEmpty ? null : 
       client.apolices.reduce((a, b) => a.dataFim.isBefore(b.dataFim) ? a : b);
 
@@ -145,7 +160,6 @@ class _ClientListScreenState extends State<ClientListScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ✅ CABEÇALHO CONSISTENTE
               Row(
                 children: [
                   CircleAvatar(
@@ -167,8 +181,6 @@ class _ClientListScreenState extends State<ClientListScreen> {
                 ],
               ),
               const SizedBox(height: 12),
-              
-              // ✅ INFORMAÇÕES PRINCIPAIS
               Text(
                 client.cnpjCpf,
                 style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
@@ -176,8 +188,6 @@ class _ClientListScreenState extends State<ClientListScreen> {
                 maxLines: 1,
               ),
               const SizedBox(height: 8),
-              
-              // ✅ INFORMAÇÕES SECUNDÁRIAS
               Row(
                 children: [
                   Text(
@@ -198,10 +208,7 @@ class _ClientListScreenState extends State<ClientListScreen> {
                     const Icon(Icons.warning, color: Colors.red, size: 16),
                 ],
               ),
-              
               const SizedBox(height: 8),
-              
-              // ✅ CHIP DE RECOMENDAÇÃO
               Align(
                 alignment: Alignment.centerLeft,
                 child: Chip(
@@ -223,28 +230,50 @@ class _ClientListScreenState extends State<ClientListScreen> {
     );
   }
 
+  // ─── Build ────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FB),
       appBar: AppBar(
-        automaticallyImplyLeading: false,
-        title: const Text('Gestão de Clientes'),
+        backgroundColor: Colors.white,
+        elevation: 0.5,
+        title: const Text(
+          'Gestão de Clientes',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF1A1A2E),
+          ),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh_outlined),
+            onPressed: _fetchClients,
+            tooltip: 'Atualizar',
+          ),
+        ],
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(60.0),
+          preferredSize: const Size.fromHeight(70.0),
           child: Padding(
-            padding: const EdgeInsets.all(8.0),
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
             child: TextField(
               controller: _searchController,
               decoration: InputDecoration(
-                hintText: 'Buscar cliente por nome ou CPF/CNPJ',
+                hintText: 'Buscar por Nome, CPF/CNPJ ou Telefone',
                 prefixIcon: const Icon(Icons.search),
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10.0),
-                  borderSide: BorderSide.none,
+                  borderRadius: BorderRadius.circular(8.0),
+                  borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8.0),
+                  borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
                 ),
                 filled: true,
                 fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
             ),
           ),
@@ -252,73 +281,67 @@ class _ClientListScreenState extends State<ClientListScreen> {
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          return Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Column(
-              children: [
-                if (_isLoading)
-                  const Expanded(child: Center(child: CircularProgressIndicator()))
-                else if (_filteredClients.isEmpty)
-                  const Expanded(
-                    child: Center(
-                      child: Text(
-                        'Nenhum cliente cadastrado.',
-                        style: TextStyle(fontSize: 16),
-                      ),
-                    ),
-                  )
-                else if (constraints.maxWidth > 600)
-                  // ✅ GRID PARA WEB COM MESMO PADRÃO
-                  Expanded(
-                    child: GridView.builder(
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: constraints.maxWidth > 900 ? 3 : 2,
-                        crossAxisSpacing: 16,
-                        mainAxisSpacing: 16,
-                        childAspectRatio: 1.2, // ✅ MESMA PROPORÇÃO
-                        mainAxisExtent: 180, // ✅ MESMA ALTURA
-                      ),
-                      itemCount: _filteredClients.length,
-                      itemBuilder: (context, index) => _buildClientCard(_filteredClients[index]),
-                    ),
-                  )
-                else
-                  // ✅ LISTA PARA MOBILE
-                  Expanded(
-                    child: RefreshIndicator(
-                      onRefresh: _fetchClients,
-                      child: ListView.builder(
-                        padding: const EdgeInsets.all(8.0),
-                        itemCount: _filteredClients.length,
-                        itemBuilder: (context, index) => _buildClientCard(_filteredClients[index]),
-                      ),
-                    ),
-                  ),
-              ],
+          if (_isLoading) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (_filteredClients.isEmpty) {
+            return Center(
+              child: Text(
+                _searchController.text.isEmpty
+                    ? 'Nenhum cliente cadastrado.'
+                    : 'Nenhum cliente encontrado com os filtros aplicados.',
+                style: const TextStyle(fontSize: 16),
+              ),
+            );
+          }
+
+          if (constraints.maxWidth > 600) {
+            final crossAxisCount = constraints.maxWidth > 900 ? 3 : 2;
+            return Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: GridView.builder(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                  mainAxisExtent: 180,
+                ),
+                itemCount: _filteredClients.length,
+                itemBuilder: (context, index) => _buildClientCard(_filteredClients[index]),
+              ),
+            );
+          }
+
+          return RefreshIndicator(
+            onRefresh: _fetchClients,
+            child: ListView.builder(
+              padding: const EdgeInsets.all(8.0),
+              itemCount: _filteredClients.length,
+              itemBuilder: (context, index) => _buildClientCard(_filteredClients[index]),
             ),
           );
         },
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
-          if (widget.onNavigate != null) {
-            widget.onNavigate!(
-              ClientFormScreen(
+          final result = await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => ClientFormScreen(
                 onSaved: () {
-                  widget.onNavigate!(ClientListScreen(onNavigate: widget.onNavigate));
                   _fetchClients();
                 },
               ),
-            );
-          } else {
-            final result = await Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ClientFormScreen()),
-            );
-            if (result == true) _fetchClients();
+            ),
+          );
+          if (result == true) {
+            _fetchClients();
           }
         },
         child: const Icon(Icons.person_add),
         tooltip: 'Cadastrar novo cliente',
+        backgroundColor: const Color(0xFF1565C0),
+        foregroundColor: Colors.white,
       ),
     );
   }

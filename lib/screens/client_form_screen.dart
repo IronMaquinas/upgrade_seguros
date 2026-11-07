@@ -16,8 +16,13 @@ import 'package:syncfusion_flutter_pdf/pdf.dart' hide PdfDocument;
 import 'package:upgrade_seguros/formatter/number_input_formatter.dart';
 import 'package:upgrade_seguros/models/apolice_model.dart';
 import 'package:upgrade_seguros/models/bem_segurado_model.dart';
+import 'package:upgrade_seguros/models/business_model.dart';
+import 'package:upgrade_seguros/models/contrato_dto.dart';
+import 'package:upgrade_seguros/parsers/parser_factory.dart';
 import 'package:upgrade_seguros/services/image_service_web.dart';
+import 'package:upgrade_seguros/services/place_search_delegate.dart';
 import 'package:upgrade_seguros/utils/formatters.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/services.dart';
 import '../models/client_model.dart';
@@ -26,6 +31,9 @@ import '../services/firestore_service.dart';
 import '../services/auth_service.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 import 'package:pdf/pdf.dart' as PDFLib;
+import 'package:flutter_google_places_sdk/flutter_google_places_sdk.dart' hide LatLng;
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '/widgets/vigencia_date_range_widget.dart';
 
 class ClientFormScreen extends StatefulWidget {
   final Client? clientToEdit;
@@ -46,12 +54,16 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
   final _numeroApoliceController = TextEditingController();
   final _valorApoliceController = TextEditingController();
   final _valorGatilhoController = TextEditingController();
-
-  DateTime? _vigenciaInicio;
-  DateTime? _vigenciaFim;
+  final nomeEmpresaCtrl = TextEditingController();
+  final cnpjEmpresaCtrl = TextEditingController();
+  final enderecoEmpresaCtrl = TextEditingController();
 
   final _authService = AuthService();
   final _firestoreService = FirestoreService();
+
+  // API Key para Google places - Mesma conta da Iron Máquinas
+  final _places = FlutterGooglePlacesSdk("AIzaSyCoE3ZT1_EMmET0RaSmBeFMWQiYwJcl1YE");
+  LatLng? _localOcorrenciaLatLng;
 
   List<Vehicle> _vehicles = [];
   bool _isLoading = false;
@@ -81,7 +93,6 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
         _selectedRamos = List.from(client.ramos);
         _apolices = List.from(client.apolices);
 
-        // Formatando valor da apólice para exibir no campo como "1.234,56"
         final numberFormat = NumberFormat.currency(
           locale: 'pt_BR',
           symbol: '',
@@ -120,6 +131,30 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
     } catch (e) {
       debugPrint('Erro ao carregar seguradoras: $e');
     }
+  }
+
+   // BUSCAR LOCAL NO MAPS
+  Future<String?> _openPlaceSearch() async {
+    final Place? place = await showSearch<Place?>(
+      context: context,
+      delegate: PlaceSearchDelegate(_places),
+    );
+
+    if (place != null) {
+      // salva lat/lng se quiser usar depois
+      if (place.latLng != null) {
+        setState(() {
+          _localOcorrenciaLatLng = LatLng(
+            place.latLng!.lat,
+            place.latLng!.lng,
+          );
+        });
+      }
+
+      return place.address ?? place.name ?? '';
+    }
+
+    return null;
   }
 
   void _showImageViewer(ImageProvider imageProvider, VoidCallback onDelete) {
@@ -192,9 +227,9 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
   Future<void> _addVehicleDialog({Vehicle? vehicleToEdit, int? indexToUpdate}) async {
     final marca = TextEditingController(text: vehicleToEdit?.marca ?? '');
     final modelo = TextEditingController(text: vehicleToEdit?.modelo ?? '');
-    final ano = TextEditingController(text: vehicleToEdit?.ano?.toString() ?? '');
+    final ano = TextEditingController(text: vehicleToEdit?.ano.toString() ?? '');
     final cor = TextEditingController(text: vehicleToEdit?.cor ?? '');
-    final anomodelo = TextEditingController(text: vehicleToEdit?.anomodelo?.toString() ?? '');
+    final anomodelo = TextEditingController(text: vehicleToEdit?.anomodelo.toString() ?? '');
     final placa = TextEditingController(text: vehicleToEdit?.placa ?? '');
     final chassi = TextEditingController(text: vehicleToEdit?.chassi ?? '');
 
@@ -203,7 +238,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
 
   // ✅ Adiciona as fotos do Firestore como XFile (via download)
     if (vehicleToEdit?.fotosUrls != null) {
-      for (final url in vehicleToEdit!.fotosUrls!) {
+      for (final url in vehicleToEdit!.fotosUrls) {
         try {
           final response = await http.get(Uri.parse(url));
           if (response.statusCode == 200) {
@@ -529,6 +564,272 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
     }
   }
 
+  // --- Diálogo de sair sem salvar ---
+  Future<bool> _showExitDialog() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancelar cadastro?'),
+        content: const Text('Você tem certeza que deseja sair? As informações preenchidas serão perdidas.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Continuar editando'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Sim, sair', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    return confirm ?? false;
+  }
+
+  // --- Importar novo contrato ---
+  Future<void> _importarContrato() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+        allowMultiple: false,
+      );
+
+      Navigator.of(context).pop();
+
+      if (result == null) return;
+
+      final file = result.files.single;
+      final texto = await _extractText(file);
+ 
+final linhasDebug = texto
+    .split('\n')
+    .map((l) => l.trim())
+    .where((l) => l.isNotEmpty)
+    .toList();
+ 
+for (int i = 0; i < linhasDebug.length; i++) {
+  final linha = linhasDebug[i];
+  print('[$i] ${linha.substring(0, linha.length > 100 ? 100 : linha.length)}${linha.length > 100 ? '...' : ''}');
+}
+ 
+for (int i = 0; i < linhasDebug.length; i++) {
+  if (linhasDebug[i].toLowerCase().contains('proponente')) {
+    print('  [$i] ${linhasDebug[i]}');
+    if (i + 1 < linhasDebug.length) {
+      print('  [$i+1] ${linhasDebug[i + 1]} ← próxima linha');
+    }
+  }
+}
+ 
+for (int i = 0; i < linhasDebug.length; i++) {
+  if (linhasDebug[i].toLowerCase().contains('cpf') ||
+      RegExp(r'\d{3}\.\d{3}\.\d{3}-\d{2}').hasMatch(linhasDebug[i])) {
+    print('  [$i] ${linhasDebug[i]}');
+  }
+}
+ 
+for (int i = 0; i < linhasDebug.length; i++) {
+  if (linhasDebug[i].toLowerCase().contains('placa')) {
+    print('  [$i] ${linhasDebug[i]}');
+    if (i + 1 < linhasDebug.length) {
+      print('  [$i+1] ${linhasDebug[i + 1]} ← dados da placa?');
+    }
+  }
+}
+ 
+for (int i = 0; i < linhasDebug.length; i++) {
+  if (linhasDebug[i].toLowerCase().contains('apólice') ||
+      linhasDebug[i].toLowerCase().contains('número da')) {
+    print('  [$i] ${linhasDebug[i]}');
+    if (i + 1 < linhasDebug.length) {
+      print('  [$i+1] ${linhasDebug[i + 1]} ← dados?');
+    }
+  }
+}
+ 
+for (int i = 0; i < linhasDebug.length; i++) {
+  if (RegExp(r'\d{3}\.\d{3}\.\d{3}-\d{2}').hasMatch(linhasDebug[i])) {
+    print('  [$i] ${linhasDebug[i]}');
+  }
+}
+ 
+for (int i = 0; i < linhasDebug.length; i++) {
+  if (RegExp(r'[A-Z]{3}-?\d[A-Z0-9]-?\d{2}').hasMatch(linhasDebug[i])) {
+    print('  [$i] ${linhasDebug[i]}');
+  }
+}
+      final contrato = ParserFactory.parseContrato(texto);
+
+      print('📋 Contrato parseado:');
+      if (contrato.veiculos.isNotEmpty) {
+        print('    Marca: ${contrato.veiculos.first.marca}');
+        print('    Modelo: ${contrato.veiculos.first.modelo}');
+        print('    Ano: ${contrato.veiculos.first.ano}');
+      }
+
+      final clienteExistente = await _firestoreService.getClientByCnpjCpf(
+        contrato.cnpjCpfProponente
+      );
+
+      if (clienteExistente != null) {
+        final adicionar = await _mostrarDialogoClienteExistente(clienteExistente, contrato);
+        if (adicionar) {
+          _atualizarClienteExistente(clienteExistente, contrato);
+        }
+      } else {
+        _preencherNovoCliente(contrato);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Dados do contrato importados! Revise e salve.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      print('❌ Erro na importação: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Erro ao importar: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // --- Preencher novo cliente se for o caso ---
+  void _preencherNovoCliente(ContratoDTO contrato) {
+    setState(() {
+      _nameController.text = contrato.nomeProponente;
+      _cpfCnpjController.text = contrato.cnpjCpfProponente;
+      _contactController.text = contrato.contato ?? '';
+      _phoneController.text = BRFormatters.formatarTelefone(contrato.telefone ?? '');
+      _emailController.text = contrato.email ?? '';
+
+      final apolice = _criarApolice(contrato);
+      _apolices = [apolice];
+    });
+
+    // 🔥 AVISO DE CHASSI FALTANTE (FORA DO setState)
+    if (contrato.veiculos.isNotEmpty && contrato.veiculos.first.chassi.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ Chassi não foi extraído. Preencha manualmente.'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  void _atualizarClienteExistente(Client cliente, ContratoDTO contrato) {
+    setState(() {
+      _nameController.text = cliente.nome;
+      _cpfCnpjController.text = cliente.cnpjCpf;
+      _contactController.text = cliente.contato;
+      _phoneController.text = BRFormatters.formatarTelefone(cliente.contatoTelefone);
+      _emailController.text = cliente.email;
+      
+      _selectedRamos = List.from(cliente.ramos);  // ✅ Já tem
+      _apolices = List.from(cliente.apolices);
+
+      final existe = _apolices.any((a) => a.numeroApolice == contrato.numeroApolice);
+      if (!existe) {
+        final novaApolice = _criarApolice(contrato);
+        _apolices.add(novaApolice);
+        
+        // 🆕 ADICIONE TAMBÉM:
+        if (!_selectedRamos.contains(contrato.ramo)) {
+          _selectedRamos.add(contrato.ramo);
+        }
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Apólice ${contrato.numeroApolice} adicionada.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    });
+    // 🔥 AVISO DE CHASSI FALTANTE
+    if (contrato.veiculos.isNotEmpty && contrato.veiculos.first.chassi.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ Chassi não foi extraído. Preencha manualmente.'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  // --- Criar nova apólice de novo cliente ou cliente existente ---
+  Apolice _criarApolice(ContratoDTO contrato) {
+    final bens = contrato.veiculos.map((v) {
+      return BemSegurado(
+        id: const Uuid().v4(),
+        tipo: contrato.ramo,
+        descricao: '${v.marca} ${v.modelo} - ${v.ano}',
+        dataCadastro: DateTime.now(),
+        placa: v.placa.isNotEmpty ? v.placa : null,
+        marca: v.marca.isNotEmpty ? v.marca : null,
+        modelo: v.modelo.isNotEmpty ? v.modelo : null,
+        ano: v.ano > 0 ? v.ano : null,
+        anoModelo: v.anoModelo > 0 ? v.anoModelo : null,
+        cor: v.cor.isNotEmpty ? v.cor : null,
+        chassi: v.chassi.isNotEmpty ? v.chassi : null,
+        proprietarioNome: v.proprietarioNome,
+        proprietarioCPF: v.proprietarioCPF,
+      );
+    }).toList();
+
+    return Apolice(
+      id: const Uuid().v4(),
+      ramo: contrato.ramo,
+      seguradora: contrato.seguradora,
+      numeroApolice: contrato.numeroApolice,
+      dataInicio: contrato.dataInicio,
+      dataFim: contrato.dataFim,
+      valorApolice: contrato.valorPremioTotal,
+      valorGatilho: contrato.valorFranquia ?? 0.0,
+      bensSegurados: bens,
+    );
+  }
+
+// --- Diálogo para importar dados do contrato ----
+Future<bool> _mostrarDialogoClienteExistente(Client cliente, ContratoDTO contrato) async {
+  return await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Cliente já existe'),
+      content: Text(
+        'Cliente ${cliente.nome} já está cadastrado.\n'
+        'Nova apólice: ${contrato.numeroApolice} (${contrato.seguradora})\n\n'
+        'Deseja adicionar esta apólice e seus bens ao cliente?'
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Cancelar'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Adicionar', style: TextStyle(color: Colors.blue)),
+        ),
+      ],
+    ),
+  ) ?? false;
+}
+
   Future<String?> _pickAndUploadImage(ImageSource source) async {
     try {
       final picker = ImagePicker();
@@ -565,10 +866,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
     return valor.replaceAll(RegExp(r'[^\d]'), '');
   }
 
-  // ════════════════════════════════════════════════════════════════════════════════
-  // BUSCAR CNPJ
-  // ════════════════════════════════════════════════════════════════════════════════
-
+  // --- BUSCAR CNPJ ---
   Future<void> _buscarCNPJ() async {
     final cnpj = _cpfCnpjController.text.replaceAll(RegExp(r'\D'), '');
 
@@ -809,17 +1107,187 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
 
     Future<String> _extractText(PlatformFile file) async {
       try {
-        // PlatformFile tem bytes na web
         final bytes = file.bytes;
         if (bytes == null) throw Exception('Arquivo vazio');
+
         final pdfDocument = PdfDocument(inputBytes: bytes);
-        final text = PdfTextExtractor(pdfDocument).extractText();
-        return text;
+
+        // 🔥 Tenta extrair com diferentes opções
+        String text = '';
+        try {
+          text = PdfTextExtractor(pdfDocument).extractText();
+        } catch (e) {
+          print('Erro ao extrair texto padrão: $e');
+        }
+
+        pdfDocument.dispose();
+
+        // Se o texto estiver vazio, tenta extrair página por página
+        if (text.isEmpty) {
+          text = await _extractTextPageByPage(bytes);
+        }
+
+        return _normalizePdfText(text);
       } catch (e, stackTrace) {
+        print('❌ Erro ao extrair texto: $e');
         print('📍 Stack trace: $stackTrace');
         return '';
       }
     }
+
+    Future<String> _extractTextPageByPage(Uint8List bytes) async {
+    final doc = PdfDocument(inputBytes: bytes);
+    final buffer = StringBuffer();
+    final extractor = PdfTextExtractor(doc);
+    
+    for (int i = 0; i < doc.pages.count; i++) {
+      try {
+        // ✅ Extrai a página específica usando o extrator com índices
+        final text = extractor.extractText(startPageIndex: i, endPageIndex: i);
+        buffer.writeln('===== Page ${i + 1} =====');
+        buffer.writeln(text);
+      } catch (e) {
+        buffer.writeln('===== Page ${i + 1} (erro ao extrair) =====');
+      }
+    }
+    doc.dispose();
+    return buffer.toString();
+  }
+
+   /// 🔥 VERSÃO CORRIGIDA - Preserva quebras de linha estruturantes
+  String _normalizePdfText(String text) {
+    print('🔧 Normalizando texto PDF...');
+  
+    // 0. Normalizar quebras de linha
+    String normalized = text.replaceAll('\r\n', '\n');
+  
+    // 1. Insere espaço entre letras minúsculas e maiúsculas
+    normalized = normalized.replaceAllMapped(
+      RegExp(r'([a-z])([A-Z])'),
+      (match) => '${match[1]} ${match[2]}',
+    );
+  
+    // 2. Insere espaço entre letras maiúsculas e minúsculas após 2+ maiúsculas
+    normalized = normalized.replaceAllMapped(
+      RegExp(r'([A-Z]{2,})([a-z])'),
+      (match) => '${match[1]} ${match[2]}',
+    );
+  
+    // 3. Insere espaço entre números e letras
+    normalized = normalized.replaceAllMapped(
+      RegExp(r'(\d)([A-Za-z])'),
+      (match) => '${match[1]} ${match[2]}',
+    );
+  
+    // 4. Insere espaço entre letras e números
+    normalized = normalized.replaceAllMapped(
+      RegExp(r'([A-Za-z])(\d)'),
+      (match) => '${match[1]} ${match[2]}',
+    );
+  
+    // 5. Insere espaço após pontuação
+    normalized = normalized.replaceAllMapped(
+      RegExp(r'([:,;])(\d)'),
+      (match) => '${match[1]} ${match[2]}',
+    );
+  
+    // 🔥 CRÍTICO: 5a. Insere quebra de linha ANTES de LABELS IMPORTANTES
+    // Isso reconstrói a estrutura do PDF que foi perdida
+    final labels = [
+      'Proponente',
+      'Nome Social',
+      'Endereço de correspondência',
+      'Telefone',
+      'Celular',
+      'E-mail',
+      'Principal Condutor',
+      'Fabricante',
+      'Veículo',
+      'Combustível',
+      'Lotação',
+      'Placa',
+      'Chassi',
+      'Ano modelo',
+      'Ano',
+      'Cor',
+      'Número da apólice',
+      'Vigência',
+      'Fim de vigência',
+      'Prêmio Líquido',
+      'Indenização',
+      'Tipo de utilização',
+    ];
+  
+    for (var label in labels) {
+      // Insere \n antes do label usando regex case-insensitive
+      normalized = normalized.replaceAll(
+        RegExp('(?<!\\n)\\s+($label\\b)', caseSensitive: false),
+        '\n$label',
+      );
+    }
+  
+    // 6. Remove múltiplos espaços preservando estrutura
+    normalized = normalized.split('\n')
+        .map((linha) {
+          // Remove múltiplos espaços dentro da linha
+          return linha.replaceAll(RegExp(r'\s+'), ' ').trim();
+        })
+        .where((linha) => linha.isNotEmpty) // Remove linhas vazias
+        .join('\n');
+  
+    // 7. Remove espaços antes de pontuação (dentro de linhas)
+    normalized = normalized.replaceAll(RegExp(r'\s([,;:\.!?])'), r'$1');
+  
+    print('✅ Normalização concluída');
+    print('📊 Total de linhas: ${normalized.split('\n').length}');
+  
+    return normalized.trim();
+  }
+
+// ✨ PADRÃO VISUAL ADICIONAR APÓLICE
+  InputDecoration _buildModernInputDecoration(
+    String label, {
+    IconData? icon,
+    String? helperText,
+    TextInputType? keyboardType,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      helperText: helperText,
+      prefixIcon: icon != null ? Icon(icon, color: const Color(0xFF6A1B9A)) : null,
+      filled: true,
+      fillColor: Colors.white,
+      labelStyle: const TextStyle(
+        color: Color(0xFF6A1B9A),
+        fontWeight: FontWeight.w500,
+      ),
+      helperStyle: TextStyle(
+        color: Colors.grey.shade600,
+        fontSize: 12,
+      ),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.grey.shade300, width: 1),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.grey.shade300, width: 1),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFF6A1B9A), width: 2),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.red.shade300, width: 1),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Colors.red, width: 2),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    );
+  }
 
     Future<void> _saveClient() async {
       if (!_formKey.currentState!.validate()) return;
@@ -1102,34 +1570,35 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, result) async {
-        if (didPop) return;
-        final confirm = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Sair sem salvar?'),
-            content: const Text('As alterações não salvas serão perdidas.'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Continuar editando'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Sair', style: TextStyle(color: Colors.red)),
-              ),
-            ],
+@override
+Widget build(BuildContext context) {
+  return WillPopScope(
+    onWillPop: () async {
+      final confirm = await _showExitDialog();
+      return confirm;
+    },
+    child: Scaffold(
+      backgroundColor: const Color(0xFFF8F9FB),
+      appBar: AppBar(
+        title: Text(widget.clientToEdit == null ? 'Novo Cliente' : 'Editar Cliente'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.upload_file),
+            onPressed: _importarContrato,
+            tooltip: 'Importar Contrato (PDF)',
           ),
-        );
-        if (confirm == true && context.mounted) Navigator.of(context).pop();
-      },
-      child: Scaffold(
-        backgroundColor: const Color(0xFFF8F9FB),
-      appBar: AppBar(title: Text(widget.clientToEdit == null ? 'Novo Cliente' : 'Editar Cliente')),
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () async {
+              final confirm = await _showExitDialog();
+              if (confirm && mounted) {
+                Navigator.of(context).pop();
+              }
+            },
+            tooltip: 'Cancelar',
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Form(
@@ -1145,29 +1614,27 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-
-                        // ── Seção 1: Identificação ──────────────────────────────
+                        // ── Seção 1: Identificação (única e completa) ──────────
                         _buildSectionCard(
                           icon: Icons.business,
                           title: 'Identificação',
                           children: [
-
-                            // CNPJ/CPF no topo com botão de busca
+                            // Linha: CNPJ/CPF + Botão Buscar
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Expanded(
                                   child: TextFormField(
                                     controller: _cpfCnpjController,
-                                    decoration: InputDecoration(
-                                      labelText: 'CNPJ / CPF',
-                                      hintText: 'Digite o CNPJ para busca automática',
-                                      prefixIcon: const Icon(Icons.badge_outlined),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    decoration: _buildModernInputDecoration(
+                                      'CNPJ / CPF',
+                                      icon: Icons.badge_outlined,
+                                      helperText: 'Digite o CNPJ para busca automática',
                                     ),
                                     keyboardType: TextInputType.number,
                                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                    validator: (value) => value == null || value.isEmpty ? 'Obrigatório' : null,
+                                    validator: (value) =>
+                                        value == null || value.isEmpty ? 'Obrigatório' : null,
                                   ),
                                 ),
                                 const SizedBox(width: 12),
@@ -1179,12 +1646,17 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                         ? const SizedBox(
                                             width: 18,
                                             height: 18,
-                                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white,
+                                            ),
                                           )
                                         : const Icon(Icons.search),
                                     label: Text(_buscandoCNPJ ? 'Buscando...' : 'Buscar CNPJ'),
                                     style: ElevatedButton.styleFrom(
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
                                       padding: const EdgeInsets.symmetric(horizontal: 16),
                                     ),
                                   ),
@@ -1193,20 +1665,20 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                             ),
                             const SizedBox(height: 16),
 
-                            // Nome (preenchido automaticamente pelo CNPJ)
+                            // Nome / Razão Social
                             TextFormField(
                               controller: _nameController,
-                              decoration: InputDecoration(
-                                labelText: 'Nome / Razão Social',
-                                prefixIcon: const Icon(Icons.person_outline),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              decoration: _buildModernInputDecoration(
+                                'Nome / Razão Social',
+                                icon: Icons.person_outline,
                                 helperText: 'Preenchido automaticamente ao buscar CNPJ',
                               ),
-                              validator: (value) => value == null || value.isEmpty ? 'Obrigatório' : null,
+                              validator: (value) =>
+                                  value == null || value.isEmpty ? 'Obrigatório' : null,
                             ),
                             const SizedBox(height: 16),
 
-                            // Contato / Sócio + Telefone lado a lado
+                            // Linha: Contato + Telefone
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -1214,13 +1686,11 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                   flex: 3,
                                   child: TextFormField(
                                     controller: _contactController,
-                                    decoration: InputDecoration(
-                                      labelText: 'Contato / Sócio',
-                                      prefixIcon: const Icon(Icons.contacts_outlined),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    decoration: _buildModernInputDecoration(
+                                      'Contato / Sócio',
+                                      icon: Icons.contacts_outlined,
                                       helperText: 'Preenchido automaticamente ao buscar CNPJ',
                                     ),
-                                    //validator: (value) => value == null || value.isEmpty ? 'Obrigatório' : null,
                                   ),
                                 ),
                                 const SizedBox(width: 16),
@@ -1228,29 +1698,32 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                   flex: 2,
                                   child: TextFormField(
                                     controller: _phoneController,
-                                    decoration: InputDecoration(
-                                      labelText: 'Telefone',
-                                      prefixIcon: const Icon(Icons.phone_outlined),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    decoration: _buildModernInputDecoration(
+                                      'Telefone',
+                                      icon: Icons.phone_outlined,
                                     ),
                                     keyboardType: TextInputType.phone,
-                                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                    validator: (value) => value == null || value.isEmpty ? 'Obrigatório' : null,
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter.digitsOnly,
+                                      BRFormatters.telefoneFormatter,
+                                    ],
+                                    validator: (value) =>
+                                        value == null || value.isEmpty ? 'Obrigatório' : null,
                                   ),
                                 ),
                               ],
                             ),
                             const SizedBox(height: 16),
 
-                            // Email
+                            // E-mail
                             TextFormField(
                               controller: _emailController,
-                              decoration: InputDecoration(
-                                labelText: 'E-mail',
-                                prefixIcon: const Icon(Icons.email_outlined),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              decoration: _buildModernInputDecoration(
+                                'E-mail',
+                                icon: Icons.email_outlined,
                               ),
-                              validator: (value) => value == null || value.isEmpty ? 'Obrigatório' : null,
+                              validator: (value) =>
+                                  value == null || value.isEmpty ? 'Obrigatório' : null,
                             ),
                           ],
                         ),
@@ -1258,160 +1731,6 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                         const SizedBox(height: 16),
                         _buildApolicesSection(),
                         const SizedBox(height: 16),
-
-                        // ── Seção 3: Veículos ───────────────────────────────────
-                        _buildSectionCard(
-                          icon: Icons.directions_car_outlined,
-                          title: 'Veículos Segurados',
-                          trailing: TextButton.icon(
-                            onPressed: _addVehicleDialog,
-                            icon: const Icon(Icons.add, size: 18),
-                            label: const Text('Adicionar'),
-                          ),
-                          children: [
-                            if (_vehicles.isEmpty)
-                              Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                child: Center(
-                                  child: Text(
-                                    'Nenhum veículo cadastrado',
-                                    style: TextStyle(color: Colors.grey[500], fontSize: 14),
-                                  ),
-                                ),
-                              )
-                            else
-                              Column(
-                                children: _vehicles.asMap().entries.map((entry) {
-                                  final index = entry.key;
-                                  final vehicle = entry.value;
-                                  return Container(
-                                    margin: const EdgeInsets.only(bottom: 10),
-                                    decoration: BoxDecoration(
-                                      border: Border.all(color: Colors.grey.shade200),
-                                      borderRadius: BorderRadius.circular(12),
-                                      color: Colors.white,
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                                      children: [
-
-                                        // Cabeçalho azul com marca/modelo e botões
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                          decoration: BoxDecoration(
-                                            color: Colors.blue.shade50,
-                                            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                                          ),
-                                          child: Row(
-                                            children: [
-                                              const Icon(Icons.directions_car, size: 18, color: Colors.blueAccent),
-                                              const SizedBox(width: 8),
-                                              Expanded(
-                                                child: Text(
-                                                  '${vehicle.marca} ${vehicle.modelo}',
-                                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                                                  overflow: TextOverflow.ellipsis,
-                                                ),
-                                              ),
-                                              IconButton(
-                                                icon: const Icon(Icons.edit_outlined, color: Colors.blue, size: 18),
-                                                padding: EdgeInsets.zero,
-                                                constraints: const BoxConstraints(),
-                                                onPressed: () => _addVehicleDialog(vehicleToEdit: vehicle, indexToUpdate: index),
-                                              ),
-                                              const SizedBox(width: 4),
-                                              IconButton(
-                                                icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
-                                                padding: EdgeInsets.zero,
-                                                constraints: const BoxConstraints(),
-                                                onPressed: () async {
-                                                  final confirmar = await showDialog<bool>(
-                                                    context: context,
-                                                    builder: (ctx) => AlertDialog(
-                                                      title: const Text('Remover veículo'),
-                                                      content: Text('Remover ${vehicle.marca} ${vehicle.modelo}?'),
-                                                      actions: [
-                                                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-                                                        TextButton(
-                                                          onPressed: () => Navigator.pop(ctx, true),
-                                                          child: const Text('Remover', style: TextStyle(color: Colors.red)),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  );
-                                                  if (confirmar == true) setState(() => _vehicles.removeAt(index));
-                                                },
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-
-                                        // Detalhes em grid
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
-                                                children: [
-                                                  if (vehicle.cor.isNotEmpty)
-                                                    Text('Cor: ${vehicle.cor}  •  ', style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
-                                                  Text('${vehicle.ano}/${vehicle.anomodelo}', style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
-                                                  if (vehicle.placa.isNotEmpty)
-                                                    Text('  •  Placa: ${vehicle.placa}', style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
-                                                ],
-                                              ),
-                                              if (vehicle.chassi.isNotEmpty)
-                                                Text('Chassi: ${vehicle.chassi}', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-                                            ],
-                                          ),
-                                        ),
-
-                                        // Fotos (mantém a lógica atual, só o container muda)
-                                        if ((vehicle.fotos?.isNotEmpty ?? false) || (vehicle.fotosUrls?.isNotEmpty ?? false))
-                                          Padding(
-                                            padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-                                            child: Wrap(
-                                              spacing: 6,
-                                              runSpacing: 6,
-                                              children: [
-                                                if (vehicle.fotosUrls != null)
-                                                  ...vehicle.fotosUrls!.map((url) => GestureDetector(
-                                                    onTap: () => _showImageViewer(NetworkImage(url), () {
-                                                      setState(() => vehicle.fotosUrls!.remove(url));
-                                                    }),
-                                                    child: ClipRRect(
-                                                      borderRadius: BorderRadius.circular(6),
-                                                      child: Image.network(url, width: 64, height: 64, fit: BoxFit.cover),
-                                                    ),
-                                                  )),
-                                                if (vehicle.fotos != null)
-                                                  ...vehicle.fotos!.map((photo) => GestureDetector(
-                                                    onTap: () {
-                                                      final ImageProvider img = kIsWeb
-                                                          ? NetworkImage(photo.path)
-                                                          : FileImage(File(photo.path));
-                                                      _showImageViewer(img, () => setState(() => vehicle.fotos!.remove(photo)));
-                                                    },
-                                                    child: ClipRRect(
-                                                      borderRadius: BorderRadius.circular(6),
-                                                      child: kIsWeb
-                                                          ? Image.network(photo.path, width: 64, height: 64, fit: BoxFit.cover)
-                                                          : Image.file(File(photo.path), width: 64, height: 64, fit: BoxFit.cover),
-                                                    ),
-                                                  )),
-                                              ],
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 24),
 
                         // ── Botões de ação ──────────────────────────────────────
                         LayoutBuilder(
@@ -1424,13 +1743,18 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                     onPressed: _isLoading ? null : _saveClient,
                                     style: ElevatedButton.styleFrom(
                                       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
                                     ),
                                     child: _isLoading
                                         ? const Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                                              SizedBox(
+                                                  width: 20,
+                                                  height: 20,
+                                                  child: CircularProgressIndicator(strokeWidth: 2)),
                                               SizedBox(width: 12),
                                               Text('Salvando...'),
                                             ],
@@ -1444,7 +1768,9 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                         backgroundColor: Colors.red,
                                         foregroundColor: Colors.white,
                                         padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
                                       ),
                                       onPressed: _isLoading ? null : _deleteClient,
                                       child: const Text('Excluir Cliente', style: TextStyle(fontSize: 15)),
@@ -1460,13 +1786,18 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                     onPressed: _isLoading ? null : _saveClient,
                                     style: ElevatedButton.styleFrom(
                                       padding: const EdgeInsets.symmetric(vertical: 14),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
                                     ),
                                     child: _isLoading
                                         ? const Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                                              SizedBox(
+                                                  width: 20,
+                                                  height: 20,
+                                                  child: CircularProgressIndicator(strokeWidth: 2)),
                                               SizedBox(width: 12),
                                               Text('Salvando...'),
                                             ],
@@ -1480,7 +1811,9 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                         backgroundColor: Colors.red,
                                         foregroundColor: Colors.white,
                                         padding: const EdgeInsets.symmetric(vertical: 14),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
                                       ),
                                       onPressed: _isLoading ? null : _deleteClient,
                                       child: const Text('Excluir Cliente', style: TextStyle(fontSize: 15)),
@@ -1491,7 +1824,6 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                             }
                           },
                         ),
-
                         const SizedBox(height: 32),
                       ],
                     ),
@@ -1502,29 +1834,9 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
           ),
         ),
       ),
-      )
-    );
-  }
-
-  // HELPER CARD DE VEÍCULOS
-  Widget _vehicleChip(IconData icon, String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.grey.shade300, width: 0.8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: Colors.grey.shade600),
-          const SizedBox(width: 4),
-          Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-        ],
-      ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildApolicesSection() {
     return _buildSectionCard(
@@ -1722,6 +2034,22 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                           _buildDetailChip('${bem.anoModelo}'),
                                       ],
 
+                                      // ═══ Civil Ônibus (RCO) ═══
+                                      if (bem.tipo == 'Civil Ônibus (RCO)') ...[
+                                        if (bem.placa != null && bem.placa!.isNotEmpty)
+                                          _buildDetailChip('${bem.placa}'),
+                                        if (bem.marca != null && bem.marca!.isNotEmpty)
+                                          _buildDetailChip('${bem.marca}'),
+                                        if (bem.modelo != null && bem.modelo!.isNotEmpty)
+                                          _buildDetailChip('${bem.modelo}'),
+                                        if (bem.cor != null && bem.cor!.isNotEmpty)
+                                          _buildDetailChip('${bem.cor}'),
+                                        if (bem.ano != null && bem.ano! > 0)
+                                          _buildDetailChip('${bem.ano}'),
+                                        if (bem.anoModelo != null && bem.anoModelo! > 0)
+                                          _buildDetailChip('${bem.anoModelo}'),
+                                      ],
+
                                       // ═══ FROTA ═══
                                       if (bem.tipo == 'Frota') ...[
                                         if (bem.placaCavalo != null && bem.placaCavalo!.isNotEmpty)
@@ -1746,6 +2074,26 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                           _buildDetailChip('SN: ${bem.numeroSerie}'),
                                         if (bem.fabricante != null && bem.fabricante!.isNotEmpty)
                                           _buildDetailChip('${bem.fabricante}'),
+                                      ],
+
+                                      // ═══ EMPRESARIAL ═══
+                                      if (bem.tipo == 'Empresarial') ...[
+                                        // Prioriza campos diretos
+                                        if (bem.nomeEmpresa != null && bem.nomeEmpresa!.isNotEmpty)
+                                          _buildDetailChip(bem.nomeEmpresa!),
+                                        if (bem.enderecoEmpresa != null && bem.enderecoEmpresa!.isNotEmpty)
+                                          _buildDetailChip(bem.enderecoEmpresa!),
+                                        if (bem.cnpjEmpresa != null && bem.cnpjEmpresa!.isNotEmpty)
+                                          _buildDetailChip('CNPJ: ${bem.cnpjEmpresa}'),
+                                        // Fallback para businessData (bens antigos)
+                                        if ((bem.nomeEmpresa == null || bem.nomeEmpresa!.isEmpty) && bem.businessData != null) ...[
+                                          if (bem.businessData!.nomeEmpresa.isNotEmpty)
+                                            _buildDetailChip(bem.businessData!.nomeEmpresa),
+                                          if (bem.businessData!.enderecoEmpresa.isNotEmpty)
+                                            _buildDetailChip(bem.businessData!.enderecoEmpresa),
+                                          if (bem.businessData!.cnpjEmpresa.isNotEmpty)
+                                            _buildDetailChip('CNPJ: ${bem.businessData!.cnpjEmpresa}'),
+                                        ],
                                       ],
 
                                       // ═══ RESIDENCIAL ═══
@@ -1824,18 +2172,6 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
       return '';
     }
 
-    // Controllers (já estavam fora do StatefulBuilder, ok)
-    //final descricaoCtrl = TextEditingController(text: bemToEdit?.descricao ?? '');
-    //final placaCtrl = TextEditingController(text: bemToEdit?.placa ?? '');
-    //final marcaCtrl = TextEditingController(text: bemToEdit?.marca ?? '');
-    //final modeloCtrl = TextEditingController(text: bemToEdit?.modelo ?? '');
-    //final anoCtrl = TextEditingController(text: bemToEdit?.ano?.toString() ?? '');
-    //final anoModeloCtrl = TextEditingController(text: bemToEdit?.anoModelo?.toString() ?? '');
-    //final corCtrl = TextEditingController(text: bemToEdit?.cor ?? '');
-    //final chassiCtrl = TextEditingController(text: bemToEdit?.chassi ?? '');
-    //final proprietarioNomeCtrl = TextEditingController(text: bemToEdit?.proprietarioNome ?? '');
-    //final proprietarioCPFCtrl = TextEditingController(text: bemToEdit?.proprietarioCPF ?? '');
-
     final numeroDocumentoCtrl = TextEditingController(text: bemToEdit?.numeroDocumento ?? '');
 
     final descricaoCtrl = TextEditingController(text: bemToEdit?.descricao ?? '');
@@ -1875,19 +2211,6 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
       text: getValor(bemToEdit?.proprietarioCPF, null, null)
     );
 
-/*
-    // Frota
-    final tipoCavaloCtrl = TextEditingController(text: bemToEdit?.tipoCavalo ?? '');
-    final placaCavaloCtrl = TextEditingController(text: bemToEdit?.placaCavalo ?? '');
-    final marcaCavaloCtrl = TextEditingController(text: bemToEdit?.marcaCavalo ?? '');
-    final modeloCavaloCtrl = TextEditingController(text: bemToEdit?.modeloCavalo ?? '');
-    final anoCavaloCtrl = TextEditingController(text: bemToEdit?.anoCavalo?.toString() ?? '');
-    final tipoCarretaCtrl = TextEditingController(text: bemToEdit?.tipoCarreta ?? '');
-    final placaCarretaCtrl = TextEditingController(text: bemToEdit?.placaCarreta ?? '');
-    final marcaCarretaCtrl = TextEditingController(text: bemToEdit?.marcaCarreta ?? '');
-    final modeloCarretaCtrl = TextEditingController(text: bemToEdit?.modeloCarreta ?? '');
-    final anoCarretaCtrl = TextEditingController(text: bemToEdit?.anoCarreta?.toString() ?? '');
-*/
     // Equipamento
     final modeloEquipCtrl = TextEditingController(text: bemToEdit?.modeloEquipamento ?? '');
     final numeroSerieCtrl = TextEditingController(text: bemToEdit?.numeroSerie ?? '');
@@ -1902,6 +2225,26 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
     final estadoCtrl = TextEditingController(text: bemToEdit?.estado ?? '');
     final cepCtrl = TextEditingController(text: bemToEdit?.cep ?? '');
 
+    // ✨ NOVO: Empresarial
+    final nomeEmpresaCtrl = TextEditingController(
+      text: bemToEdit?.businessData?.nomeEmpresa ?? bemToEdit?.nomeEmpresa ?? ''
+    );
+    final cnpjEmpresaCtrl = TextEditingController(
+      text: bemToEdit?.businessData?.cnpjEmpresa ?? bemToEdit?.cnpjEmpresa ?? ''
+    );
+    final enderecoEmpresaCtrl = TextEditingController(
+      text: bemToEdit?.businessData?.enderecoEmpresa ?? bemToEdit?.enderecoEmpresa ?? ''
+    );
+    final ramoAtividadeCtrl = TextEditingController(text: bemToEdit?.businessData?.ramoAtividade ?? '');
+    final numeroCnaeCtrl = TextEditingController(text: bemToEdit?.businessData?.numeroCnae ?? '');
+    final anoFundacaoCtrl = TextEditingController(text: bemToEdit?.businessData?.anoFundacao?.toString() ?? '');
+    final descricaoImovelCtrl = TextEditingController(text: bemToEdit?.businessData?.descricaoImovel ?? '');
+    final areaM2Ctrl = TextEditingController(text: bemToEdit?.businessData?.areaM2?.toString() ?? '');
+    final tipoEstruturaCtrl = TextEditingController(text: bemToEdit?.businessData?.tipoEstrutura ?? '');
+    final numeroAndaresCtrl = TextEditingController(text: bemToEdit?.businessData?.numeroAndares?.toString() ?? '');
+    final sistemaSegurancaCtrl = TextEditingController(text: bemToEdit?.businessData?.sistemaSeguranca ?? '');
+    final situacaoImovelCtrl = TextEditingController(text: bemToEdit?.businessData?.situacaoImovel ?? '');
+
     // Vida
     final cpfVidaCtrl = TextEditingController(text: bemToEdit?.cpfVida ?? '');
     DateTime? dataVida = bemToEdit?.dataVida;
@@ -1911,15 +2254,11 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
-        // ════════════════════════════════════════════════════
-        // 🔥 VARIÁVEIS QUE PERSISTEM ENTRE REBUILDS
-        // ════════════════════════════════════════════════════
         List<PlatformFile> crlvArquivos = [];
         bool isUploadingCRLV = false;
         String tipoFrotaSelecionado = tipoFrotaInicial;
         List<PlatformFile> documentosArquivos = [];
         bool isUploadingDocumentos = false;
-
         return StatefulBuilder(
           builder: (context, setModalState) {
             return Dialog(
@@ -1936,7 +2275,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                     children: [
                       // CABEÇALHO
                       Text(
-                        '${bemToEdit == null ? 'Adicionar' : 'Editar'} ${ramo == 'Frota' ? 'Veículos (Cavalo + Carreta)' : ramo}',
+                        '${bemToEdit == null ? 'Adicionar' : 'Editar'} ${ramo == 'Frota' ? 'Veículos (Cavalo OU Carreta)' : ramo}',
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
@@ -1951,19 +2290,8 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              // DESCRIÇÃO
-                              TextField(
-                                controller: descricaoCtrl,
-                                decoration: InputDecoration(
-                                  labelText: 'Descrição/Identificação',
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                                  helperText: 'Ex: Carro branco, Caminhão azul, etc',
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-
                               // ═══ SCAN CRLV ═══
-                              if (ramo == 'Veículo Individual' || ramo == 'Frota') ...[
+                              if (ramo == 'Veículo Individual' || ramo == 'Frota' || ramo == 'Civil Ônibus (RCO)') ...[
                                 const SizedBox(height: 12),
                                 Row(
                                   children: [
@@ -2063,7 +2391,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                               ],
 
                               // ═══ PROPRIETÁRIO ═══
-                              if (ramo == 'Veículo Individual' || ramo == 'Frota') ...[
+                              if (ramo == 'Veículo Individual' || ramo == 'Frota' || ramo == 'Civil Ônibus (RCO)') ...[
                                 const SizedBox(height: 12),
                                 const Text('👤 Proprietário', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                                 const SizedBox(height: 8),
@@ -2090,7 +2418,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                               ],
 
                               // ═══ VEÍCULO INDIVIDUAL ═══ (seus campos, mantidos)
-                              if (ramo == 'Veículo Individual') ...[
+                              if (ramo == 'Veículo Individual' || ramo == 'Civil Ônibus (RCO)') ...[
                                 Row(
                                   children: [
                                     Expanded(
@@ -2122,12 +2450,10 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                       ),
                                     ),
                                     const SizedBox(width: 8),
-                                    Expanded(
-                                      flex: 1,
+                                   Expanded(
                                       child: TextField(
-                                        controller: anoCtrl,
-                                        decoration: InputDecoration(labelText: 'Ano', border: OutlineInputBorder()),
-                                        keyboardType: TextInputType.number,
+                                        controller: corCtrl,
+                                        decoration: InputDecoration(labelText: 'Cor', border: OutlineInputBorder()),
                                       ),
                                     ),
                                   ],
@@ -2136,9 +2462,11 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                 Row(
                                   children: [
                                     Expanded(
+                                      flex: 1,
                                       child: TextField(
-                                        controller: corCtrl,
-                                        decoration: InputDecoration(labelText: 'Cor', border: OutlineInputBorder()),
+                                        controller: anoCtrl,
+                                        decoration: InputDecoration(labelText: 'Ano Fabricação', border: OutlineInputBorder()),
+                                        keyboardType: TextInputType.number,
                                       ),
                                     ),
                                     const SizedBox(width: 8),
@@ -2165,8 +2493,8 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                 const SizedBox(height: 8),
                                 SegmentedButton<String>(
                                   segments: const [
-                                    ButtonSegment(value: 'Cavalo', label: Text('🐴 Cavalo')),
-                                    ButtonSegment(value: 'Carreta', label: Text('🚛 Carreta')),
+                                    ButtonSegment(value: 'Cavalo', label: Text('Cavalo')),
+                                    ButtonSegment(value: 'Carreta', label: Text('Carreta')),
                                   ],
                                   selected: {tipoFrotaSelecionado},
                                   onSelectionChanged: (Set<String> newSelection) {
@@ -2217,12 +2545,10 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                       ),
                                     ),
                                     const SizedBox(width: 8),
-                                    Expanded(
-                                      flex: 1,
+                                      Expanded(
                                       child: TextField(
-                                        controller: anoCtrl,
-                                        decoration: InputDecoration(labelText: 'Ano', border: OutlineInputBorder()),
-                                        keyboardType: TextInputType.number,
+                                        controller: corCtrl,
+                                        decoration: InputDecoration(labelText: 'Cor', border: OutlineInputBorder()),
                                       ),
                                     ),
                                   ],
@@ -2230,12 +2556,14 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                 const SizedBox(height: 12),
                                 Row(
                                   children: [
-                                    Expanded(
+                                  Expanded(
+                                      flex: 1,
                                       child: TextField(
-                                        controller: corCtrl,
-                                        decoration: InputDecoration(labelText: 'Cor', border: OutlineInputBorder()),
+                                        controller: anoCtrl,
+                                        decoration: InputDecoration(labelText: 'Ano Fabricação', border: OutlineInputBorder()),
+                                        keyboardType: TextInputType.number,
                                       ),
-                                    ),
+                                    ),  
                                     const SizedBox(width: 8),
                                     Expanded(
                                       child: TextField(
@@ -2377,6 +2705,158 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                 // 📎 Documentos Anexos
                                 _buildDocumentUploadSection(
                                   titulo: 'Documentos do Imóvel',
+                                  arquivos: documentosArquivos,
+                                  isUploading: isUploadingDocumentos,
+                                  onAdd: () async {
+                                    final result = await FilePicker.platform.pickFiles(
+                                      allowMultiple: true,
+                                      type: FileType.any,
+                                    );
+                                    if (result != null) {
+                                      setModalState(() {
+                                        documentosArquivos.addAll(result.files);
+                                      });
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('📎 ${result.files.length} documento(s) adicionado(s)'),
+                                          backgroundColor: Colors.green,
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  onRemove: (index) {
+                                    setModalState(() {
+                                      documentosArquivos.removeAt(index);
+                                    });
+                                  },
+                                ),
+                              ],
+
+                              // --- EMPRESARIAL ----
+                              if (ramo == 'Empresarial') ...[
+                                const SizedBox(height: 12),
+                                const Text('🏢 Dados da Empresa', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                                const SizedBox(height: 8),
+                                
+                                // NOME E CNPJ
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: nomeEmpresaCtrl,
+                                        decoration: InputDecoration(labelText: 'Nome da Unidade', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                // ENDEREÇO
+                                TextField(
+                                  controller: enderecoEmpresaCtrl,
+                                  decoration: InputDecoration(
+                                    labelText: 'Endereço da Empresa',
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                    prefixIcon: const Icon(Icons.location_on_outlined),
+                                    suffixIcon: IconButton(
+                                      icon: const Icon(Icons.search),
+                                      onPressed: () async {
+                                        final endereco = await _openPlaceSearch();
+                                        if (endereco != null) {
+                                          enderecoEmpresaCtrl.text = endereco;
+                                        }
+                                      },
+                                    ),
+                                  ),
+                                  readOnly: true,
+                                ),
+                                const SizedBox(height: 12),
+                                
+                                // RAMO E ANO FUNDAÇÃO
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: ramoAtividadeCtrl,
+                                        decoration: InputDecoration(labelText: 'Ramo de Atividade', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: anoFundacaoCtrl,
+                                        decoration: InputDecoration(labelText: 'Ano de Fundação', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                                        keyboardType: TextInputType.number,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                // DESCRIÇÃO DO IMÓVEL
+                                TextField(
+                                  controller: descricaoCtrl,
+                                    decoration: InputDecoration(
+                                      labelText: 'Descrição do Bem',
+                                      hintText: 'Ex: Prédio comercial, fábrica, etc',
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                    maxLines: 2,
+                                  ),
+                                const SizedBox(height: 12),
+                                
+                                // ÁREA E TIPO ESTRUTURA
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: areaM2Ctrl,
+                                        decoration: InputDecoration(labelText: 'Área (m²)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                                        keyboardType: TextInputType.number,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: tipoEstruturaCtrl,
+                                        decoration: InputDecoration(labelText: 'Tipo de Estrutura', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                
+                                // ANDARES E SEGURANÇA
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: numeroAndaresCtrl,
+                                        decoration: InputDecoration(labelText: 'Número de Andares', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                                        keyboardType: TextInputType.number,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: sistemaSegurancaCtrl,
+                                        decoration: InputDecoration(labelText: 'Sistema de Segurança', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                
+                                // SITUAÇÃO
+                                TextField(
+                                  controller: situacaoImovelCtrl,
+                                  decoration: InputDecoration(labelText: 'Situação (Próprio/Alugado)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                                ),
+
+                                // ANEXOS
+                                const SizedBox(height: 16),
+
+                                // 📎 Documentos da Empresa
+                                _buildDocumentUploadSection(
+                                  titulo: 'Documentos da Empresa',
                                   arquivos: documentosArquivos,
                                   isUploading: isUploadingDocumentos,
                                   onAdd: () async {
@@ -2629,127 +3109,146 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                           Expanded(
                             child: ElevatedButton(
                               onPressed: isUploadingCRLV || isUploadingDocumentos ? null : () async {
-  if (descricaoCtrl.text.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Informe a descrição')),
-    );
-    return;
-  }
+                                if (descricaoCtrl.text.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Informe a descrição')),
+                                  );
+                                  return;
+                                }
 
-  // 🔥 UPLOAD DE CRLV (se houver)
-  List<String> crlvUrls = [];
-  if (crlvArquivos.isNotEmpty) {
-    setModalState(() => isUploadingCRLV = true);
-    try {
-      crlvUrls = await _firestoreService.uploadCRLV(
-        clientId,
-        apoliceId,
-        const Uuid().v4(), // bemId
-        crlvArquivos,
-      );
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ CRLV(s) enviado(s) com sucesso'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('❌ Erro ao enviar CRLV: $e')),
-      );
-      setModalState(() => isUploadingCRLV = false);
-      return;
-    }
-    setModalState(() => isUploadingCRLV = false);
-  }
+                                // 🔥 UPLOAD DE CRLV (se houver)
+                                List<String> crlvUrls = [];
+                                if (crlvArquivos.isNotEmpty) {
+                                  setModalState(() => isUploadingCRLV = true);
+                                  try {
+                                    crlvUrls = await _firestoreService.uploadCRLV(
+                                      clientId,
+                                      apoliceId,
+                                      const Uuid().v4(), // bemId
+                                      crlvArquivos,
+                                    );
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('✅ CRLV(s) enviado(s) com sucesso'),
+                                        backgroundColor: Colors.green,
+                                      ),
+                                    );
+                                  } catch (e) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('❌ Erro ao enviar CRLV: $e')),
+                                    );
+                                    setModalState(() => isUploadingCRLV = false);
+                                    return;
+                                  }
+                                  setModalState(() => isUploadingCRLV = false);
+                                }
 
-  // 🔥 UPLOAD DE DOCUMENTOS ANEXOS (Residencial/Vida)
-  List<String> documentosUrls = [];
-  if (documentosArquivos.isNotEmpty) {
-    setModalState(() => isUploadingDocumentos = true);
-    try {
-      documentosUrls = await _firestoreService.uploadDocumentosBem(
-        clientId,
-        apoliceId,
-        const Uuid().v4(), // bemId
-        documentosArquivos,
-      );
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Documento(s) anexado(s) com sucesso'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('❌ Erro ao enviar documentos: $e')),
-      );
-      setModalState(() => isUploadingDocumentos = false);
-      return;
-    }
-    setModalState(() => isUploadingDocumentos = false);
-  }
+                                // 🔥 UPLOAD DE DOCUMENTOS ANEXOS (Residencial/Vida)
+                                List<String> documentosUrls = [];
+                                if (documentosArquivos.isNotEmpty) {
+                                  setModalState(() => isUploadingDocumentos = true);
+                                  try {
+                                    documentosUrls = await _firestoreService.uploadDocumentosBem(
+                                      clientId,
+                                      apoliceId,
+                                      const Uuid().v4(), // bemId
+                                      documentosArquivos,
+                                    );
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('✅ Documento(s) anexado(s) com sucesso'),
+                                        backgroundColor: Colors.green,
+                                      ),
+                                    );
+                                  } catch (e) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('❌ Erro ao enviar documentos: $e')),
+                                    );
+                                    setModalState(() => isUploadingDocumentos = false);
+                                    return;
+                                  }
+                                  setModalState(() => isUploadingDocumentos = false);
+                                }
 
-  // 🔥 CRIAÇÃO DO BEM
-  final novoBem = BemSegurado(
-    id: bemToEdit?.id ?? const Uuid().v4(),
-    tipo: ramo,
-    descricao: descricaoCtrl.text,
-    dataCadastro: bemToEdit?.dataCadastro ?? DateTime.now(),
+                                // 🔥 CRIAÇÃO DO BEM
+                                final novoBem = BemSegurado(
+                                  id: bemToEdit?.id ?? const Uuid().v4(),
+                                  tipo: ramo,
+                                  descricao: descricaoCtrl.text,
+                                  dataCadastro: bemToEdit?.dataCadastro ?? DateTime.now(),
 
-    // Veículo (campos comuns)
-    placa: placaCtrl.text.isNotEmpty ? placaCtrl.text : null,
-    marca: marcaCtrl.text.isNotEmpty ? marcaCtrl.text : null,
-    modelo: modeloCtrl.text.isNotEmpty ? modeloCtrl.text : null,
-    ano: int.tryParse(anoCtrl.text),
-    anoModelo: int.tryParse(anoModeloCtrl.text),
-    cor: corCtrl.text.isNotEmpty ? corCtrl.text : null,
-    chassi: chassiCtrl.text.isNotEmpty ? chassiCtrl.text : null,
-    proprietarioNome: proprietarioNomeCtrl.text.isNotEmpty ? proprietarioNomeCtrl.text : null,
-    proprietarioCPF: proprietarioCPFCtrl.text.isNotEmpty ? proprietarioCPFCtrl.text : null,
+                                  // Veículo (campos comuns)
+                                  placa: placaCtrl.text.isNotEmpty ? placaCtrl.text : null,
+                                  marca: marcaCtrl.text.isNotEmpty ? marcaCtrl.text : null,
+                                  modelo: modeloCtrl.text.isNotEmpty ? modeloCtrl.text : null,
+                                  ano: int.tryParse(anoCtrl.text),
+                                  anoModelo: int.tryParse(anoModeloCtrl.text),
+                                  cor: corCtrl.text.isNotEmpty ? corCtrl.text : null,
+                                  chassi: chassiCtrl.text.isNotEmpty ? chassiCtrl.text : null,
+                                  proprietarioNome: proprietarioNomeCtrl.text.isNotEmpty ? proprietarioNomeCtrl.text : null,
+                                  proprietarioCPF: proprietarioCPFCtrl.text.isNotEmpty ? proprietarioCPFCtrl.text : null,
 
-    // Frota (se aplicável)
-    tipoCavalo: (ramo == 'Frota' && tipoFrotaSelecionado == 'Cavalo') ? 'Cavalo Mecânico' : null,
-    placaCavalo: (ramo == 'Frota' && tipoFrotaSelecionado == 'Cavalo') ? placaCtrl.text : null,
-    marcaCavalo: (ramo == 'Frota' && tipoFrotaSelecionado == 'Cavalo') ? marcaCtrl.text : null,
-    modeloCavalo: (ramo == 'Frota' && tipoFrotaSelecionado == 'Cavalo') ? modeloCtrl.text : null,
-    anoCavalo: (ramo == 'Frota' && tipoFrotaSelecionado == 'Cavalo') ? int.tryParse(anoCtrl.text) : null,
-    chassiCavalo: (ramo == 'Frota' && tipoFrotaSelecionado == 'Cavalo') ? chassiCtrl.text : null,
-    tipoCarreta: (ramo == 'Frota' && tipoFrotaSelecionado == 'Carreta') ? 'Carreta' : null,
-    placaCarreta: (ramo == 'Frota' && tipoFrotaSelecionado == 'Carreta') ? placaCtrl.text : null,
-    marcaCarreta: (ramo == 'Frota' && tipoFrotaSelecionado == 'Carreta') ? marcaCtrl.text : null,
-    modeloCarreta: (ramo == 'Frota' && tipoFrotaSelecionado == 'Carreta') ? modeloCtrl.text : null,
-    anoCarreta: (ramo == 'Frota' && tipoFrotaSelecionado == 'Carreta') ? int.tryParse(anoCtrl.text) : null,
-    chassiCarreta: (ramo == 'Frota' && tipoFrotaSelecionado == 'Carreta') ? chassiCtrl.text : null,
+                                  // Frota (se aplicável)
+                                  tipoCavalo: (ramo == 'Frota' && tipoFrotaSelecionado == 'Cavalo') ? 'Cavalo Mecânico' : null,
+                                  placaCavalo: (ramo == 'Frota' && tipoFrotaSelecionado == 'Cavalo') ? placaCtrl.text : null,
+                                  marcaCavalo: (ramo == 'Frota' && tipoFrotaSelecionado == 'Cavalo') ? marcaCtrl.text : null,
+                                  modeloCavalo: (ramo == 'Frota' && tipoFrotaSelecionado == 'Cavalo') ? modeloCtrl.text : null,
+                                  anoCavalo: (ramo == 'Frota' && tipoFrotaSelecionado == 'Cavalo') ? int.tryParse(anoCtrl.text) : null,
+                                  chassiCavalo: (ramo == 'Frota' && tipoFrotaSelecionado == 'Cavalo') ? chassiCtrl.text : null,
+                                  tipoCarreta: (ramo == 'Frota' && tipoFrotaSelecionado == 'Carreta') ? 'Carreta' : null,
+                                  placaCarreta: (ramo == 'Frota' && tipoFrotaSelecionado == 'Carreta') ? placaCtrl.text : null,
+                                  marcaCarreta: (ramo == 'Frota' && tipoFrotaSelecionado == 'Carreta') ? marcaCtrl.text : null,
+                                  modeloCarreta: (ramo == 'Frota' && tipoFrotaSelecionado == 'Carreta') ? modeloCtrl.text : null,
+                                  anoCarreta: (ramo == 'Frota' && tipoFrotaSelecionado == 'Carreta') ? int.tryParse(anoCtrl.text) : null,
+                                  chassiCarreta: (ramo == 'Frota' && tipoFrotaSelecionado == 'Carreta') ? chassiCtrl.text : null,
 
-    // Equipamento
-    modeloEquipamento: modeloEquipCtrl.text.isNotEmpty ? modeloEquipCtrl.text : null,
-    numeroSerie: numeroSerieCtrl.text.isNotEmpty ? numeroSerieCtrl.text : null,
-    fabricante: fabricanteCtrl.text.isNotEmpty ? fabricanteCtrl.text : null,
+                                  // Equipamento
+                                  modeloEquipamento: modeloEquipCtrl.text.isNotEmpty ? modeloEquipCtrl.text : null,
+                                  numeroSerie: numeroSerieCtrl.text.isNotEmpty ? numeroSerieCtrl.text : null,
+                                  fabricante: fabricanteCtrl.text.isNotEmpty ? fabricanteCtrl.text : null,
 
-    // Residencial
-    logradouro: logradouroCtrl.text.isNotEmpty ? logradouroCtrl.text : null,
-    numero: numeroCtrl.text.isNotEmpty ? numeroCtrl.text : null,
-    complemento: complementoCtrl.text.isNotEmpty ? complementoCtrl.text : null,
-    bairro: bairroCtrl.text.isNotEmpty ? bairroCtrl.text : null,
-    cidade: cidadeCtrl.text.isNotEmpty ? cidadeCtrl.text : null,
-    estado: estadoCtrl.text.isNotEmpty ? estadoCtrl.text : null,
-    cep: cepCtrl.text.isNotEmpty ? cepCtrl.text : null,
-    numeroDocumento: numeroDocumentoCtrl.text.isNotEmpty ? numeroDocumentoCtrl.text : null,
+                                  // Residencial
+                                  logradouro: logradouroCtrl.text.isNotEmpty ? logradouroCtrl.text : null,
+                                  numero: numeroCtrl.text.isNotEmpty ? numeroCtrl.text : null,
+                                  complemento: complementoCtrl.text.isNotEmpty ? complementoCtrl.text : null,
+                                  bairro: bairroCtrl.text.isNotEmpty ? bairroCtrl.text : null,
+                                  cidade: cidadeCtrl.text.isNotEmpty ? cidadeCtrl.text : null,
+                                  estado: estadoCtrl.text.isNotEmpty ? estadoCtrl.text : null,
+                                  cep: cepCtrl.text.isNotEmpty ? cepCtrl.text : null,
+                                  numeroDocumento: numeroDocumentoCtrl.text.isNotEmpty ? numeroDocumentoCtrl.text : null,
 
-    // Vida
-    cpfVida: cpfVidaCtrl.text.isNotEmpty ? cpfVidaCtrl.text : null,
-    dataVida: dataVida,
-    capitalSegurado: double.tryParse(capitalCtrl.text.replaceAll('R\$ ', '').replaceAll(',', '.')),
+                                  nomeEmpresa: nomeEmpresaCtrl.text.isNotEmpty ? nomeEmpresaCtrl.text : null,
+                                  cnpjEmpresa: cnpjEmpresaCtrl.text.isNotEmpty ? cnpjEmpresaCtrl.text : null,
+                                  enderecoEmpresa: enderecoEmpresaCtrl.text.isNotEmpty ? enderecoEmpresaCtrl.text : null,
 
-    // URLs dos CRLV (se houver) – você pode salvar em um campo separado se quiser
-    // Vou usar documentosUrls para tudo, mas se quiser separar, crie um campo crlvUrls no modelo
-    documentosUrls: [...crlvUrls, ...documentosUrls].isNotEmpty ? [...crlvUrls, ...documentosUrls] : null,
-  );
+                                  businessData: ramo == 'Empresarial' ? Business(
+                                    id: const Uuid().v4(),
+                                    nomeEmpresa: nomeEmpresaCtrl.text,
+                                    cnpjEmpresa: cnpjEmpresaCtrl.text,
+                                    enderecoEmpresa: enderecoEmpresaCtrl.text,
+                                    ramoAtividade: ramoAtividadeCtrl.text.isNotEmpty ? ramoAtividadeCtrl.text : null,
+                                    numeroCnae: numeroCnaeCtrl.text.isNotEmpty ? numeroCnaeCtrl.text : null,
+                                    anoFundacao: int.tryParse(anoFundacaoCtrl.text),
+                                    descricaoImovel: descricaoImovelCtrl.text.isNotEmpty ? descricaoImovelCtrl.text : null,
+                                    areaM2: double.tryParse(areaM2Ctrl.text),
+                                    tipoEstrutura: tipoEstruturaCtrl.text.isNotEmpty ? tipoEstruturaCtrl.text : null,
+                                    numeroAndares: int.tryParse(numeroAndaresCtrl.text),
+                                    sistemaSeguranca: sistemaSegurancaCtrl.text.isNotEmpty ? sistemaSegurancaCtrl.text : null,
+                                    situacaoImovel: situacaoImovelCtrl.text.isNotEmpty ? situacaoImovelCtrl.text : null,
+                                    anexos: documentosArquivos.map((file) => file.name).toList(),
+                                  ) : null,
 
-  onBemAdded(novoBem);
-  Navigator.pop(ctx);
-},
+                                  // Vida
+                                  cpfVida: cpfVidaCtrl.text.isNotEmpty ? cpfVidaCtrl.text : null,
+                                  dataVida: dataVida,
+                                  capitalSegurado: double.tryParse(capitalCtrl.text.replaceAll('R\$ ', '').replaceAll(',', '.')),
+
+                                  documentosUrls: [...crlvUrls, ...documentosUrls].isNotEmpty ? [...crlvUrls, ...documentosUrls] : null,
+                                );
+
+                                onBemAdded(novoBem);
+                                Navigator.pop(ctx);
+                              },
                               style: ElevatedButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(vertical: 12),
                               ),
@@ -2790,6 +3289,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
     DateTime? dataFim = apoliceToEdit?.dataFim;
     List<BemSegurado> bensSegurados = List.from(apoliceToEdit?.bensSegurados ?? []);
 
+    final dialogContext = context;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -2822,13 +3322,11 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // CONTEÚDO SCROLLÁVEL
                   Expanded(
                     child: SingleChildScrollView(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // ═══ SEÇÃO DE APÓLICE ═══
                           // RAMO
                           DropdownButtonFormField<String>(
                             value: ramoCtrl.text.isEmpty ? null : ramoCtrl.text,
@@ -2845,9 +3343,11 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                             items: [
                               'Frota',
                               'Veículo Individual',
+                              'Civil Ônibus (RCO)',
                               'Transporte',
                               'Máquinas',
                               'Residencial',
+                              'Empresarial',
                               'Vida',
                             ]
                                 .map((r) => DropdownMenuItem(
@@ -2905,93 +3405,107 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                           ),
                           const SizedBox(height: 12),
 
-                          // VALOR DA APÓLICE
-                          TextField(
-                            controller: valorCtrl,
-                            decoration: InputDecoration(
-                              labelText: 'Valor da Apólice',
-                              prefixText: 'R\$ ',
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                              BRFormatters.moedaFormatter,
+                          // VALOR DA APÓLICE E GATILHO (lado a lado)
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: valorCtrl,
+                                  decoration: InputDecoration(
+                                    labelText: 'Valor da Apólice',
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.digitsOnly,
+                                    BRFormatters.moedaFormatter,
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: TextField(
+                                  controller: gatilhoCtrl,
+                                  decoration: InputDecoration(
+                                    labelText: 'Valor do Gatilho',
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.digitsOnly,
+                                    BRFormatters.moedaFormatter,
+                                  ],
+                                ),
+                              ),
                             ],
                           ),
                           const SizedBox(height: 12),
-
-                          // VALOR DO GATILHO
-                          TextField(
-                            controller: gatilhoCtrl,
-                            decoration: InputDecoration(
-                              labelText: 'Valor do Gatilho',
-                              prefixText: 'R\$ ',
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                              BRFormatters.moedaFormatter,
+                          // DATA DE INÍCIO E DATA DE FIM (lado a lado)
+                          Row(
+                            children: [
+                              Expanded(
+                                child: ListTile(
+                                  title: Text(
+                                    dataInicio == null
+                                        ? 'Data de Início'
+                                        : DateFormat('dd/MM/yyyy').format(dataInicio!),
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: dataInicio == null ? Colors.grey : Colors.black,
+                                      fontWeight: dataInicio == null ? FontWeight.normal : FontWeight.w600,
+                                    ),
+                                  ),
+                                  trailing: const Icon(Icons.calendar_today, size: 20),
+                                  tileColor: Colors.grey.shade50,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  onTap: () async {
+                                    final picked = await showDatePicker(
+                                      context: dialogContext,
+                                      initialDate: dataInicio ?? DateTime.now(),
+                                      firstDate: DateTime(2020),
+                                      lastDate: DateTime(2100),
+                                      locale: const Locale('pt', 'BR'), // ✨ PORTUGUÊS
+                                    );
+                                    if (picked != null) {
+                                      setModalState(() {
+                                        dataInicio = picked;
+                                        // ✨ AUTO-PREENCHER DATA FIM COM +1 ANO
+                                        dataFim = picked.add(const Duration(days: 365));
+                                      });
+                                    }
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: ListTile(
+                                  title: Text(
+                                    dataFim == null
+                                        ? 'Data de Fim'
+                                        : DateFormat('dd/MM/yyyy').format(dataFim!),
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: dataFim == null ? Colors.grey : Colors.black,
+                                      fontWeight: dataFim == null ? FontWeight.normal : FontWeight.w600,
+                                    ),
+                                  ),
+                                  trailing: const Icon(Icons.calendar_today, size: 20),
+                                  tileColor: Colors.grey.shade50,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  onTap: () async {
+                                    final picked = await showDatePicker(
+                                      context: dialogContext,
+                                      initialDate: dataFim ?? DateTime.now(),
+                                      firstDate: DateTime(2020),
+                                      lastDate: DateTime(2100),
+                                      locale: const Locale('pt', 'BR'), // ✨ PORTUGUÊS
+                                    );
+                                    if (picked != null) {
+                                      setModalState(() => dataFim = picked);
+                                    }
+                                  },
+                                ),
+                              ),
                             ],
-                          ),
-                          const SizedBox(height: 12),
-
-                          // DATA DE INÍCIO
-                          ListTile(
-                            title: Text(
-                              dataInicio == null
-                                  ? 'Data de Início'
-                                  : DateFormat('dd/MM/yyyy').format(dataInicio!),
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: dataInicio == null ? Colors.grey : Colors.black,
-                                fontWeight: dataInicio == null ? FontWeight.normal : FontWeight.w600,
-                              ),
-                            ),
-                            trailing: const Icon(Icons.calendar_today, size: 20),
-                            tileColor: Colors.grey.shade50,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            onTap: () async {
-                              final picked = await showDatePicker(
-                                context: context,
-                                initialDate: dataInicio ?? DateTime.now(),
-                                firstDate: DateTime(2020),
-                                lastDate: DateTime(2100),
-                              );
-                              if (picked != null) {
-                                setModalState(() => dataInicio = picked);
-                              }
-                            },
-                          ),
-                          const SizedBox(height: 12),
-
-                          // DATA DE FIM
-                          ListTile(
-                            title: Text(
-                              dataFim == null
-                                  ? 'Data de Fim'
-                                  : DateFormat('dd/MM/yyyy').format(dataFim!),
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: dataFim == null ? Colors.grey : Colors.black,
-                                fontWeight: dataFim == null ? FontWeight.normal : FontWeight.w600,
-                              ),
-                            ),
-                            trailing: const Icon(Icons.calendar_today, size: 20),
-                            tileColor: Colors.grey.shade50,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            onTap: () async {
-                              final picked = await showDatePicker(
-                                context: context,
-                                initialDate: dataFim ?? DateTime.now(),
-                                firstDate: DateTime(2020),
-                                lastDate: DateTime(2100),
-                              );
-                              if (picked != null) {
-                                setModalState(() => dataFim = picked);
-                              }
-                            },
-                          ),
-
+                          ),         
                           const SizedBox(height: 24),
                           const Divider(),
                           const SizedBox(height: 12),
@@ -3044,12 +3558,13 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                     color: Colors.grey.shade50,
                                   ),
                                   child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Expanded(
                                         child: Column(
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
-                                            // Detalhes do bem
+                                            // Detalhes do bem (já existentes)
                                             Wrap(
                                               spacing: 6,
                                               runSpacing: 4,
@@ -3070,10 +3585,26 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                                     _buildDetailChip('${bem.anoModelo}'),
                                                 ],
 
+                                                // ═══ CIVIL ÔNIBUS (RCO) ═══
+                                                if (bem.tipo == 'Civil Ônibus (RCO)') ...[
+                                                  if (bem.placa != null && bem.placa!.isNotEmpty)
+                                                    _buildDetailChip('${bem.placa}'),
+                                                  if (bem.marca != null && bem.marca!.isNotEmpty)
+                                                    _buildDetailChip('${bem.marca}'),
+                                                  if (bem.modelo != null && bem.modelo!.isNotEmpty)
+                                                    _buildDetailChip('${bem.modelo}'),
+                                                  if (bem.cor != null && bem.cor!.isNotEmpty)
+                                                    _buildDetailChip('${bem.cor}'),
+                                                  if (bem.ano != null && bem.ano! > 0)
+                                                    _buildDetailChip('${bem.ano}'),
+                                                  if (bem.anoModelo != null && bem.anoModelo! > 0)
+                                                    _buildDetailChip('${bem.anoModelo}'),
+                                                ],
+
                                                 // ═══ FROTA ═══
                                                 if (bem.tipo == 'Frota') ...[
                                                   if (bem.placaCavalo != null && bem.placaCavalo!.isNotEmpty)
-                                                    _buildDetailChip('🐴 ${bem.placaCavalo}'),
+                                                    _buildDetailChip('${bem.placaCavalo}'),
                                                   if (bem.marcaCavalo != null && bem.marcaCavalo!.isNotEmpty)
                                                     _buildDetailChip('${bem.marcaCavalo}'),
                                                   if (bem.modeloCavalo != null && bem.modeloCavalo!.isNotEmpty)
@@ -3096,6 +3627,26 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                                     _buildDetailChip('${bem.fabricante}'),
                                                 ],
 
+                                                // ═══ EMPRESARIAL ═══
+                                                if (bem.tipo == 'Empresarial') ...[
+                                                  // Prioriza campos diretos
+                                                  if (bem.nomeEmpresa != null && bem.nomeEmpresa!.isNotEmpty)
+                                                    _buildDetailChip(bem.nomeEmpresa!),
+                                                  if (bem.enderecoEmpresa != null && bem.enderecoEmpresa!.isNotEmpty)
+                                                    _buildDetailChip(bem.enderecoEmpresa!),
+                                                  if (bem.cnpjEmpresa != null && bem.cnpjEmpresa!.isNotEmpty)
+                                                    _buildDetailChip('CNPJ: ${bem.cnpjEmpresa}'),
+                                                  // Fallback para businessData (bens antigos)
+                                                  if ((bem.nomeEmpresa == null || bem.nomeEmpresa!.isEmpty) && bem.businessData != null) ...[
+                                                    if (bem.businessData!.nomeEmpresa.isNotEmpty)
+                                                      _buildDetailChip(bem.businessData!.nomeEmpresa),
+                                                    if (bem.businessData!.enderecoEmpresa.isNotEmpty)
+                                                      _buildDetailChip(bem.businessData!.enderecoEmpresa),
+                                                    if (bem.businessData!.cnpjEmpresa.isNotEmpty)
+                                                      _buildDetailChip('CNPJ: ${bem.businessData!.cnpjEmpresa}'),
+                                                  ],
+                                                ],
+
                                                 // ═══ RESIDENCIAL ═══
                                                 if (bem.tipo == 'Residencial') ...[
                                                   if (bem.logradouro != null && bem.logradouro!.isNotEmpty)
@@ -3104,12 +3655,18 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                                     _buildDetailChip('${bem.bairro}'),
                                                   if (bem.cidade != null && bem.cidade!.isNotEmpty)
                                                     _buildDetailChip('${bem.cidade}'),
+                                                  if (bem.numeroDocumento != null && bem.numeroDocumento!.isNotEmpty)
+                                                    _buildDetailChip('Doc: ${bem.numeroDocumento}'),
                                                 ],
 
                                                 // ═══ VIDA ═══
                                                 if (bem.tipo == 'Vida') ...[
+                                                  if (bem.descricao != null && bem.descricao.isNotEmpty)
+                                                    _buildDetailChip('${bem.descricao}'),
                                                   if (bem.cpfVida != null && bem.cpfVida!.isNotEmpty)
                                                     _buildDetailChip('CPF: ${bem.cpfVida}'),
+                                                  if (bem.dataVida != null)
+                                                    _buildDetailChip('Nasc: ${DateFormat('dd/MM/yyyy').format(bem.dataVida!)}'),
                                                   if (bem.capitalSegurado != null && bem.capitalSegurado! > 0)
                                                     _buildDetailChip('Capital: ${BRFormatters.formatarMoeda(bem.capitalSegurado!)}'),
                                                 ],
@@ -3120,15 +3677,100 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                                               bem.tipo,
                                               style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
                                             ),
+
+                                            // 🔥 NOVO: EXIBIR DOCUMENTOS ANEXADOS (CRLV, etc.)
+                                            if (bem.documentosUrls != null && bem.documentosUrls!.isNotEmpty) ...[
+                                              const SizedBox(height: 6),
+                                              Row(
+                                                children: [
+                                                  Icon(Icons.attach_file, size: 14, color: Colors.grey),
+                                                  const SizedBox(width: 4),
+                                                  Text('Documentos:',
+                                                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.grey)),
+                                                  const Spacer(),
+                                                  Text('${bem.documentosUrls!.length} arquivo(s)',
+                                                      style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Wrap(
+                                                spacing: 4,
+                                                runSpacing: 4,
+                                                children: bem.documentosUrls!.map((url) {
+                                                  // Determina ícone baseado na extensão
+                                                  IconData icon = Icons.insert_drive_file;
+                                                  Color iconColor = Colors.grey.shade700;
+                                                  final ext = url.split('.').last.toLowerCase();
+                                                  if (ext == 'pdf') {
+                                                    icon = Icons.picture_as_pdf;
+                                                    iconColor = Colors.red;
+                                                  } else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].contains(ext)) {
+                                                    icon = Icons.image;
+                                                    iconColor = Colors.orange;
+                                                  } else if (['doc', 'docx'].contains(ext)) {
+                                                    icon = Icons.description;
+                                                    iconColor = Colors.blue;
+                                                  } else if (['xls', 'xlsx'].contains(ext)) {
+                                                    icon = Icons.table_chart;
+                                                    iconColor = Colors.green;
+                                                  }
+
+                                                  return GestureDetector(
+                                                    onTap: () async {
+                                                      final Uri uri = Uri.parse(url);
+                                                      try {
+                                                        if (await canLaunchUrl(uri)) {
+                                                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                                        } else {
+                                                          await Clipboard.setData(ClipboardData(text: url));
+                                                          ScaffoldMessenger.of(context).showSnackBar(
+                                                            const SnackBar(
+                                                              content: Text('Link copiado para a área de transferência'),
+                                                              backgroundColor: Colors.blue,
+                                                            ),
+                                                          );
+                                                        }
+                                                      } catch (e) {
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          SnackBar(
+                                                            content: Text('Erro ao abrir: $e'),
+                                                            backgroundColor: Colors.red,
+                                                          ),
+                                                        );
+                                                      }
+                                                    },
+                                                    child: Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.grey.shade200,
+                                                        borderRadius: BorderRadius.circular(12),
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        children: [
+                                                          Icon(icon, size: 12, color: iconColor),
+                                                          const SizedBox(width: 2),
+                                                          Text(
+                                                            url.split('/').last.split('?').first.substring(0, 10) + '…',
+                                                            style: TextStyle(fontSize: 9, color: Colors.grey.shade700),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  );
+                                                }).toList(),
+                                              ),
+                                            ],
                                           ],
                                         ),
                                       ),
+                                      // Botões de editar/excluir (mantidos)
                                       IconButton(
                                         icon: const Icon(Icons.edit, size: 16, color: Colors.blue),
                                         onPressed: () {
                                           _addBemDialog(
                                             ramo: ramoCtrl.text,
-                                            clientId: clientId, 
+                                            clientId: clientId,
                                             apoliceId: apoliceToEdit?.id ?? const Uuid().v4(),
                                             bemToEdit: bem,
                                             onBemAdded: (bemEditado) {
@@ -3222,13 +3864,14 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
   }
 
   // ── Helper: card de seção com título e ícone ──────────────────────────────
-  Widget _buildSectionCard({
+Widget _buildSectionCard({
     required IconData icon,
     required String title,
     required List<Widget> children,
     Widget? trailing,
   }) {
     return Card(
+      color: Colors.white,  // ✨ ADICIONE ESTA LINHA
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
@@ -3261,23 +3904,27 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
   String _getEmojiRamo(String ramo) {
     const ramoEmojis = {
       'Veículo Individual': '🚗',
-      'Frota': '🚚',
+      'Frota': '🚛',
+      'Civil Ônibus (RCO)': '🚌',
       'Transporte': '📦',
       'Máquinas': '⚙️',
       'Residencial': '🏠',
       'Vida': '💓',
+      'Empresarial': '🏢',
     };
     return ramoEmojis[ramo] ?? '📋';
   }
 
   Color _getCorRamo(String ramo) {
     const ramoColors = {
-      'Veículo Individual': Color(0xFFFFB74D),  // Amarelo
-      'Frota': Color(0xFF64B5F6),                // Azul
-      'Transporte': Color(0xFF81C784),           // Verde
-      'Máquinas': Color(0xFFA1887F),             // Marrom
-      'Residencial': Color(0xFFE57373),          // Vermelho
-      'Vida': Color(0xFFBA68C8),                 // Roxo
+      'Veículo Individual': Color(0xFFFFB74D),
+      'Frota': Color(0xFF64B5F6),
+      'Civil Ônibus (RCO)': Color(0xFF00838F),
+      'Transporte': Color(0xFF81C784),
+      'Máquinas': Color(0xFFA1887F),
+      'Residencial': Color(0xFFE57373),
+      'Empresarial': Color(0xFF424242),
+      'Vida': Color(0xFFBA68C8),
     };
     return ramoColors[ramo] ?? Colors.grey;
   }

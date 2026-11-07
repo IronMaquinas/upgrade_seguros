@@ -20,6 +20,8 @@ import '../widgets/dashboard_content.dart';
 import '../widgets/option_picker_dialog.dart';
 import '../services/firestore_service.dart';
 import '../models/client_model.dart';
+import '../screens/claim_list_screen.dart';
+import '../screens/assist_list_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -37,6 +39,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _ramoSelecionado;
   String _ramoSelecionadoLabel = 'Novo Sinistro';
 
+  Map<String, dynamic>? _claimListParams;
+  Map<String, dynamic>? _assistListParams;
+
   // ── Definição dos grupos e campos ─────────────────────────────────────────
   List<_Group> _groups = [];
 
@@ -44,36 +49,69 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _checkClientsNearExpiry();
+  }
 
-    _widgetOptions = [
-      DashboardContent(
-        onNavigate: (screen) {
-          setState(() {
-            // Detecta o slot correto pelo tipo da tela
-            if (screen is AssistListScreen || screen is AssistDetailScreen) {
-              _selectedIndex = 2;
-              _widgetOptions[2] = screen;
-            } else {
-              _selectedIndex = 1;
-              _widgetOptions[1] = screen;
-            }
-          });
-        },
-      ),
-      ClaimListScreen(),        // 1: Sinistros
-      AssistListScreen(),       // 2: Assistências (NOVO)
-      ClientListScreen(
-        onNavigate: (screen) {
-          setState(() {
-            _selectedIndex = 3;
-            _widgetOptions[3] = screen;
-          });
-        },
-      ),       // 3: Clientes
-      TaskListScreen(),         // 4: Tarefas
-      ReportsScreen(),          // 5: Relatórios
-      const SettingsScreen(),   // 6: Configurações
-    ];
+  void _onNavigateFromDashboard(Widget screen) {
+    if (screen is ClaimListScreen) {
+      _claimListParams = {
+        'initialRamoFilter': screen.initialRamoFilter,
+        'initialStatusFilter': screen.initialStatusFilter,
+        'initialSlaFilter': screen.initialSlaFilter,
+        //'hideConcluido': screen.hideConcluido,
+      };
+      setState(() {
+        _selectedIndex = 1;
+      });
+    } else if (screen is AssistListScreen) {
+      _assistListParams = {
+        'initialStatusFilter': screen.initialStatusFilter,
+      };
+      setState(() {
+        _selectedIndex = 2;
+      });
+    } else {
+      // Para detalhes (ClaimDetailScreen, AssistDetailScreen), use push
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => screen),
+      );
+    }
+  }
+
+  Widget _buildCurrentScreen() {
+      switch (_selectedIndex) {
+    case 0:
+      return DashboardContent(
+        onNavigate: _onNavigateFromDashboard,
+      );
+    case 1:
+      return ClaimListScreen(
+        key: ValueKey('claim_${DateTime.now().millisecondsSinceEpoch}'),
+        initialRamoFilter: _claimListParams?['initialRamoFilter'],
+        initialStatusFilter: _claimListParams?['initialStatusFilter'],
+        initialSlaFilter: _claimListParams?['initialSlaFilter'] ?? 'Todos',
+      );
+    case 2:
+      return AssistListScreen(
+        key: ValueKey('assist_${DateTime.now().millisecondsSinceEpoch}'),
+        initialStatusFilter: _assistListParams?['initialStatusFilter'],
+      );
+      case 3:
+        return ClientListScreen(
+          onNavigate: (screen) {
+            setState(() {
+              _selectedIndex = 3;
+            });
+          },
+        );
+      case 4:
+        return TaskListScreen();
+      case 5:
+        return ReportsScreen();
+      case 6:
+        return const SettingsScreen();
+      default:
+        return const SizedBox();
+    }
   }
 
   Future<void> _checkClientsNearExpiry() async {
@@ -96,12 +134,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  void _onItemTapped(int index) => setState(() => _selectedIndex = index);
+  void _onItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
+      // Resetar parâmetros se não for a tela correspondente
+      if (index != 1) _claimListParams = null;
+      if (index != 2) _assistListParams = null;
+    });
+  }
 
   String _ramoToLabel(String ramo) {
     switch (ramo) {
       case 'Frota':              return 'Veículo / Frota';
       case 'Veículo Individual': return 'Veículo Individual';
+      case 'Civil Ônibus (RCO)': return 'Veículo Individual';
       case 'Transporte':         return 'Transporte';
       case 'Máquinas':           return 'Máquinas e Equipamentos';
       case 'Residencial':        return 'Residencial';
@@ -112,12 +158,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _showRamoPickerGlobal() async {
     const ramos = [
-      _RamoOption(label: 'Veículo / Frota',    icon: Icons.directions_car_outlined,   ramo: 'Frota',              color: Color(0xFF1565C0)),
-      _RamoOption(label: 'Veículo Individual', icon: Icons.car_rental_outlined,       ramo: 'Veículo Individual', color: Color(0xFF1565C0)),
-      _RamoOption(label: 'Transporte',         icon: Icons.local_shipping_outlined,   ramo: 'Transporte',         color: Color(0xFF2E7D32)),
-      _RamoOption(label: 'Máquinas e Equipamentos', icon: Icons.settings_outlined,    ramo: 'Máquinas', color: Color(0xFFFF6F00)),
-      _RamoOption(label: 'Residencial',        icon: Icons.home_outlined,             ramo: 'Residencial',        color: Color(0xFFBF360C)),
-      _RamoOption(label: 'Vidas',              icon: Icons.favorite_outline,          ramo: 'Vidas',              color: Color(0xFF6A1B9A)),
+      _RamoOption(label: 'Veículo / Frota',          icon: Icons.directions_car_outlined,  ramo: 'Frota',               color: Color(0xFF1565C0)),
+      _RamoOption(label: 'Veículo Individual',       icon: Icons.car_rental_outlined,      ramo: 'Veículo Individual',  color: Color(0xFFD4A017)),
+      _RamoOption(label: 'Civil Ônibus (RCO)',       icon: Icons.directions_bus_outlined,  ramo: 'Civil Ônibus (RCO)',  color: Color(0xFF00838F)),
+      _RamoOption(label: 'Transporte',               icon: Icons.local_shipping_outlined,  ramo: 'Transporte',          color: Color(0xFF2E7D32)),
+      _RamoOption(label: 'Máquinas e Equipamentos',  icon: Icons.settings_outlined,        ramo: 'Máquinas',            color: Color(0xFFFF6F00)),
+      _RamoOption(label: 'Residencial',              icon: Icons.home_outlined,            ramo: 'Residencial',         color: Color(0xFFBF360C)),
+      _RamoOption(label: 'Empresarial',              icon: Icons.business_outlined,        ramo: 'Empresarial',         color: Color(0xFF424242)),
+      _RamoOption(label: 'Vidas',                    icon: Icons.favorite_outline,         ramo: 'Vidas',               color: Color(0xFF6A1B9A)),
     ];
 
     final ramo = await showDialog<String>(
@@ -190,13 +238,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     )),
               const SizedBox(height: 16),
               // Botão Voltar + Cancelar
-                              Row(
+                Row(
                   children: [
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () {
-                          Navigator.of(context).pop(); // Fecha Modal 2b
-                          _showNewItemDialog(); // Reabre Modal 1
+                          Navigator.of(context).pop();
+                          _showNewItemDialog();
                         },
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 12),
@@ -209,7 +257,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: OutlinedButton(
                         onPressed: () {
                           Navigator.of(context).pop();
-                          Navigator.of(context).pop(); // Fecha Modal 2b + volta ao dashboard
+                          Navigator.of(context).pop();
                         },
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 12),
@@ -390,7 +438,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Navigator.pop(ctx);
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => const SpreadsheetAssistScreen(),
+                    builder: (_) => const SpreadsheetAssistScreen(tipoAssistencia: 'veiculo'),
                   ),
                 );
               },
@@ -403,29 +451,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // MODAL COM NOVO REGISTRO + CANCELAR
   Widget _buildNewItemDialog() {
-    const options = [
-  PickerOption(
-    label: 'Sinistro Completo',
-    value: 'sinistro_completo',
-    icon: Icons.assignment_outlined,
-    color: Color(0xFF1565C0),
-    description: 'Registro completo com ramo e dados',
-  ),
-  PickerOption(
-    label: 'Sinistro Resumido',
-    value: 'sinistro_resumido',
-    icon: Icons.flash_on_rounded,
-    color: Color.fromARGB(255, 233, 102, 108),
-    description: 'Abertura rápida - preencha depois',
-  ),
-  PickerOption(
-    label: 'Assistência',
-    value: 'assistencia',
-    icon: Icons.emergency_outlined,
-    color: Color(0xFF2E7D32),
-    description: 'Novo atendimento assistencial',
-  ),
-];
+      const options = [
+    PickerOption(
+      label: 'Sinistro Completo',
+      value: 'sinistro_completo',
+      icon: Icons.assignment_outlined,
+      color: Color(0xFF1565C0),
+      description: 'Registro completo com ramo e dados',
+    ),
+    PickerOption(
+      label: 'Sinistro Resumido',
+      value: 'sinistro_resumido',
+      icon: Icons.flash_on_rounded,
+      color: Color.fromARGB(255, 233, 102, 108),
+      description: 'Abertura rápida - preencha depois',
+    ),
+    PickerOption(
+      label: 'Assistência',
+      value: 'assistencia',
+      icon: Icons.emergency_outlined,
+      color: Color(0xFF2E7D32),
+      description: 'Novo atendimento assistencial',
+    ),
+  ];
 
     return Dialog(
       backgroundColor: Colors.white,
@@ -706,11 +754,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     if (tipo == 'veiculo' && mounted) {
       Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => const SpreadsheetAssistScreen(),
+        builder: (_) => const SpreadsheetAssistScreen(tipoAssistencia: 'veiculo'),
       ));
     } else if (tipo == 'residencial' && mounted) {
       Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => const SpreadsheetAssistResidencialScreen(),
+        builder: (_) => const SpreadsheetAssistScreen(tipoAssistencia: 'residencial'),
       ));
     }
   }
@@ -894,10 +942,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ],
                 ),
                 Container(width: 0.5, color: Colors.grey.shade200),
-                Expanded(child: _widgetOptions[_selectedIndex]),
+                Expanded(child: _buildCurrentScreen()),
               ],
             )
-          : _widgetOptions[_selectedIndex],
+          : _buildCurrentScreen(),
 
       bottomNavigationBar: isMobileDevice
           ? BottomNavigationBar(

@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:upgrade_seguros/models/business_model.dart';
 
 class BemSegurado {
   String id;
@@ -44,6 +45,12 @@ class BemSegurado {
   String? modeloEquipamento;
   String? numeroSerie;
   String? fabricante;
+
+  // Empresarial
+  String? nomeEmpresa;
+  String? cnpjEmpresa;
+  String? enderecoEmpresa;
+  final Business? businessData;
 
   // Endereço (Residencial)
   String? logradouro;
@@ -101,6 +108,13 @@ class BemSegurado {
     this.modeloEquipamento,
     this.numeroSerie,
     this.fabricante,
+
+    // Empresarial
+    this.nomeEmpresa,
+    this.cnpjEmpresa,
+    this.enderecoEmpresa,
+    this.businessData,
+
     // Endereço
     this.logradouro,
     this.numero,
@@ -159,6 +173,13 @@ class BemSegurado {
       'modelo_equipamento': modeloEquipamento,
       'numero_serie': numeroSerie,
       'fabricante': fabricante,
+
+      // Empresarial
+      'nome_empresa': nomeEmpresa,
+      'endereco_empresa': enderecoEmpresa,
+      'cnpj_empresa': cnpjEmpresa,
+      'business_data': businessData?.toMap(),
+
       // Endereço
       'logradouro': logradouro,
       'numero': numero,
@@ -218,6 +239,15 @@ class BemSegurado {
       modeloEquipamento: data['modelo_equipamento'],
       numeroSerie: data['numero_serie'],
       fabricante: data['fabricante'],
+
+      // Empresarial
+      nomeEmpresa: data['nome_empresa'] ?? '',
+      enderecoEmpresa: data['endereco_empresa'],
+      cnpjEmpresa: data['cnpj_empresa'],
+      businessData: data['business_data'] != null 
+          ? Business.fromMap(data['business_data']) 
+          : null,
+
       // Endereço
       logradouro: data['logradouro'],
       numero: data['numero'],

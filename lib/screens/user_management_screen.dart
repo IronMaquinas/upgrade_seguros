@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:upgrade_seguros/services/employee_service.dart';
 import 'package:upgrade_seguros/models/employee_model.dart';
+import 'package:upgrade_seguros/utils/formatters.dart';
 
 // ─── Paleta (igual Seguradoras) ───────────────────────────────────────────
 const _kBlue  = Color(0xFF1565C0);
@@ -432,14 +433,7 @@ class _UserFormState extends State<_UserForm> {
  
     try {
       if (widget._isEdit) {
-        print('DEBUG: Editando usuário ${widget.employee!.id}');
-        print('DEBUG: Nome: ${_nomeCtrl.text}');
-        print('DEBUG: Email: ${_emailCtrl.text}');
-        print('DEBUG: Matrícula: ${_cargoCtrl.text}');
-        print('DEBUG: Telefone: ${_telefoneCtrl.text}');
-        print('DEBUG: Perfil: $_perfil');
-        print('DEBUG: Ativo: $_ativo');
-        
+      
         await widget.service.updateUser(
           widget.employee!.id,
           nome: _nomeCtrl.text,
@@ -465,6 +459,7 @@ class _UserFormState extends State<_UserForm> {
           email: _emailCtrl.text,
           matricula: _cargoCtrl.text,
           role: _perfil,
+          telefone: BRFormatters.parseFromTelefone(_telefoneCtrl.text), 
         );
         print('DEBUG: Usuário criado com sucesso');
       }
@@ -607,10 +602,15 @@ class _UserFormState extends State<_UserForm> {
             const SizedBox(height: 12),
 
             // ── Telefone ──────────────────────────────────────────────────
-            TextFormField(
+            TextField(
               controller: _telefoneCtrl,
-              keyboardType: TextInputType.phone,
-              decoration: _dec('Telefone', icon: Icons.phone_outlined),
+              inputFormatters: [BRFormatters.telefoneFormatter],  // ← ADICIONE ISTO
+              decoration: InputDecoration(
+                labelText: 'Telefone',
+                hintText: '(11) 99999-9999',
+                prefixIcon: const Icon(Icons.phone),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              ),
             ),
 
             const SizedBox(height: 14),

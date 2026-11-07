@@ -64,6 +64,7 @@ flutter:
   uses-material-design: true
   assets:
       - lib/assets/logo_upgrade.png
+      - assets/fonts/NotoColorEmoji.ttf
 
   # assets:
   #  - assets/logo_cliente.png

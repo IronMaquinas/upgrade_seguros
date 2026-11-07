@@ -31,8 +31,9 @@ class _NotesWidgetState extends State<NotesWidget> {
     setState(() => _isAdding = true);
 
     try {
-      final userEmail = AuthService().getUserEmail();
-      await FirestoreService().addAnotacao(widget.claimId, texto, userEmail);
+      final authService = AuthService();
+      final nomeUsuario = await authService.getUserName(); // ✨ PEGA NOME!
+      await FirestoreService().addAnotacao(widget.claimId, texto, nomeUsuario); // ✨ PASSA NOME!
       _controller.clear();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -133,7 +134,7 @@ class _NotesWidgetState extends State<NotesWidget> {
             ),
             const SizedBox(height: 8),
             widget.anotacoes.isEmpty
-              ? const Text('Nenhuma anotação adicionada ainda.')
+              ? const SelectableText('Nenhuma anotação adicionada ainda.')
               : ListView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
@@ -143,7 +144,7 @@ class _NotesWidgetState extends State<NotesWidget> {
                     final data = (nota['data'] is Timestamp)
                         ? (nota['data'] as Timestamp).toDate()
                         : DateTime.now();
-                    final autor = nota['responsavelEmail'] ?? 'N/A';
+                    final autor = nota['autor'] ?? nota['responsavelEmail'] ?? 'N/A';
                     final texto = nota['texto'] ?? '';
 
                     return Card(
@@ -159,7 +160,7 @@ class _NotesWidgetState extends State<NotesWidget> {
                             Row(
                               children: [
                                 Expanded(
-                                  child: Text(
+                                  child: SelectableText(
                                     '$autor - ${dateFormat.format(data)}',
                                     style: const TextStyle(
                                       fontSize: 12,
@@ -197,7 +198,7 @@ class _NotesWidgetState extends State<NotesWidget> {
                               ],
                             ),
                             const SizedBox(height: 4),
-                            Text(texto),
+                            SelectableText(texto),
                           ],
                         ),
                       ),

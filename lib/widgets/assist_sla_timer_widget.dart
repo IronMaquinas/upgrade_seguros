@@ -21,33 +21,21 @@ enum SlaStatus {
 
 /// Widget de relógio visual para SLA
 /// Mostra um círculo de progresso com cores conforme o status
-/// Atualiza a cada segundo
 class AssistSlaTimerWidget extends StatefulWidget {
-  /// Data de abertura do atendimento
   final DateTime dataAbertura;
-
-  /// Tempo previsto de conclusão
   final DateTime? slaPrevisto;
-
-  /// Se null, usa slaPrevisto automaticamente
+  final DateTime? dataAgendamento;
   final Duration? duracao;
-
-  /// Tamanho do widget em pixels
   final double size;
-
-  /// Se deve mostrar detalhes textuais
   final bool showDetails;
-
-  /// Callback quando SLA é excedido
   final VoidCallback? onSlaExceeded;
-
-  /// Callback quando SLA está prestes a exceder (80%)
   final VoidCallback? onSlaWarning;
 
   const AssistSlaTimerWidget({
     Key? key,
     required this.dataAbertura,
     required this.slaPrevisto,
+    this.dataAgendamento,
     this.duracao,
     this.size = 200,
     this.showDetails = true,
@@ -94,11 +82,59 @@ class _AssistSlaTimerWidgetState extends State<AssistSlaTimerWidget> {
     super.dispose();
   }
 
+  /// Formata tempo restante com lógica inteligente:
+  /// < 60min → minutos
+  /// < 24h → horas
+  /// >= 24h → dias
+  String _getTempoRestanteInteligente() {
+    // 🔁 Usa data de agendamento (se houver) como referência principal
+    final dataLimite = widget.dataAgendamento ?? widget.slaPrevisto;
+    if (dataLimite == null) return '--';
+
+    final agora = DateTime.now();
+    final diferenca = dataLimite.difference(agora);
+
+    if (diferenca.isNegative) {
+      // SLA excedido
+      final absoDiff = agora.difference(dataLimite);
+      
+      if (absoDiff.inHours < 1) {
+        final minutos = absoDiff.inMinutes;
+        return '+${minutos}min';
+      } else if (absoDiff.inHours < 24) {
+        final horas = absoDiff.inHours;
+        final minutos = absoDiff.inMinutes % 60;
+        return '+${horas}h ${minutos}min';
+      } else {
+        final dias = absoDiff.inDays;
+        final horas = (absoDiff.inHours % 24);
+        return '+${dias}d ${horas}h';
+      }
+    }
+
+    // SLA dentro do prazo
+    if (diferenca.inHours < 1) {
+      final minutos = diferenca.inMinutes;
+      return '${minutos}min';
+    } else if (diferenca.inHours < 24) {
+      final horas = diferenca.inHours;
+      final minutos = diferenca.inMinutes % 60;
+      return '${horas}h ${minutos}min';
+    } else {
+      final dias = diferenca.inDays;
+      final horas = (diferenca.inHours % 24);
+      return '${dias}d ${horas}h';
+    }
+  }
+
   /// Calcula o percentual de SLA decorrido (0.0 a 1.0+)
   double _getPercentualDecorrido() {
-    if (widget.slaPrevisto == null) return 0.0;
+    // Se tem agendamento, usa como referência em vez de slaPrevisto
+    final dataLimite = widget.dataAgendamento ?? widget.slaPrevisto;
+    
+    if (dataLimite == null) return 0.0;
 
-    final duracao = widget.slaPrevisto!.difference(widget.dataAbertura);
+    final duracao = dataLimite.difference(widget.dataAbertura);
     if (duracao.inSeconds == 0) return 0.0;
 
     final decorrido = DateTime.now().difference(widget.dataAbertura);
@@ -107,23 +143,40 @@ class _AssistSlaTimerWidgetState extends State<AssistSlaTimerWidget> {
 
   /// Calcula o tempo restante em formato legível
   String _getTempoRestante() {
-    if (widget.slaPrevisto == null) return '--:--';
+  // Se tem agendamento, usa como referência
+    final dataLimite = widget.dataAgendamento ?? widget.slaPrevisto;
+    
+    if (dataLimite == null) return '--';
 
     final agora = DateTime.now();
-    final diferenca = widget.slaPrevisto!.difference(agora);
+    final diferenca = dataLimite.difference(agora);
 
     if (diferenca.isNegative) {
-      // SLA excedido
-      final absoDiff = agora.difference(widget.slaPrevisto!);
-      final horas = absoDiff.inHours;
-      final minutos = absoDiff.inMinutes % 60;
-      return '+${horas.toString().padLeft(2, '0')}:${minutos.toString().padLeft(2, '0')}';
+      final absoDiff = agora.difference(dataLimite);
+      if (absoDiff.inHours < 1) {
+        return '+${absoDiff.inMinutes}min';
+      } else if (absoDiff.inHours < 24) {
+        final horas = absoDiff.inHours;
+        final minutos = absoDiff.inMinutes % 60;
+        return '+${horas}h ${minutos}min';
+      } else {
+        final dias = absoDiff.inDays;
+        final horas = (absoDiff.inHours % 24);
+        return '+${dias}d ${horas}h';
+      }
     }
 
-    // SLA dentro do prazo
-    final horas = diferenca.inHours;
-    final minutos = diferenca.inMinutes % 60;
-    return '${horas.toString().padLeft(2, '0')}:${minutos.toString().padLeft(2, '0')}';
+    if (diferenca.inHours < 1) {
+      return '${diferenca.inMinutes}min';
+    } else if (diferenca.inHours < 24) {
+      final horas = diferenca.inHours;
+      final minutos = diferenca.inMinutes % 60;
+      return '${horas}h ${minutos}min';
+    } else {
+      final dias = diferenca.inDays;
+      final horas = (diferenca.inHours % 24);
+      return '${dias}d ${horas}h';
+    }
   }
 
   /// Obtém o status atual
@@ -144,7 +197,7 @@ class _AssistSlaTimerWidgetState extends State<AssistSlaTimerWidget> {
   Widget build(BuildContext context) {
     final percentual = _getPercentualDecorrido();
     final status = _getStatus();
-    final tempoRestante = _getTempoRestante();
+    final tempoRestante = _getTempoRestanteInteligente();
 
     return Center(
       child: Column(

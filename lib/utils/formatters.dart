@@ -24,6 +24,12 @@ import 'package:intl/intl.dart';
     ).format(v);
   }
 
+  static String formatarCpfOuCnpj(String? value) {
+    if (value == null || value.isEmpty) return '—';
+    final cleaned = value.replaceAll(RegExp(r'\D'), '');
+    return cleaned.length == 11 ? formatarCPF(value) : formatarCNPJ(value);
+  }
+
   /// Parse moeda de string formatada para double
   static double parseFromMoeda(String moedaFormatada) {
     final cleaned = moedaFormatada

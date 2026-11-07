@@ -52,4 +52,31 @@ class Life {
       documentosUrls: List<String>.from(map['documentosUrls'] ?? []),
     );
   }
+
+  // ✨ NOVO: copyWith para edições imutáveis
+  Life copyWith({
+    String? localLife,
+    String? nomeSegurado,
+    String? cpfSegurado,
+    int? idadeSegurado,
+    String? telefone,
+    String? email,
+    String? parentesco,
+    String? causaMorte,
+    List<String>? fotosUrls,
+    List<String>? documentosUrls,
+  }) {
+    return Life(
+      localLife: localLife ?? this.localLife,
+      nomeSegurado: nomeSegurado ?? this.nomeSegurado,
+      cpfSegurado: cpfSegurado ?? this.cpfSegurado,
+      idadeSegurado: idadeSegurado ?? this.idadeSegurado,
+      telefone: telefone ?? this.telefone,
+      email: email ?? this.email,
+      parentesco: parentesco ?? this.parentesco,
+      causaMorte: causaMorte ?? this.causaMorte,
+      fotosUrls: fotosUrls ?? this.fotosUrls,
+      documentosUrls: documentosUrls ?? this.documentosUrls,
+    );
+  }
 }

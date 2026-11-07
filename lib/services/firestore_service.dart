@@ -352,6 +352,7 @@ class FirestoreService {
     String newStatus,
     String userId,
     String userEmail,
+    String nomeUsuarioLogado,
   ) async {
     await getSinistrosCollection().doc(claimId).update({
       'status_atual': newStatus,
@@ -362,6 +363,7 @@ class FirestoreService {
           'data': Timestamp.now(),
           'responsavelId': userId,
           'responsavelEmail': userEmail,
+          'registrado_por': nomeUsuarioLogado,
         }
       ]),
     });
@@ -1190,11 +1192,12 @@ class FirestoreService {
   }
 
   // Adiciona Anotações
-  Future<void> addAnotacao(String claimId, String texto, String responsavelEmail) async {
+  Future<void> addAnotacao(String claimId, String texto, String nomeAutor) async {
     final anotacao = {
       'texto': texto,
       'data': Timestamp.now(),
-      'responsavelEmail': responsavelEmail,
+      'autor': nomeAutor,
+      'responsavelEmail': nomeAutor,
     };
     await getSinistrosCollection().doc(claimId).update({
       'anotacoes': FieldValue.arrayUnion([anotacao])
@@ -1257,7 +1260,7 @@ class FirestoreService {
     }
   }
 
-  // Busca de todas as tarefas
+// Busca de todas as tarefas
   Future<List<Map<String, dynamic>>> getAllTasksWithClaims() async {
     final tasksSnapshot = await getTasksCollection().get();
     List<Map<String, dynamic>> allTasks = [];
@@ -1269,20 +1272,35 @@ class FirestoreService {
 
     if (claimIds.isEmpty) return [];
 
-    // Busca nas duas coleções em paralelo
-    final results = await Future.wait([
-      getSinistrosCollection()
-          .where(FieldPath.documentId, whereIn: claimIds.toList())
-          .get(),
-      _db.collection('assistencias')
-          .where(FieldPath.documentId, whereIn: claimIds.toList())
-          .get(),
-    ]);
+    final claimIdsList = claimIds.toList();
+    final Map<String, Map<String, dynamic>> claimsData = {};
 
-    final Map<String, Map<String, dynamic>> claimsData = {
-      for (var doc in results[0].docs) doc.id: doc.data(),
-      for (var doc in results[1].docs) doc.id: doc.data(),
-    };
+    // ✅ Dividir em chunks de 30 (limite do Firestore whereIn)
+    const chunkSize = 30;
+    for (int i = 0; i < claimIdsList.length; i += chunkSize) {
+      final end = (i + chunkSize > claimIdsList.length)
+          ? claimIdsList.length
+          : i + chunkSize;
+      final chunk = claimIdsList.sublist(i, end);
+
+      // Busca nas duas coleções em paralelo
+      final results = await Future.wait([
+        getSinistrosCollection()
+            .where(FieldPath.documentId, whereIn: chunk)
+            .get(),
+        _db.collection('assistencias')
+            .where(FieldPath.documentId, whereIn: chunk)
+            .get(),
+      ]);
+
+      // Adiciona aos dados
+      for (var doc in results[0].docs) {
+        claimsData[doc.id] = doc.data();
+      }
+      for (var doc in results[1].docs) {
+        claimsData[doc.id] = doc.data();
+      }
+    }
 
     for (var taskDoc in tasksSnapshot.docs) {
       final data = taskDoc.data();
@@ -1341,6 +1359,12 @@ class FirestoreService {
     await getClientesCollection().doc(clientId).update({
       'recomendacao_manutencao': recomendacao,
     });
+  }
+
+  // --- OBTER NOME DO USUÁRIO ---
+  Future<List<QueryDocumentSnapshot>> getFuncionarios() async {
+    final snapshot = await _db.collection('users').get();
+    return snapshot.docs;
   }
 
   // CARREGAR FOTOS DOS VEÍCULOS DO SEGURADO
@@ -1436,20 +1460,119 @@ class FirestoreService {
     String claimId,
     String status,
     String userId,
-    String? userEmail,
-  ) async {
+    String? userEmail, {
+    String nomeUsuario = 'Desconhecido', // ✨ ADICIONE PARÂMETRO
+  }) async {
     final docRef = getSinistrosCollection().doc(claimId);
-
+  
     final historyEntry = {
       'status': status,
       'data': Timestamp.now(),
       'responsavelId': userId,
       'responsavelEmail': userEmail ?? 'desconhecido@dominio.com',
+      'registrado_por': nomeUsuario, // ✨ SALVE O NOME!
     };
-
+  
     await docRef.update({
       'historico_status': FieldValue.arrayUnion([historyEntry]),
     });
+  }
+
+  /// Coleção de corretoras
+  CollectionReference<Map<String, dynamic>> getCorretorasCollection() {
+    return _db.collection('corretoras');
+  }
+ 
+  /// Busca corretora por ID
+  Future<Map<String, dynamic>?> getCorretoraById(String corretoraId) async {
+    try {
+      final doc = await getCorretorasCollection().doc(corretoraId).get();
+      if (doc.exists) {
+        return {
+          'id': doc.id,
+          ...doc.data()!,
+        };
+      }
+      return null;
+    } catch (e) {
+      debugPrint('❌ Erro ao buscar corretora: $e');
+      return null;
+    }
+  }
+ 
+  /// Salva/atualiza dados da corretora
+  Future<void> saveCorretora({
+    required String corretoraId,
+    required String nome,
+    required String telefone,
+    required String email,
+    String? cnpj,
+    String? endereco,
+    String? logo,
+  }) async {
+    try {
+      await getCorretorasCollection().doc(corretoraId).set({
+        'nome': nome,
+        'telefone': telefone,
+        'email': email,
+        'cnpj': cnpj,
+        'endereco': endereco,
+        'logo': logo,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      debugPrint('✅ Corretora atualizada: $corretoraId');
+    } catch (e) {
+      debugPrint('❌ Erro ao salvar corretora: $e');
+      rethrow;
+    }
+  }
+ 
+  /// Atualiza apenas nome, telefone e email da corretora
+  Future<void> updateCorretoraContactInfo({
+    required String corretoraId,
+    required String nome,
+    required String telefone,
+    required String email,
+  }) async {
+    try {
+      await getCorretorasCollection().doc(corretoraId).update({
+        'nome': nome,
+        'telefone': telefone,
+        'email': email,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      debugPrint('✅ Dados de contato da corretora atualizados');
+    } catch (e) {
+      debugPrint('❌ Erro ao atualizar contato da corretora: $e');
+      rethrow;
+    }
+  }
+ 
+  /// Cria uma nova corretora (para onboarding de novo cliente SaaS)
+  Future<String> createCorretora({
+    required String nome,
+    required String telefone,
+    required String email,
+    String? cnpj,
+    String? endereco,
+  }) async {
+    try {
+      final docRef = await getCorretorasCollection().add({
+        'nome': nome,
+        'telefone': telefone,
+        'email': email,
+        'cnpj': cnpj,
+        'endereco': endereco,
+        'ativa': true,
+        'dataCriacao': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      debugPrint('✅ Nova corretora criada: ${docRef.id}');
+      return docRef.id;
+    } catch (e) {
+      debugPrint('❌ Erro ao criar corretora: $e');
+      rethrow;
+    }
   }
 
 }

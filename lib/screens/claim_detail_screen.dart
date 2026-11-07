@@ -3,8 +3,10 @@ import 'dart:async';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_google_places_sdk/flutter_google_places_sdk.dart' hide LatLng;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -12,12 +14,16 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import 'package:upgrade_seguros/formatter/number_input_formatter.dart';
+import 'package:upgrade_seguros/helpers/signature_data_helper.dart';
+import 'package:upgrade_seguros/models/corretora_model.dart';
 import 'package:upgrade_seguros/models/employee_model.dart';
+import 'package:upgrade_seguros/models/pdf_signature_model.dart';
 import 'package:upgrade_seguros/models/third_party_model.dart';
 import 'package:upgrade_seguros/services/employee_service.dart';
 import 'package:upgrade_seguros/services/image_service_web.dart';
 import 'package:upgrade_seguros/services/pdf_services.dart';
 import 'package:upgrade_seguros/services/place_search_delegate.dart';
+import 'package:upgrade_seguros/utils/formatters.dart';
 import 'package:upgrade_seguros/widgets/notes_widget.dart';
 import 'package:upgrade_seguros/widgets/task_list_widget.dart';
 import 'package:upgrade_seguros/widgets/workshop_widget.dart';
@@ -31,6 +37,7 @@ import '../services/auth_service.dart';
 import 'dart:convert';
 import '../models/claim_task_model.dart';
 import '../models/machinery_model.dart';
+import 'package:upgrade_seguros/widgets/selectable_text_helper.dart';
 
 class ClaimDetailScreen extends StatefulWidget {
   final Claim claim;
@@ -106,6 +113,8 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
   static const STATUS_ABERTA = 'Aberta';
   static const STATUS_CONCLUIDA = 'Concluída';
 
+  String _nomeUsuarioLogado = 'Desconhecido'; 
+
   bool _isStatusExterno(String status) {
     return [
       'Aguardando Peças',
@@ -120,6 +129,10 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
   late TextEditingController _numeroSeguradoraController;
   late TextEditingController _enderecoTerceiroController;
   late TextEditingController _slaPrevistController;
+
+  late TextEditingController _horaOcorrenciaController;
+  late TextEditingController _nomeContatoSinistroController;
+  late TextEditingController _telefoneContatoSinistroController;
 
   List<ThirdParty> _currentTerceiros = [];
 
@@ -157,6 +170,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     _currentClaim = widget.claim;
     _loadClient();
     _listenToClaimUpdates();
+    _loadNomeUsuario();
     _currentTerceiros = List.from(_currentClaim.terceiros); // Inicializa a lista
     _valorTotalSinistroController = TextEditingController(
     text: _currentClaim.valorTotalSinistro.toStringAsFixed(2));
@@ -167,6 +181,10 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     _numeroSinistroController = TextEditingController(text: _currentClaim.numeroSinistro);
     _numeroSeguradoraController = TextEditingController(text: _currentClaim.numeroSeguradora);
     _enderecoTerceiroController = TextEditingController(text: _currentClaim.enderecoTerceiro);
+
+    _horaOcorrenciaController = TextEditingController(text: _currentClaim.horaOcorrencia ?? '');
+    _nomeContatoSinistroController = TextEditingController(text: _currentClaim.nomeContatoSinistro ?? '');
+    _telefoneContatoSinistroController = TextEditingController(text: _currentClaim.telefoneContatoSinistro ?? '');
   
     _slaPrevistController = TextEditingController(
       text: _currentClaim.slaPrevisto != null
@@ -174,6 +192,19 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
           : 'Selecione',
     );
   
+    _currentClaim.veiculoSelecionado ??= Vehicle(
+      placa: '',
+      marca: '',
+      modelo: '',
+      ano: 0,
+      anomodelo: 0,
+      chassi: '',
+      cor: '',
+      nomeCondutorMotorista: '',
+      cpfCondutorMotorista: '',
+      cnhCondutorMotorista: '',
+    );
+
   }
 
   @override
@@ -185,8 +216,20 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     _numeroSeguradoraController.dispose();
     _enderecoTerceiroController.dispose();
     _slaPrevistController.dispose();
+    _horaOcorrenciaController.dispose();
+    _nomeContatoSinistroController.dispose();
+    _telefoneContatoSinistroController.dispose();
     super.dispose();
     _sinistroSubscription.cancel();
+  }
+
+  Future<void> _loadNomeUsuario() async {
+    try {
+      final nome = await _authService.getUserName();
+      setState(() => _nomeUsuarioLogado = nome);
+    } catch (e) {
+      print('🔴 ERRO EM _loadNomeUsuario(): $e'); // ← SE DER ERRO
+    }
   }
 
   void _listenToClaimUpdates() {
@@ -320,6 +363,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
       newStatus,
       userId,
       userEmail,
+      _nomeUsuarioLogado,
     );
 
     // 🔥 3. ATUALIZA PREVISÃO
@@ -639,6 +683,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
         newStatus,
         userId,
         userEmail,
+        _nomeUsuarioLogado,
       );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Status atualizado para: $newStatus')),
@@ -887,8 +932,23 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
         updates['workshop'] = _currentClaim.workshop!.toMap();
       }
 
+      if (_currentClaim.business != null) {
+        updates['business'] = _currentClaim.business!.toMap();
+      }
+
       if (_currentClaim.oficinas.isNotEmpty) {
         updates['oficinas'] = _currentClaim.oficinas.map((o) => o.toMap()).toList();
+      }
+
+      // Campos novos
+      if (_currentClaim.horaOcorrencia != widget.claim.horaOcorrencia) {
+        updates['hora_ocorrencia'] = _currentClaim.horaOcorrencia;
+      }
+      if (_currentClaim.nomeContatoSinistro != widget.claim.nomeContatoSinistro) {
+        updates['nomeContatoSinistro'] = _currentClaim.nomeContatoSinistro;
+      }
+      if (_currentClaim.telefoneContatoSinistro != widget.claim.telefoneContatoSinistro) {
+        updates['telefoneContatoSinistro'] = _currentClaim.telefoneContatoSinistro;
       }
 
       // 🔥 SALVA CLIENTE
@@ -907,6 +967,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
           'Edição de dados',
           userId,
           _authService.getUserEmail(),
+          nomeUsuario: _nomeUsuarioLogado,
         );
       }
 
@@ -917,6 +978,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
           'Edição de cliente',
           userId,
           _authService.getUserEmail(),
+          nomeUsuario: _nomeUsuarioLogado,
         );
       }
 
@@ -1079,6 +1141,84 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     }
   }
 
+  // ✨ MÉTODO DE CONFIRMAÇÃO E EXCLUSÃO
+  void _showDeleteTerceiroConfirmation(ThirdParty terceiro, int index) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Excluir Terceiro?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Tem certeza que deseja excluir o terceiro:'),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      terceiro.nome,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                    if (terceiro.cpf.isNotEmpty)
+                      Text('CPF/CNPJ: ${terceiro.cpf}', style: const TextStyle(fontSize: 12)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Esta ação não pode ser desfeita.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.red,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                elevation: 0,
+              ),
+              onPressed: () {
+                setState(() {
+                  _currentClaim.terceiros.removeAt(index);
+                });
+                Navigator.of(context).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('✓ Terceiro removido com sucesso'),
+                    backgroundColor: Colors.green,
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              },
+              child: const Text('Excluir'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _updateValorTotalSinistro() async {
     setState(() => _isLoading = true);
     final userId = _authService.getUserId();
@@ -1157,30 +1297,69 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     }
   }
 
-  // Gerador de PDF
   Future<void> _generateAndSharePdf() async {
     setState(() => _isLoading = true);
     try {
       final pdfService = PdfService();
       final logoBytes = await pdfService.loadLogo();
 
-      // 1️⃣ Obter dados do usuário logado
+      // 1️⃣ Usuário logado
       final usuarioLogado = await _obterDadosUsuarioLogado();
 
-      // 2️⃣ Passar dados dinâmicos
+      // 2️⃣ Obter empresaId do usuário
+      final user = FirebaseAuth.instance.currentUser;
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user?.uid)
+          .get();
+      final empresaId = userDoc.data()?['empresaId'] as String?;
+
+      Corretora? corretora;
+      PdfSignatureConfig? pdfConfig;
+
+      if (empresaId != null && empresaId.isNotEmpty) {
+        // Carrega a corretora
+        final corretoraMap = await _firestoreService.getCorretoraById(empresaId);
+        if (corretoraMap != null) {
+          corretora = Corretora.fromMap(corretoraMap, empresaId);
+        }
+
+        // Carrega a configuração PDF
+        final pdfConfigDoc = await FirebaseFirestore.instance
+            .collection('pdf_signatures')
+            .doc(empresaId)
+            .get();
+        if (pdfConfigDoc.exists) {
+          pdfConfig = PdfSignatureConfig.fromJson(pdfConfigDoc.data() as Map<String, dynamic>);
+        }
+      }
+
+      // 3️⃣ Dados da assinatura via helper
+      final signatureData = SignatureDataHelper.getSignatureData(
+        nomeSource: pdfConfig?.nomeSource ?? SignatureSource.funcionario,
+        telefoneSource: pdfConfig?.telefoneSource ?? SignatureSource.funcionario,
+        emailSource: pdfConfig?.emailSource ?? SignatureSource.funcionario,
+        currentEmployee: usuarioLogado,
+        corretora: corretora,
+        nomeController: '',
+        telefoneController: '',
+        emailController: '',
+      );
+
+      // 4️⃣ Gerar PDF
       final pdfBytes = await pdfService.generateClaimPdf(
         _currentClaim,
         _client,
         _currentClaim.terceiros,
         logoBytes,
-        usuarioNome: usuarioLogado?.nome,       // ✅ Seu nome
-        usuarioEmail: usuarioLogado?.email,     // ✅ Seu email
-        usuarioTelefone: usuarioLogado?.telefone, // ✅ Seu telefone
+        usuarioNome: signatureData['nome'],
+        usuarioEmail: signatureData['email'],
+        usuarioTelefone: signatureData['telefone'],
       );
 
       final fileName = 'Upgrade Seguros - ${_currentClaim.numeroSinistro}.pdf';
+      await Printing.sharePdf(bytes: pdfBytes, filename: fileName);
 
-      await Printing.sharePdf(bytes: pdfBytes, filename: fileName);  // aqui sim passa os pdfBytes
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Erro ao gerar PDF: $e')),
@@ -1194,11 +1373,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
   Future<Employee?> _obterDadosUsuarioLogado() async {
     try {
       final userId = _authService.getUserId();
-      print('═══════════════════════════════════════════════════');
-      print('🔍 DEBUG: Obtendo dados do usuário logado');
-      print('═══════════════════════════════════════════════════');
-      print('📍 userId: $userId');
-      
+       
       if (userId == 'anonymous_user' || userId.isEmpty) {
         print('❌ Usuário é anônimo ou vazio!');
         return null;
@@ -1206,15 +1381,6 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
       
       final employeeService = EmployeeService();
       final usuario = await employeeService.getUserById(userId);
-      
-      print('✅ Usuário obtido com sucesso!');
-      print('📋 Dados do usuário:');
-      print('   ├─ id: ${usuario?.id}');
-      print('   ├─ nome: ${usuario?.nome}');
-      print('   ├─ email: ${usuario?.email}');
-      print('   ├─ telefone: ${usuario?.telefone}');
-      print('   └─ perfil: ${usuario?.perfil}');
-      print('═══════════════════════════════════════════════════');
       
       if (usuario == null) {
         print('⚠️ WARNING: usuário é null!');
@@ -1327,7 +1493,6 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
               const Text('O valor total dos serviços deste sinistro:'),
               const SizedBox(height: 8),
               TextFormField(
-              enabled: _isEditing,
                 controller: controller,
                 keyboardType: TextInputType.numberWithOptions(decimal: true),
                 decoration: const InputDecoration(
@@ -1395,6 +1560,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
 
   Future<void> _showAddThirdPartyDialog() async {
     final _thirdPartyFormKey = GlobalKey<FormState>();
+    final ImagePicker _picker = ImagePicker();
 
     // Controllers
     final TextEditingController _tpNomeController = TextEditingController();
@@ -1410,73 +1576,125 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     final TextEditingController _tpAnoModeloController = TextEditingController();
     final TextEditingController _tpRelatoController = TextEditingController();
     final TextEditingController _enderecoTerceiroController = TextEditingController();
+    final TextEditingController _nomeContatoTerceiroController = TextEditingController();
+    final TextEditingController _telefoneContatoTerceiroController = TextEditingController();
+    final TextEditingController _registroSeguradoraTerceiroController = TextEditingController();
 
     final List<XFile> _thirdPartyPhotos = [];
     final List<XFile> _thirdPartyDocuments = [];
-    final ImagePicker _picker = ImagePicker();
 
     final novoTerceiro = await showDialog<ThirdParty>(
       context: context,
+      barrierDismissible: false,
       builder: (context) {
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
-          child: StatefulBuilder(
-            builder: (context, setModalState) {
-              return Container(
-                width: MediaQuery.of(context).size.width * 0.9,
-                padding: const EdgeInsets.all(16.0),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const SizedBox(width: 16),
-                      const Text('Adicionar Terceiro', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 60),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 900),
+            child: StatefulBuilder(
+              builder: (context, setModalState) {
+                return Container(
+                  padding: const EdgeInsets.all(24),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Adicionar Terceiro',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF1A1A2E),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
                       Form(
                         key: _thirdPartyFormKey,
                         child: Column(
                           children: [
-                            TextFormField(
-              enabled: _isEditing,
-                              controller: _tpNomeController,
-                              decoration: const InputDecoration(labelText: 'Nome do Terceiro'),
-                              validator: (value) => value!.isEmpty ? 'Campo obrigatório' : null,
-                            ),
-                            TextFormField(
-              enabled: _isEditing,
-                              controller: _tpCpfController,
-                              decoration: const InputDecoration(labelText: 'CPF do Terceiro'),
-                              keyboardType: TextInputType.number,
-                              validator: (value) => value!.isEmpty ? 'Campo obrigatório' : null,
-                            ),
-                            TextFormField(
-              enabled: _isEditing,
-                              controller: _tpContatoController,
-                              decoration: const InputDecoration(labelText: 'Contato do Terceiro'),
-                              keyboardType: TextInputType.phone,
-                            ),
-                            TextFormField(
-              enabled: _isEditing,
-                              controller: _tpEmailController,
-                              decoration: const InputDecoration(labelText: 'Email do Terceiro'),
-                              keyboardType: TextInputType.emailAddress,
-                            ),
+                            buildRow([
+                              TextFormField(
+                                enabled: _isEditing,
+                                controller: _tpNomeController,
+                                decoration: const InputDecoration(labelText: 'Nome do Terceiro'),
+                                validator: (value) => value!.isEmpty ? 'Campo obrigatório' : null,
+                              ),
+                              TextFormField(
+                                enabled: _isEditing,
+                                controller: _tpCpfController,
+                                decoration: const InputDecoration(labelText: 'CPF do Terceiro'),
+                                inputFormatters: [BRFormatters.cpfCnpjFormatter],
+                              ),
+                            ]),
+                            buildRow([
+                              TextFormField(
+                                controller: _tpContatoController,
+                                decoration: InputDecoration(labelText: 'Telefone de Contato'),
+                                inputFormatters: [BRFormatters.telefoneFormatter],
+                              ),
+                              TextFormField(
+                                controller: _tpEmailController,
+                                decoration: InputDecoration(labelText: 'Email do terceriro'),
+                              ),
+                            ]),
                             
                             TextFormField(
-                              controller: _enderecoTerceiroController,
-                              readOnly: true,
-                              decoration: InputDecoration(
-                                labelText: 'Endereço',
-                                suffixIcon: Icon(Icons.search),
+                            enabled: _isEditing,
+                                controller: _enderecoTerceiroController,
+                                readOnly: true,
+                                decoration: const InputDecoration(
+                                  labelText: 'Endereço do Terceiro',
+                                  suffixIcon: Icon(Icons.search),
+                                ),
+                                onTap: () => _openPlaceSearchTerceiro('Endereço do Terceiro', _enderecoTerceiroController),
+                                validator: (value) {
+                                  if (value == null || value.isEmpty) return 'Campo obrigatório';
+                                  return null;
+                                },
                               ),
-                              onTap: () => _openPlaceSearchTerceiro(
-                                'Endereço',
-                                _enderecoTerceiroController,
-                              ),
+                            // ✨ CONTATO DO TERCEIRO
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextFormField(
+                                    enabled: _isEditing,
+                                    controller: _nomeContatoTerceiroController,
+                                    decoration: const InputDecoration(labelText: 'Nome do Contato do Terceiro'),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: TextFormField(
+                                    enabled: _isEditing,
+                                    controller: _telefoneContatoTerceiroController,
+                                    decoration: const InputDecoration(labelText: 'Telefone do Contato do Terceiro'),
+                                    keyboardType: TextInputType.phone,
+                                    inputFormatters: [BRFormatters.telefoneFormatter],
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: TextFormField(
+                                    enabled: _isEditing,
+                                    controller: _registroSeguradoraTerceiroController,
+                                    decoration: InputDecoration(
+                                      labelText: 'Nº do Registro da Seguradora',
+                                      filled: true,
+                                      fillColor: Colors.yellow.shade100,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-
+                            const SizedBox(height: 16),
                             const Divider(),
-                            buildRow([
+                            const Text('Veículo do Terceiro', style: TextStyle(fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 8),
+                           buildRow([
                               TextFormField(
                                 controller: _marcaTerceiroController,
                                 decoration: InputDecoration(labelText: 'Marca'),
@@ -1493,11 +1711,11 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                             buildRow([
                               TextFormField(
                                 controller: _tpAnoController,
-                                decoration: InputDecoration(labelText: 'Ano Fab'),
+                                decoration: InputDecoration(labelText: 'Ano de Fabricação'),
                               ),
                               TextFormField(
                                 controller: _tpAnoModeloController,
-                                decoration: InputDecoration(labelText: 'Ano Mod'),
+                                decoration: InputDecoration(labelText: 'Ano Modelo'),
                               ),
                               TextFormField(
                                 controller: _tpPlacaController,
@@ -1509,12 +1727,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                               ),
                             ]),
                             TextFormField(
-              enabled: _isEditing,
-                              controller: _tpPlacaController,
-                              decoration: const InputDecoration(labelText: 'Placa do Terceiro'),
-                            ),
-                            TextFormField(
-              enabled: _isEditing,
+                              enabled: _isEditing,
                               controller: _tpRelatoController,
                               decoration: const InputDecoration(labelText: 'Relato do Terceiro sobre o Evento'),
                               maxLines: 3,
@@ -1716,6 +1929,10 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
 
                                     fotosUrls: fotoUrls,
                                     documentosUrls: documentoUrls,
+
+                                    nomeContatoTerceiro: _nomeContatoTerceiroController.text,
+                                    telefoneContatoTerceiro: _telefoneContatoTerceiroController.text,
+                                    registroSeguradoraTerceiro: _registroSeguradoraTerceiroController.text,
                                   );
                                   
                                   Navigator.of(context).pop(novoTerceiro);
@@ -1737,6 +1954,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
               );
             },
           ),
+          )
         );
       },
     );
@@ -1809,6 +2027,10 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     final TextEditingController _tpRelatoController = TextEditingController(text: terceiro.relato ?? '');
     final TextEditingController _enderecoTerceiroController = TextEditingController(text: terceiro.enderecoTerceiro);
 
+    final TextEditingController _nomeContatoTerceiroController = TextEditingController(text: terceiro.nomeContatoTerceiro ?? '');
+    final TextEditingController _telefoneContatoTerceiroController = TextEditingController(text: terceiro.telefoneContatoTerceiro ?? '');
+    final TextEditingController _registroSeguradoraTerceiroController = TextEditingController(text: terceiro.registroSeguradoraTerceiro ?? '');
+
     // Listas para gerenciar fotos e documentos
     List<XFile> _thirdPartyPhotos = [];
     List<PlatformFile> _thirdPartyDocuments = []; // Alterado para PlatformFile
@@ -1867,7 +2089,11 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
         return StatefulBuilder(
           builder: (context, setModalState) {
             return Dialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
+            backgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 60),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 900),
               child: Container(
                 width: MediaQuery.of(context).size.width * 0.9,
                 padding: const EdgeInsets.all(16.0),
@@ -1902,26 +2128,27 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                 enabled: _isEditing,
                                 controller: _tpCpfController,
                                 decoration: const InputDecoration(labelText: 'CPF do Terceiro'),
+                                inputFormatters: [BRFormatters.cpfCnpjFormatter],
                               ),
                             ]),
                             buildRow([
                               TextFormField(
                                 controller: _tpContatoController,
-                                decoration: InputDecoration(labelText: 'Contato'),
+                                decoration: InputDecoration(labelText: 'Telefone do Terceiro'),
+                                inputFormatters: [BRFormatters.telefoneFormatter],
                               ),
                               TextFormField(
                                 controller: _tpEmailController,
-                                decoration: InputDecoration(labelText: 'Email'),
+                                decoration: InputDecoration(labelText: 'Email do Terceiro'),
                               ),
                             ]),
                             TextFormField(
-              enabled: _isEditing,
+                            enabled: _isEditing,
                                 controller: _enderecoTerceiroController,
                                 readOnly: true,
                                 decoration: const InputDecoration(
                                   labelText: 'Endereço do Terceiro',
                                   suffixIcon: Icon(Icons.search),
-                                  //border: OutlineInputBorder(),
                                 ),
                                 onTap: () => _openPlaceSearchTerceiro('Endereço do Terceiro', _enderecoTerceiroController),
                                 validator: (value) {
@@ -1929,49 +2156,105 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                   return null;
                                 },
                               ),
+                            
+                            // ✨ CONTATO DO TERCEIRO
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextFormField(
+                                    enabled: _isEditing,
+                                    controller: _nomeContatoTerceiroController,
+                                    decoration: const InputDecoration(labelText: 'Nome do Contato do Terceiro'),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: TextFormField(
+                                    enabled: _isEditing,
+                                    controller: _telefoneContatoTerceiroController,
+                                    decoration: const InputDecoration(labelText: 'Telefone do Contato do Terceiro'),
+                                    keyboardType: TextInputType.phone,
+                                    inputFormatters: [BRFormatters.telefoneFormatter],
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: TextFormField(
+                                    enabled: _isEditing,
+                                    controller: _registroSeguradoraTerceiroController,
+                                    decoration: InputDecoration(
+                                      labelText: 'Nº do Registro da Seguradora',
+                                      filled: true,
+                                      fillColor: Colors.yellow.shade100,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
                             const Divider(),
                             const Text('Veículo do Terceiro', style: TextStyle(fontWeight: FontWeight.bold)),
-                            TextFormField(
-              enabled: _isEditing,
-                              controller: _tpMarcaController,
-                              decoration: const InputDecoration(labelText: 'Marca do Veículo'),
-                            ),
-                            TextFormField(
-              enabled: _isEditing,
-                              controller: _tpModeloController,
-                              decoration: const InputDecoration(labelText: 'Modelo do Veículo'),
-                            ),
+                            const SizedBox(height: 8),
                             Row(
-                                  children: [
-                                    Expanded(
-                                      child: TextFormField(
-              enabled: _isEditing,
-                                        controller: _tpAnoController,
-                                        decoration: const InputDecoration(labelText: 'Ano de Fabricação'),
-                                        keyboardType: TextInputType.number,
-                                        validator: (value) => value == null || value.isEmpty ? 'Campo obrigatório' : null,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 16),
-                                    Expanded(
-                                      child: TextFormField(
-              enabled: _isEditing,
-                                        controller: _tpAnoModeloController,
-                                        decoration: const InputDecoration(labelText: 'Ano Modelo'),
-                                        keyboardType: TextInputType.number,
-                                        validator: (value) => value == null || value.isEmpty ? 'Campo obrigatório' : null,
-                                      ),
-                                    ),
-                                  ],
+                              children: [
+                                Expanded(
+                                  child: TextFormField(
+                                    enabled: _isEditing,
+                                    controller: _tpMarcaController,
+                                    decoration: const InputDecoration(labelText: 'Marca do Veículo'),
+                                  ),
                                 ),
-
-                            TextFormField(
-              enabled: _isEditing,
-                              controller: _tpPlacaController,
-                              decoration: const InputDecoration(labelText: 'Placa do Veículo'),
+                                const SizedBox(width: 16),
+                                Expanded(                                  
+                                  child: TextFormField(
+                                    enabled: _isEditing,
+                                    controller: _tpModeloController,
+                                    decoration: const InputDecoration(labelText: 'Modelo do Veículo'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                           Row(
+                              children: [
+                                Expanded(
+                                  child: TextFormField(
+                                    enabled: _isEditing,
+                                    controller: _tpAnoController,
+                                    decoration: const InputDecoration(labelText: 'Ano de Fabricação'),
+                                    keyboardType: TextInputType.number,
+                                    validator: (value) => value == null || value.isEmpty ? 'Campo obrigatório' : null,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: TextFormField(
+                                    enabled: _isEditing,
+                                    controller: _tpAnoModeloController,
+                                    decoration: const InputDecoration(labelText: 'Ano Modelo'),
+                                    keyboardType: TextInputType.number,
+                                    validator: (value) => value == null || value.isEmpty ? 'Campo obrigatório' : null,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(                                  
+                                  child: TextFormField(
+                                    enabled: _isEditing,
+                                    controller: _tpPlacaController,
+                                    decoration: const InputDecoration(labelText: 'Placa do Veículo'),
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: TextFormField(
+                                    controller: _tpChassiController,
+                                    decoration: InputDecoration(labelText: 'Chassi'),
+                                  ),
+                                ),
+                              ],
                             ),
                             TextFormField(
-              enabled: _isEditing,
+                              enabled: _isEditing,
                               controller: _tpRelatoController,
                               decoration: const InputDecoration(labelText: 'Relato do Terceiro sobre o Evento'),
                               maxLines: 3,
@@ -2234,6 +2517,9 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                     fotosUrls: finalPhotoUrls,
                                     documentosUrls: finalDocumentUrls,
                                     enderecoTerceiro: _enderecoTerceiroController.text,
+                                    nomeContatoTerceiro: _nomeContatoTerceiroController.text.isNotEmpty ? _nomeContatoTerceiroController.text : null,
+                                    telefoneContatoTerceiro: _telefoneContatoTerceiroController.text.isNotEmpty ? _telefoneContatoTerceiroController.text : null,
+                                    registroSeguradoraTerceiro: _registroSeguradoraTerceiroController.text.isNotEmpty ? _registroSeguradoraTerceiroController.text : null,
                                   );
                                   
                                   Navigator.of(context).pop(novoTerceiro);
@@ -2254,6 +2540,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                   ),
                 ),
               ),
+            )
             );
           },
         );
@@ -2382,7 +2669,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
       case 'Aguardando Aprovação': return Colors.yellow.shade700;
       case 'Aguardando Peças': return Colors.blueGrey.shade400;
       case 'Reparo em Andamento': return Colors.blue.shade400;
-      case 'Concluído': return Colors.green.shade400;
+      case 'Concluído': return const Color(0xFF6366F1);
       default: return Colors.grey;
     }
   }
@@ -2420,7 +2707,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
             children: [
               Icon(icon, size: 16, color: color),
               const SizedBox(width: 6),
-              Text(
+              SelectableText(
                 title,
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
@@ -2440,14 +2727,14 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
+        SelectableText(
           label,
           style: TextStyle(
             fontSize: 11,
             color: Colors.grey[500],
           ),
         ),
-        Text(
+        SelectableText(
           value.isEmpty ? '-' : value,
           style: const TextStyle(
             fontWeight: FontWeight.w600,
@@ -2465,11 +2752,13 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     required String? value,
     required Function(String) onChanged,
     int maxLines = 1,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     if (_isEditing) {
       return TextFormField(
         initialValue: value ?? '',
         maxLines: maxLines,
+        inputFormatters: inputFormatters,
         decoration: InputDecoration(
           labelText: label,
           isDense: true,
@@ -2490,7 +2779,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
             color: Colors.grey[500],
           ),
         ),
-        Text(
+        SelectableText(
           (value == null || value.isEmpty) ? '-' : value,
           style: const TextStyle(
             fontWeight: FontWeight.w600,
@@ -2510,9 +2799,11 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
       'Frota',
       'Veículo Individual',
       'Transporte',
+      'Civil Ônibus (RCO)',
       'Residencial',
+      'Empresarial',
       'Vidas',
-      'Máquinas',  // 🆕 NOVO
+      'Máquinas',
     ];
 
     if (_isEditing) {
@@ -2549,7 +2840,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
             color: Colors.grey,
           ),
         ),
-        Text(
+        SelectableText(
           value ?? 'Frota',
           style: const TextStyle(
             fontWeight: FontWeight.w600,
@@ -2560,311 +2851,437 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     );
   }
 
+  Widget _buildInfoChip(String label, String value, {bool isPhone = false, bool highlighted = false}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: highlighted ? Colors.yellow.shade50 : Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(6),
+        border: highlighted ? Border.all(color: Colors.yellow.shade300) : null,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$label: ',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: highlighted ? Colors.black87 : Colors.grey.shade700,
+            ),
+          ),
+          SelectableText(
+            value,
+            style: TextStyle(fontSize: 12, color: highlighted ? Colors.black : Colors.black87),
+          ),
+          if (isPhone) ...[
+            const SizedBox(width: 4),
+            InkWell(
+              onTap: () async {
+                final uri = Uri(scheme: 'tel', path: value.replaceAll(RegExp(r'\D'), ''));
+                if (await canLaunchUrl(uri)) await launchUrl(uri);
+              },
+              child: const Icon(Icons.phone, color: Colors.green, size: 16),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
-Widget build(BuildContext context) {
-  // ✅ 1. Função para limpar strings (agora segura)
-  String clean(String? s) => (s ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
+  Widget build(BuildContext context) {
+    // ✅ 1. Função para limpar strings (agora segura)
+    String clean(String? s) => (s ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
 
-  // ✅ 2. Valores limpos para uso em URLs
-  final seguradora = clean(_currentClaim.seguradora);
-  final reguladora = clean(_currentClaim.transporte?.reguladora) ?? 'Não informado';
-  final nomeMotorista = clean(_currentClaim.transporte?.nomeMotorista) ?? 'Não informado';
-  final ramo = _currentClaim.ramoSinistro ?? 'Frota';
-  bool isTransporte = ramo == 'Transporte';
-  bool isVeiculo = ramo == 'Frota' || ramo == 'Veículo Individual';
-  bool isResidencial = ramo == 'Residencial';
-  bool isVida = ramo == 'Vidas';
-  bool isMaquinas = ramo == 'Máquinas';
+    // ✅ 2. Valores limpos para uso em URLs
+    final seguradora = clean(_currentClaim.seguradora);
+    final reguladora = clean(_currentClaim.transporte?.reguladora) ?? 'Não informado';
+    final nomeMotorista = clean(_currentClaim.transporte?.nomeMotorista) ?? 'Não informado';
+    final ramo = _currentClaim.ramoSinistro ?? 'Frota';
+    bool isTransporte = ramo == 'Transporte';
+    bool isVeiculo = ramo == 'Frota' || ramo == 'Veículo Individual' || ramo == 'Civil Ônibus (RCO)';
+    bool isResidencial = ramo == 'Residencial';
+    bool isVida = ramo == 'Vidas';
+    bool isMaquinas = ramo == 'Máquinas';
+    bool isEmpresarial = ramo == 'Empresarial';
 
-  return Scaffold(
-    backgroundColor: const Color(0xFFF8F9FB),
-    appBar: AppBar(
-      title: const Text('Detalhes do Sinistro'),
-      actions: [
-        if (!_isEditing && _authService.getUserId() != 'anonymous_user')
-          IconButton(
-            icon: const Icon(Icons.edit),
-            onPressed: () {
-              setState(() {
-                _isEditing = true;
-              });
-            },
-            tooltip: 'Editar',
-          ),
-        if (_isEditing)
-          IconButton(
-            icon: const Icon(Icons.save),
-            onPressed: _saveChanges,
-            tooltip: 'Salvar',
-          ),
-        if (_isEditing)
-          IconButton(
-            icon: const Icon(Icons.cancel),
-            onPressed: () {
-              setState(() {
-                _isEditing = false;
-                _relatoController.text = widget.claim.relatoEvento;
-                _localController.text = widget.claim.localOcorrencia;
-                _numeroSinistroController.text = widget.claim.numeroSinistro;
-                _numeroSeguradoraController.text = widget.claim.numeroSeguradora;
-              });
-            },
-            tooltip: 'Cancelar',
-          ),
-      ],
-    ),
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FB),
+      appBar: AppBar(
+        title: const Text('Detalhes do Sinistro'),
+        actions: [
+          if (!_isEditing && _authService.getUserId() != 'anonymous_user')
+            IconButton(
+              icon: const Icon(Icons.edit),
+              onPressed: () {
+                setState(() {
+                  _isEditing = true;
+                });
+              },
+              tooltip: 'Editar',
+            ),
+          if (_isEditing)
+            IconButton(
+              icon: const Icon(Icons.save),
+              onPressed: _saveChanges,
+              tooltip: 'Salvar',
+            ),
+          if (_isEditing)
+            IconButton(
+              icon: const Icon(Icons.cancel),
+              onPressed: () {
+                setState(() {
+                  _isEditing = false;
+                  _relatoController.text = widget.claim.relatoEvento;
+                  _localController.text = widget.claim.localOcorrencia;
+                  _numeroSinistroController.text = widget.claim.numeroSinistro;
+                  _numeroSeguradoraController.text = widget.claim.numeroSeguradora;
+                });
+              },
+              tooltip: 'Cancelar',
+            ),
+        ],
+      ),
 
-    body: WillPopScope(
-          onWillPop: () async {
-            // Intercepta o gesto de voltar
-            if (_isEditing) {
-              // Mostra diálogo de confirmação
-              final shouldPop = await _showExitConfirmationDialog();
-              return shouldPop;
-            }
-            return true; // Permite voltar normalmente se não estiver editando
-          },
-      child: _isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : LayoutBuilder(
-            builder: (context, constraints) {
-              final isLargeScreen = constraints.maxWidth > 600;
-              return SingleChildScrollView(
-                padding: const EdgeInsets.all(16.0),
-                child: Align(
-                  alignment: isLargeScreen ? Alignment.centerLeft : Alignment.center,
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: isLargeScreen ? 800 : double.infinity),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SectionCard(
-                          title: 'Sinistro',
-                          icon: Icons.description_outlined,
-                          color: const Color(0xFF1565C0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-
-                              // 🔵 HEADER ORIGINAL (INALTERADO)
-                              Container(
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[50],
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.grey.shade200),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                          decoration: BoxDecoration(
-                                            color: _getStatusColor(_currentClaim.statusAtual).withOpacity(0.1),
-                                            borderRadius: BorderRadius.circular(20),
-                                          ),
-                                          child: Text(
-                                            _currentClaim.statusAtual,
-                                            style: TextStyle(
-                                              color: _getStatusColor(_currentClaim.statusAtual),
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
+      body: WillPopScope(
+        onWillPop: () async {
+          if (_isEditing) {
+            final shouldPop = await _showExitConfirmationDialog();
+            return shouldPop;
+          }
+          return true;
+        },
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : LayoutBuilder(
+                builder: (context, constraints) {
+                  final isLargeScreen = constraints.maxWidth > 600;
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: Align(
+                      alignment: isLargeScreen ? Alignment.centerLeft : Alignment.center,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: isLargeScreen ? 800 : double.infinity),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,  // ✨ ADICIONE ESTA LINHA
+                          children: [
+                            SectionCard(
+                              title: 'Sinistro',
+                              icon: Icons.description_outlined,
+                              color: const Color(0xFF1565C0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // 🔵 HEADER
+                                  Container(
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey[50],
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(color: Colors.grey.shade200),
                                     ),
-
-                                    const SizedBox(height: 10),
-
-                                    Text(
-                                      _currentClaim.numeroSinistro,
-                                      style: const TextStyle(
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-
-                                    const SizedBox(height: 12),
-
-                                    Column(
+                                    child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-
-                                        /// 🔵 LINHA 1
                                         Row(
                                           children: [
-                                            Expanded(
-                                              child: buildEditableRamoDropdown(  // ✅ Muda o método
-                                                value: _currentClaim.ramoSinistro,
-                                                onChanged: (v) => _currentClaim.ramoSinistro = v,
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                              decoration: BoxDecoration(
+                                                color: _getStatusColor(_currentClaim.statusAtual).withOpacity(0.1),
+                                                borderRadius: BorderRadius.circular(20),
                                               ),
-                                            ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Sinistro',
-                                                value: _currentClaim.numeroSinistro,
-                                                onChanged: (v) => _currentClaim.numeroSinistro = v,
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Data Ocorrência',
-                                                value: DateFormat('dd/MM/yyyy').format(_currentClaim.dataOcorrencia),
-                                                onChanged: (v) {}, // ⚠️ não editar direto (explico abaixo)
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Data Aviso',
-                                                value: _currentClaim.dataAviso != null
-                                                    ? DateFormat('dd/MM/yyyy').format(_currentClaim.dataAviso!)
-                                                    : '',
-                                                onChanged: (v) {}, // ⚠️ idem
+                                              child: Text(
+                                                _currentClaim.statusAtual,
+                                                style: TextStyle(
+                                                  color: _getStatusColor(_currentClaim.statusAtual),
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 12,
+                                                ),
                                               ),
                                             ),
                                           ],
                                         ),
-
-                                        const SizedBox(height: 12),
-
-                                        /// 🔵 LINHA 2
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Seguradora',
-                                                value: _currentClaim.seguradora,
-                                                onChanged: (v) => _currentClaim.seguradora = v,
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Registro Seguradora',
-                                                value: _currentClaim.numeroSeguradora,
-                                                onChanged: (v) => _currentClaim.numeroSeguradora = v,
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Reguladora',
-                                                value: _currentClaim.transporte?.reguladora,
-                                                onChanged: (v) {
-                                                  if (_currentClaim.transporte != null) {
-                                                    _currentClaim.transporte!.reguladora = v;
-                                                  }
-                                                },
-                                              ),
-                                            ),
-                                          ],
+                                        const SizedBox(height: 10),
+                                        Text(
+                                          _currentClaim.clientNome,
+                                          style: const TextStyle(
+                                            fontSize: 20,
+                                            fontWeight: FontWeight.w700,
+                                          ),
                                         ),
-
                                         const SizedBox(height: 12),
-
-                                        /// 🔵 LINHA 3
-                                        buildEditableField(
-                                          label: 'Endereço',
-                                          value: _currentClaim.localOcorrencia,
-                                          onChanged: (v) => _currentClaim.localOcorrencia = v,
-                                        ),
-
-                                        const SizedBox(height: 12),
-                                          Row(
+                                        Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
-                                            Expanded(
-                                              child: _isEditing
-                                                  ? TextFormField(
-                                                      controller: _valorTotalSinistroController,
-                                                      keyboardType: TextInputType.number,
-                                                      decoration: const InputDecoration(
-                                                        labelText: 'Valor Total do Sinistro',
-                                                        prefixText: 'R\$ ',
-                                                        isDense: true,
-                                                        filled: true,
-                                                      ),
-                                                      onChanged: (v) {
-                                                        final clean = v.replaceAll('.', '').replaceAll(',', '.');
-                                                        _currentClaim.valorTotalSinistro =
-                                                            double.tryParse(clean) ?? 0.0;
-                                                      },
-                                                    )
-                                                  : buildField(
-                                                      'Valor Total do Sinistro',
-                                                      'R\$ ${decimalFormat.format(_currentClaim.valorTotalSinistro)}',
+                                            // LINHA 1
+                                           Container(
+                                              width: double.infinity,
+                                              child: Row(
+                                                children: [
+                                                  Expanded(
+                                                    child: buildEditableField(
+                                                      label: 'Data Ocorrência',
+                                                      value: DateFormat('dd/MM/yyyy').format(_currentClaim.dataOcorrencia),
+                                                      onChanged: (v) {},
                                                     ),
+                                                  ),
+                                                  Expanded(
+                                                    child: buildEditableField(
+                                                      label: 'Hora Ocorrência',
+                                                      value: _currentClaim.horaOcorrencia ?? '',
+                                                      onChanged: (v) => _currentClaim.horaOcorrencia = v,
+                                                    ),
+                                                  ),
+                                                  Expanded(
+                                                    child: buildEditableField(
+                                                      label: 'Data Aviso',
+                                                      value: _currentClaim.dataAviso != null
+                                                          ? DateFormat('dd/MM/yyyy').format(_currentClaim.dataAviso!)
+                                                          : '',
+                                                      onChanged: (v) {},
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
                                             ),
-                                            const SizedBox(width: 12),
-                                            Expanded(
-                                              child: _isEditing
-                                                  ? GestureDetector(
-                                                      onTap: () async {
-                                                        final picked = await showDatePicker(
-                                                          context: context,
-                                                          initialDate: _currentClaim.slaPrevisto ?? DateTime.now(),
-                                                          firstDate: DateTime.now(),
-                                                          lastDate: DateTime(2100),
-                                                        );
-                                                        if (picked != null) {
-                                                          setState(() {
-                                                            _currentClaim.slaPrevisto = picked;
-                                                            _slaPrevistController.text = DateFormat('dd/MM/yyyy').format(picked);
-                                                          });
-                                                        }
-                                                      },
-                                                      child: TextFormField(
-                                                        controller: _slaPrevistController,
-                                                        enabled: false,
-                                                        decoration: const InputDecoration(
-                                                          labelText: 'Tempo Previsto',
-                                                          suffixIcon: Icon(Icons.calendar_today),
-                                                          isDense: true,
-                                                          filled: true,
+                                            const SizedBox(height: 12),
+                                            // LINHA 2
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'Seguradora',
+                                                    value: _currentClaim.seguradora,
+                                                    onChanged: (v) => _currentClaim.seguradora = v,
+                                                  ),
+                                                ),
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'Registro da Seguradora',
+                                                    value: _currentClaim.numeroSeguradora,
+                                                    onChanged: (v) => _currentClaim.numeroSeguradora = v,
+                                                  ),
+                                                ),
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'Reguladora',
+                                                    value: _currentClaim.transporte?.reguladora,
+                                                    onChanged: (v) {
+                                                      if (_currentClaim.transporte != null) {
+                                                        _currentClaim.transporte!.reguladora = v;
+                                                      }
+                                                    },
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 12),
+                                            // LINHA 3
+                                            buildEditableField(
+                                              label: 'Endereço',
+                                              value: _currentClaim.localOcorrencia,
+                                              onChanged: (v) => _currentClaim.localOcorrencia = v,
+                                            ),
+                                            const SizedBox(height: 12),
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: _isEditing
+                                                      ? TextFormField(
+                                                          controller: _valorTotalSinistroController,
+                                                          keyboardType: TextInputType.number,
+                                                          decoration: const InputDecoration(
+                                                            labelText: 'Valor Total do Sinistro',
+                                                            prefixText: 'R\$ ',
+                                                            isDense: true,
+                                                            filled: true,
+                                                          ),
+                                                          onChanged: (v) {
+                                                            final clean = v.replaceAll('.', '').replaceAll(',', '.');
+                                                            _currentClaim.valorTotalSinistro =
+                                                                double.tryParse(clean) ?? 0.0;
+                                                          },
+                                                        )
+                                                      : buildField(
+                                                          'Valor Total do Sinistro',
+                                                          'R\$ ${decimalFormat.format(_currentClaim.valorTotalSinistro)}',
                                                         ),
-                                                      ),
-                                                    )
-                                                  : _buildTempoPrevisto(),  // ← NOVO WIDGET
+                                                ),
+                                                const SizedBox(width: 12),
+                                                Expanded(
+                                                  child: _isEditing
+                                                      ? GestureDetector(
+                                                          onTap: () async {
+                                                            final picked = await showDatePicker(
+                                                              context: context,
+                                                              initialDate: _currentClaim.slaPrevisto ?? DateTime.now(),
+                                                              firstDate: DateTime.now(),
+                                                              lastDate: DateTime(2100),
+                                                            );
+                                                            if (picked != null) {
+                                                              setState(() {
+                                                                _currentClaim.slaPrevisto = picked;
+                                                                _slaPrevistController.text =
+                                                                    DateFormat('dd/MM/yyyy').format(picked);
+                                                              });
+                                                            }
+                                                          },
+                                                          child: TextFormField(
+                                                            controller: _slaPrevistController,
+                                                            enabled: false,
+                                                            decoration: const InputDecoration(
+                                                              labelText: 'Tempo Previsto',
+                                                              suffixIcon: Icon(Icons.calendar_today),
+                                                              isDense: true,
+                                                              filled: true,
+                                                            ),
+                                                          ),
+                                                        )
+                                                      : _buildTempoPrevisto(),
+                                                ),
+                                              ],
                                             ),
                                           ],
                                         ),
                                       ],
-                                    )
-                                  ],
-                                ),
-                              ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
 
-                              const SizedBox(height: 12),
-
-                              // 🚛 TRANSPORTE (INALTERADO)
-                              if (isTransporte && _currentClaim.transporte != null) ...[
-                                
-                                Column(
-                                  children: [
-
-                                    // 👤 MOTORISTA
+                                  // 👤 VIDA
+                                  if (isVida && _currentClaim.life != null) ...[
                                     buildInfoCard(
-                                      title: 'Motorista',
-                                      icon: Icons.person,
-                                      color: Colors.blue,
+                                      title: 'Dados do Segurado',
+                                      icon: Icons.person_outlined,
+                                      color: const Color(0xFF6A1B9A),
                                       children: [
                                         Row(
                                           children: [
                                             Expanded(
                                               child: buildEditableField(
-                                                label: 'Nome',
-                                                value: nomeMotorista,
+                                                label: 'Nome do Segurado',
+                                                value: clean(_currentClaim.life?.nomeSegurado),
                                                 onChanged: (v) {
-                                                  _currentClaim.transporte!.nomeMotorista = v;
+                                                  setState(() {
+                                                    _currentClaim.life = _currentClaim.life?.copyWith(
+                                                      nomeSegurado: v,
+                                                    );
+                                                  });
                                                 },
                                               ),
                                             ),
                                             Expanded(
                                               child: buildEditableField(
                                                 label: 'CPF',
-                                                value: clean(_currentClaim.transporte!.cpfMotorista),
+                                                value: clean(_currentClaim.life?.cpfSegurado),
                                                 onChanged: (v) {
-                                                  _currentClaim.transporte!.cpfMotorista = v;
+                                                  setState(() {
+                                                    _currentClaim.life = _currentClaim.life?.copyWith(
+                                                      cpfSegurado: v,
+                                                    );
+                                                  });
+                                                },
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Idade',
+                                                value: _currentClaim.life?.idadeSegurado.toString() ?? '',
+                                                onChanged: (v) {
+                                                  setState(() {
+                                                    _currentClaim.life = _currentClaim.life?.copyWith(
+                                                      idadeSegurado: int.tryParse(v) ?? 0,
+                                                    );
+                                                  });
+                                                },
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Parentesco',
+                                                value: clean(_currentClaim.life?.parentesco),
+                                                onChanged: (v) {
+                                                  setState(() {
+                                                    _currentClaim.life = _currentClaim.life?.copyWith(
+                                                      parentesco: v,
+                                                    );
+                                                  });
+                                                },
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+                                        buildEditableField(
+                                          label: 'Causa da Morte',
+                                          value: clean(_currentClaim.life?.causaMorte),
+                                          onChanged: (v) {
+                                            setState(() {
+                                              _currentClaim.life = _currentClaim.life?.copyWith(
+                                                causaMorte: v,
+                                              );
+                                            });
+                                          },
+                                          maxLines: 3,
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+
+                                  // 🏠 RESIDENCIAL
+                                  if (isResidencial && _currentClaim.house != null) ...[
+                                    buildInfoCard(
+                                      title: 'Dados do Imóvel',
+                                      icon: Icons.home_outlined,
+                                      color: const Color(0xFFBF360C),
+                                      children: [
+                                        buildEditableField(
+                                          label: 'Endereço',
+                                          value: clean(_currentClaim.house?.localHouse),
+                                          onChanged: (v) {
+                                            setState(() {
+                                              _currentClaim.house = _currentClaim.house?.copyWith(
+                                                localHouse: v,
+                                              );
+                                            });
+                                          },
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Tipo de Imóvel',
+                                                value: clean(_currentClaim.house?.tipoImovel),
+                                                onChanged: (v) {
+                                                  setState(() {
+                                                    _currentClaim.house = _currentClaim.house?.copyWith(
+                                                      tipoImovel: v,
+                                                    );
+                                                  });
+                                                },
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Valor do Imóvel (R\$)',
+                                                value: _currentClaim.house?.valorImovel != null
+                                                    ? _currentClaim.house!.valorImovel.toString()
+                                                    : '',
+                                                onChanged: (v) {
+                                                  setState(() {
+                                                    _currentClaim.house = _currentClaim.house?.copyWith(
+                                                      valorImovel: double.tryParse(v),
+                                                    );
+                                                  });
                                                 },
                                               ),
                                             ),
@@ -2872,983 +3289,1728 @@ Widget build(BuildContext context) {
                                         ),
                                       ],
                                     ),
+                                  ],
 
-                                    // 🚛 CAVALO
+                                  // 🏢 EMPRESARIAL
+                                  if (isEmpresarial && _currentClaim.business != null) ...[
                                     buildInfoCard(
-                                      title: 'Cavalo',
-                                      icon: Icons.local_shipping,
-                                      color: Colors.green,
+                                      title: 'Dados da Empresa',
+                                      icon: Icons.business_outlined,
+                                      color: const Color(0xFF424242),
                                       children: [
-
                                         Row(
                                           children: [
                                             Expanded(
                                               child: buildEditableField(
-                                                label: 'Placa',
-                                                value: clean(_currentClaim.transporte!.placaCavalo),
-                                                onChanged: (v) => _currentClaim.transporte!.placaCavalo = v,
+                                                label: 'Nome da Empresa',
+                                                value: clean(_currentClaim.business?.nomeEmpresa),
+                                                onChanged: (v) {
+                                                  setState(() {
+                                                    _currentClaim.business = _currentClaim.business?.copyWith(
+                                                      nomeEmpresa: v,
+                                                    );
+                                                  });
+                                                },
                                               ),
                                             ),
                                             Expanded(
                                               child: buildEditableField(
-                                                label: 'Chassi',
-                                                value: clean(_currentClaim.transporte!.chassi),
-                                                onChanged: (v) => _currentClaim.transporte!.chassi = v,
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Cor',
-                                                value: clean(_currentClaim.transporte!.cor),
-                                                onChanged: (v) => _currentClaim.transporte!.cor = v,
+                                                label: 'CNPJ',
+                                                value: clean(_currentClaim.business?.cnpjEmpresa),
+                                                onChanged: (v) {
+                                                  setState(() {
+                                                    _currentClaim.business = _currentClaim.business?.copyWith(
+                                                      cnpjEmpresa: v,
+                                                    );
+                                                  });
+                                                },
                                               ),
                                             ),
                                           ],
                                         ),
-
                                         const SizedBox(height: 8),
-
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Ano',
-                                                value: '${_currentClaim.transporte!.ano ?? ''}',
-                                                onChanged: (v) =>
-                                                    _currentClaim.transporte!.ano = int.tryParse(v) ?? 0,
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Modelo',
-                                                value: '${_currentClaim.transporte!.anomodelo ?? ''}',
-                                                onChanged: (v) =>
-                                                    _currentClaim.transporte!.anomodelo = int.tryParse(v) ?? 0,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-
-                                    // 🚚 CARRETA
-                                    buildInfoCard(
-                                      title: 'Carreta',
-                                      icon: Icons.fire_truck,
-                                      color: Colors.orange,
-                                      children: [
-
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Placa',
-                                                value: clean(_currentClaim.transporte!.placaCarreta),
-                                                onChanged: (v) =>
-                                                    _currentClaim.transporte!.placaCarreta = v,
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Chassi',
-                                                value: clean(_currentClaim.transporte!.chassiCarreta),
-                                                onChanged: (v) =>
-                                                    _currentClaim.transporte!.chassiCarreta = v,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-
-                                        const SizedBox(height: 8),
-
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Ano',
-                                                value: '${_currentClaim.transporte!.anoCarreta ?? ''}',
-                                                onChanged: (v) =>
-                                                    _currentClaim.transporte!.anoCarreta =
-                                                        int.tryParse(v) ?? 0,
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'Modelo',
-                                                value: '${_currentClaim.transporte!.anoModeloCarreta ?? ''}',
-                                                onChanged: (v) =>
-                                                    _currentClaim.transporte!.anoModeloCarreta =
-                                                        int.tryParse(v) ?? 0,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-
-                                    // 📦 CARGA
-                                    buildInfoCard(
-                                      title: 'Carga',
-                                      icon: Icons.inventory_2,
-                                      color: Colors.purple,
-                                      children: [
-
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'NFE',
-                                                value: clean(_currentClaim.transporte!.nfe),
-                                                onChanged: (v) =>
-                                                    _currentClaim.transporte!.nfe = v,
-                                              ),
-                                            ),
-                                            Expanded(
-                                              child: buildEditableField(
-                                                label: 'CTe',
-                                                value: clean(_currentClaim.transporte!.cte),
-                                                onChanged: (v) =>
-                                                    _currentClaim.transporte!.cte = v,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-
-                                        const SizedBox(height: 8),
-
                                         buildEditableField(
-                                          label: 'Averbação',
-                                          value: clean(_currentClaim.transporte!.numeroAverbacao),
-                                          onChanged: (v) =>
-                                              _currentClaim.transporte!.numeroAverbacao = v,
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                )
-
-                              ] else if (isVeiculo) ...[
-                                buildInfoCard(
-                                  title: 'Veículo',
-                                  icon: Icons.directions_car,
-                                  color: Colors.blueGrey,
-                                  children: [
-
-                                    // 🚗 DADOS PRINCIPAIS
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: buildEditableField(
-                                            label: 'Placa',
-                                            value: clean(_currentClaim.veiculoSelecionado?.placa),
-                                            onChanged: (v) {
-                                              if (_currentClaim.veiculoSelecionado != null) {
-                                                _currentClaim.veiculoSelecionado!.placa = v;
-                                              }
-                                            },
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: buildEditableField(
-                                            label: 'Marca',
-                                            value: clean(_currentClaim.veiculoSelecionado?.marca),
-                                            onChanged: (v) {
-                                              if (_currentClaim.veiculoSelecionado != null) {
-                                                _currentClaim.veiculoSelecionado!.marca = v;
-                                              }
-                                            },
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: buildEditableField(
-                                            label: 'Modelo',
-                                            value: clean(_currentClaim.veiculoSelecionado?.modelo),
-                                            onChanged: (v) {
-                                              if (_currentClaim.veiculoSelecionado != null) {
-                                                _currentClaim.veiculoSelecionado!.modelo = v;
-                                              }
-                                            },
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-
-                                    const SizedBox(height: 8),
-
-                                    // 🎨 COR + CHASSI
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: buildEditableField(
-                                            label: 'Cor',
-                                            value: clean(_currentClaim.veiculoSelecionado?.cor),
-                                            onChanged: (v) {
-                                              if (_currentClaim.veiculoSelecionado != null) {
-                                                _currentClaim.veiculoSelecionado!.cor = v;
-                                              }
-                                            },
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: buildEditableField(
-                                            label: 'Chassi',
-                                            value: clean(_currentClaim.veiculoSelecionado?.chassi),
-                                            onChanged: (v) {
-                                              if (_currentClaim.veiculoSelecionado != null) {
-                                                _currentClaim.veiculoSelecionado!.chassi = v;
-                                              }
-                                            },
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-
-                                    const SizedBox(height: 8),
-
-                                    // 📅 ANOS
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: buildEditableField(
-                                            label: 'Ano Fab.',
-                                            value: '${_currentClaim.veiculoSelecionado?.ano ?? ''}',
-                                            onChanged: (v) {
-                                              if (_currentClaim.veiculoSelecionado != null) {
-                                                _currentClaim.veiculoSelecionado!.ano = int.tryParse(v) ?? 0;
-                                              }
-                                            },
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: buildEditableField(
-                                            label: 'Ano Mod.',
-                                            value: '${_currentClaim.veiculoSelecionado?.anomodelo ?? ''}',
-                                            onChanged: (v) {
-                                              if (_currentClaim.veiculoSelecionado != null) {
-                                                _currentClaim.veiculoSelecionado!.anomodelo = int.tryParse(v) ?? 0;
-                                              }
-                                            },
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-
-                                  ],
-                                ),
-
-                                                            ] else if (isMaquinas) ...[
-                                // 🆕 SEÇÃO DE MÁQUINAS
-                                buildInfoCard(
-                                  title: 'Máquina e Equipamento',
-                                  icon: Icons.settings_outlined,
-                                  color: Colors.orange,
-                                  children: [
- 
-                                    // 📋 DADOS PRINCIPAIS
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: buildEditableField(
-                                            label: 'Descrição',
-                                            value: clean(_currentClaim.maquinaria?.descricao),
-                                            onChanged: (v) {
-                                              if (_currentClaim.maquinaria != null) {
-                                                _currentClaim.maquinaria!.descricao = v;
-                                              }
-                                            },
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: buildEditableField(
-                                            label: 'Número de Série',
-                                            value: clean(_currentClaim.maquinaria?.numeroSerie),
-                                            onChanged: (v) {
-                                              if (_currentClaim.maquinaria != null) {
-                                                _currentClaim.maquinaria!.numeroSerie = v;
-                                              }
-                                            },
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: buildEditableField(
-                                            label: 'Modelo',
-                                            value: clean(_currentClaim.maquinaria?.modelo),
-                                            onChanged: (v) {
-                                              if (_currentClaim.maquinaria != null) {
-                                                _currentClaim.maquinaria!.modelo = v;
-                                              }
-                                            },
-                                          ),
-                                        ),
-                                      ],
-                                    ),
- 
-                                    const SizedBox(height: 8),
- 
-                                    // 📝 DESCRIÇÃO DO SINISTRO
-                                    buildEditableField(
-                                      label: 'Descrição do Sinistro',
-                                      value: clean(_currentClaim.maquinaria?.descricaoSinistro),
-                                      onChanged: (v) {
-                                        if (_currentClaim.maquinaria != null) {
-                                          _currentClaim.maquinaria!.descricaoSinistro = v;
-                                        }
-                                      },
-                                      maxLines: 3,
-                                    ),
- 
-                                  ],
-                                ),
- 
-                              const SizedBox(height: 16),
-
-                              // 📝 RELATO (INALTERADO)
-                              Text('Relato do Evento:',
-                                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 4),
-
-                              if (_isEditing)
-                                TextFormField(
-                                  enabled: _isEditing,
-                                  controller: _relatoController,
-                                  maxLines: 3,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Relato do Evento',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  onChanged: (value) {
-                                    _currentClaim.relatoEvento = value;
-                                  },
-                                )
-                              else
-                                Text(_currentClaim.relatoEvento),
-
-                              const Divider(height: 30),
-
-                              // 👤 CLIENTE (INALTERADO)
-                              buildInfoCard(
-                                title: 'Cliente',
-                                icon: Icons.business,
-                                color: Colors.indigo,
-                                children: [
-
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: buildEditableField(
-                                          label: 'Nome',
-                                          value: _client?.nome,
+                                          label: 'Endereço',
+                                          value: clean(_currentClaim.business?.enderecoEmpresa),
                                           onChanged: (v) {
-                                            if (_client != null) {
-                                              _client!.nome = v;
-                                            }
+                                            setState(() {
+                                              _currentClaim.business = _currentClaim.business?.copyWith(
+                                                enderecoEmpresa: v,
+                                              );
+                                            });
                                           },
                                         ),
-                                      ),                                    ],
-                                  ),
-
-                                  const SizedBox(height: 8),
-
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: buildEditableField(
-                                          label: 'Contato',
-                                          value: _client?.contato,
-                                          onChanged: (v) {
-                                            if (_client != null) {
-                                              _client!.contato = v;
-                                            }
-                                          },
-                                        ),
-                                      ),
-                                      Expanded(
-                                        child: buildEditableField(
-                                          label: 'Email',
-                                          value: _client?.email,
-                                          onChanged: (v) {
-                                            if (_client != null) {
-                                              _client!.email = v;
-                                            }
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-
-                                  const SizedBox(height: 12),
-
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                    children: [
-                                      ElevatedButton.icon(
-                                        icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Colors.green),
-                                        label: const Text('WhatsApp'),
-                                        onPressed: () async {
-                                          final phone = (_client?.contato ?? '').replaceAll(RegExp(r'\D'), '');
-                                          final text = Uri.encodeFull('Atualização do sinistro número ${_currentClaim.numeroSinistro}');
-                                          final url = 'https://wa.me/$phone?text=$text';
-
-                                          if (await canLaunchUrlString(url)) {
-                                            await launchUrlString(url, mode: LaunchMode.externalApplication);
-                                          }
-                                        },
-                                      ),
-                                      ElevatedButton.icon(
-                                        icon: const Icon(Icons.email, color: Colors.redAccent),
-                                        label: const Text('E-mail'),
-                                        onPressed: () async {
-                                          final email = _client?.email ?? '';
-                                          final subject = Uri.encodeFull('${_currentClaim.numeroSinistro} - Atualização de Status');
-                                          final url = 'mailto:$email?subject=$subject';
-
-                                          if (await canLaunchUrlString(url)) {
-                                            await launchUrlString(url);
-                                          }
-                                        },
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-
-                              // 📸 FOTOS (INALTERADO)
-                              Text(
-                                'Fotos da Ocorrência:',
-                                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                              ),
-
-                              if (_currentClaim.fotosUrls.isNotEmpty)
-                                const SizedBox(height: 8),
-
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: _currentClaim.fotosUrls.map((url) {
-                                  final cleanedUrl = url.trim();
-                                  return GestureDetector(
-                                    onTap: () {
-                                      showDialog(
-                                        context: context,
-                                        builder: (_) => Dialog(
-                                          child: Stack(
-                                            children: [
-                                              InteractiveViewer(
-                                                child: Image.network(
-                                                  cleanedUrl,
-                                                  errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
-                                                ),
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Ramo de Atividade',
+                                                value: clean(_currentClaim.business?.ramoAtividade),
+                                                onChanged: (v) {
+                                                  setState(() {
+                                                    _currentClaim.business = _currentClaim.business?.copyWith(
+                                                      ramoAtividade: v,
+                                                    );
+                                                  });
+                                                },
                                               ),
-                                              Positioned(
-                                                top: 8,
-                                                right: 8,
-                                                child: IconButton(
-                                                  icon: const Icon(Icons.close, color: Colors.white),
-                                                  onPressed: () => Navigator.of(context).pop(),
-                                                ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Área (m²)',
+                                                value: _currentClaim.business?.areaM2 != null
+                                                    ? _currentClaim.business!.areaM2.toString()
+                                                    : '',
+                                                onChanged: (v) {
+                                                  setState(() {
+                                                    _currentClaim.business = _currentClaim.business?.copyWith(
+                                                      areaM2: double.tryParse(v),
+                                                    );
+                                                  });
+                                                },
                                               ),
-                                              if (_isEditing)
-                                                Positioned(
-                                                  top: 8,
-                                                  left: 8,
-                                                  child: IconButton(
-                                                    icon: const Icon(Icons.delete, color: Colors.red),
-                                                    onPressed: () {
-                                                      Navigator.of(context).pop();
-                                                      _removeFoto(url);
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Tipo de Estrutura',
+                                                value: clean(_currentClaim.business?.tipoEstrutura),
+                                                onChanged: (v) {
+                                                  setState(() {
+                                                    _currentClaim.business = _currentClaim.business?.copyWith(
+                                                      tipoEstrutura: v,
+                                                    );
+                                                  });
+                                                },
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Número de Andares',
+                                                value: _currentClaim.business?.numeroAndares != null
+                                                    ? _currentClaim.business!.numeroAndares.toString()
+                                                    : '',
+                                                onChanged: (v) {
+                                                  setState(() {
+                                                    _currentClaim.business = _currentClaim.business?.copyWith(
+                                                      numeroAndares: int.tryParse(v),
+                                                    );
+                                                  });
+                                                },
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Sistema de Segurança',
+                                                value: clean(_currentClaim.business?.sistemaSeguranca),
+                                                onChanged: (v) {
+                                                  setState(() {
+                                                    _currentClaim.business = _currentClaim.business?.copyWith(
+                                                      sistemaSeguranca: v,
+                                                    );
+                                                  });
+                                                },
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Situação (Próprio/Alugado)',
+                                                value: clean(_currentClaim.business?.situacaoImovel),
+                                                onChanged: (v) {
+                                                  setState(() {
+                                                    _currentClaim.business = _currentClaim.business?.copyWith(
+                                                      situacaoImovel: v,
+                                                    );
+                                                  });
+                                                },
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+
+                                  // 🚛 TRANSPORTE
+                                  if (isTransporte && _currentClaim.transporte != null) ...[
+                                    Column(
+                                      children: [
+                                        // Motorista
+                                        buildInfoCard(
+                                          title: 'Motorista',
+                                          icon: Icons.person,
+                                          color: Colors.blue,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'Nome',
+                                                    value: nomeMotorista,
+                                                    onChanged: (v) {
+                                                      _currentClaim.transporte!.nomeMotorista = v;
                                                     },
                                                   ),
                                                 ),
-                                            ],
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'CPF',
+                                                    value: clean(_currentClaim.transporte!.cpfMotorista),
+                                                    onChanged: (v) {
+                                                      _currentClaim.transporte!.cpfMotorista = v;
+                                                    },
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                        // Cavalo
+                                        buildInfoCard(
+                                          title: 'Cavalo',
+                                          icon: Icons.local_shipping,
+                                          color: Colors.green,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'Placa',
+                                                    value: clean(_currentClaim.transporte!.placaCavalo),
+                                                    onChanged: (v) => _currentClaim.transporte!.placaCavalo = v,
+                                                  ),
+                                                ),
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'Chassi',
+                                                    value: clean(_currentClaim.transporte!.chassi),
+                                                    onChanged: (v) => _currentClaim.transporte!.chassi = v,
+                                                  ),
+                                                ),
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'Cor',
+                                                    value: clean(_currentClaim.transporte!.cor),
+                                                    onChanged: (v) => _currentClaim.transporte!.cor = v,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'Ano',
+                                                    value: '${_currentClaim.transporte!.ano ?? ''}',
+                                                    onChanged: (v) =>
+                                                        _currentClaim.transporte!.ano = int.tryParse(v) ?? 0,
+                                                  ),
+                                                ),
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'Modelo',
+                                                    value: '${_currentClaim.transporte!.anomodelo ?? ''}',
+                                                    onChanged: (v) =>
+                                                        _currentClaim.transporte!.anomodelo = int.tryParse(v) ?? 0,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                        // Carreta
+                                        buildInfoCard(
+                                          title: 'Carreta',
+                                          icon: Icons.fire_truck,
+                                          color: Colors.orange,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'Placa',
+                                                    value: clean(_currentClaim.transporte!.placaCarreta),
+                                                    onChanged: (v) =>
+                                                        _currentClaim.transporte!.placaCarreta = v,
+                                                  ),
+                                                ),
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'Chassi',
+                                                    value: clean(_currentClaim.transporte!.chassiCarreta),
+                                                    onChanged: (v) =>
+                                                        _currentClaim.transporte!.chassiCarreta = v,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'Ano',
+                                                    value: '${_currentClaim.transporte!.anoCarreta ?? ''}',
+                                                    onChanged: (v) =>
+                                                        _currentClaim.transporte!.anoCarreta = int.tryParse(v) ?? 0,
+                                                  ),
+                                                ),
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'Modelo',
+                                                    value: '${_currentClaim.transporte!.anoModeloCarreta ?? ''}',
+                                                    onChanged: (v) =>
+                                                        _currentClaim.transporte!.anoModeloCarreta = int.tryParse(v) ?? 0,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                        // Carga
+                                        buildInfoCard(
+                                          title: 'Carga',
+                                          icon: Icons.inventory_2,
+                                          color: Colors.purple,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'NFE',
+                                                    value: clean(_currentClaim.transporte!.nfe),
+                                                    onChanged: (v) => _currentClaim.transporte!.nfe = v,
+                                                  ),
+                                                ),
+                                                Expanded(
+                                                  child: buildEditableField(
+                                                    label: 'CTe',
+                                                    value: clean(_currentClaim.transporte!.cte),
+                                                    onChanged: (v) => _currentClaim.transporte!.cte = v,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 8),
+                                            buildEditableField(
+                                              label: 'Averbação',
+                                              value: clean(_currentClaim.transporte!.numeroAverbacao),
+                                              onChanged: (v) => _currentClaim.transporte!.numeroAverbacao = v,
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ] else if (isVeiculo) ...[
+                                    // 🚗 VEÍCULO
+                                     buildInfoCard(
+                                      title: 'Veículo',
+                                      icon: Icons.directions_car,
+                                      color: Colors.blueGrey,
+                                      children: [
+                                        // Linha 1: Placa, Marca, Modelo
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Placa',
+                                                value: clean(_currentClaim.veiculoSelecionado?.placa),
+                                                onChanged: (v) {
+                                                  if (_currentClaim.veiculoSelecionado != null) {
+                                                    _currentClaim.veiculoSelecionado!.placa = v;
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Marca',
+                                                value: clean(_currentClaim.veiculoSelecionado?.marca),
+                                                onChanged: (v) {
+                                                  if (_currentClaim.veiculoSelecionado != null) {
+                                                    _currentClaim.veiculoSelecionado!.marca = v;
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Modelo',
+                                                value: clean(_currentClaim.veiculoSelecionado?.modelo),
+                                                onChanged: (v) {
+                                                  if (_currentClaim.veiculoSelecionado != null) {
+                                                    _currentClaim.veiculoSelecionado!.modelo = v;
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+
+                                        // Linha 2: Cor, Chassi
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Cor',
+                                                value: clean(_currentClaim.veiculoSelecionado?.cor),
+                                                onChanged: (v) {
+                                                  if (_currentClaim.veiculoSelecionado != null) {
+                                                    _currentClaim.veiculoSelecionado!.cor = v;
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Chassi',
+                                                value: clean(_currentClaim.veiculoSelecionado?.chassi),
+                                                onChanged: (v) {
+                                                  if (_currentClaim.veiculoSelecionado != null) {
+                                                    _currentClaim.veiculoSelecionado!.chassi = v;
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+
+                                        // Linha 3: Ano Fab., Ano Mod.
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Ano Fab.',
+                                                value: '${_currentClaim.veiculoSelecionado?.ano ?? ''}',
+                                                onChanged: (v) {
+                                                  if (_currentClaim.veiculoSelecionado != null) {
+                                                    _currentClaim.veiculoSelecionado!.ano = int.tryParse(v) ?? 0;
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Ano Mod.',
+                                                value: '${_currentClaim.veiculoSelecionado?.anomodelo ?? ''}',
+                                                onChanged: (v) {
+                                                  if (_currentClaim.veiculoSelecionado != null) {
+                                                    _currentClaim.veiculoSelecionado!.anomodelo = int.tryParse(v) ?? 0;
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+
+                                        // 🔥 NOVA LINHA: Condutor Motorista, CPF e CNH
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Condutor do Veículo',
+                                                value: _currentClaim.veiculoSelecionado?.nomeCondutorMotorista ?? '',
+                                                onChanged: (v) {
+                                                  if (_currentClaim.veiculoSelecionado != null) {
+                                                    _currentClaim.veiculoSelecionado!.nomeCondutorMotorista = v;
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'CPF do Condutor',
+                                                value: _currentClaim.veiculoSelecionado?.cpfCondutorMotorista ?? '',
+                                                onChanged: (v) {
+                                                  if (_currentClaim.veiculoSelecionado != null) {
+                                                    _currentClaim.veiculoSelecionado!.cpfCondutorMotorista = v;
+                                                  }
+                                                },
+                                                inputFormatters: [BRFormatters.cpfCnpjFormatter],
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'CNH do Condutor',
+                                                value: _currentClaim.veiculoSelecionado?.cnhCondutorMotorista ?? '',
+                                                onChanged: (v) {
+                                                  if (_currentClaim.veiculoSelecionado != null) {
+                                                    _currentClaim.veiculoSelecionado!.cnhCondutorMotorista = v;
+                                                  }
+                                                },
+                                                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+
+                                  // 🔧 MÁQUINAS
+                                  if (isMaquinas && _currentClaim.maquinaria != null) ...[
+                                    buildInfoCard(
+                                      title: 'Máquina e Equipamento',
+                                      icon: Icons.settings_outlined,
+                                      color: Colors.orange,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Descrição',
+                                                value: clean(_currentClaim.maquinaria?.descricao),
+                                                onChanged: (v) {
+                                                  if (_currentClaim.maquinaria != null) {
+                                                    _currentClaim.maquinaria!.descricao = v;
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Número de Série',
+                                                value: clean(_currentClaim.maquinaria?.numeroSerie),
+                                                onChanged: (v) {
+                                                  if (_currentClaim.maquinaria != null) {
+                                                    _currentClaim.maquinaria!.numeroSerie = v;
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: buildEditableField(
+                                                label: 'Modelo',
+                                                value: clean(_currentClaim.maquinaria?.modelo),
+                                                onChanged: (v) {
+                                                  if (_currentClaim.maquinaria != null) {
+                                                    _currentClaim.maquinaria!.modelo = v;
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+                                        buildEditableField(
+                                          label: 'Descrição do Sinistro',
+                                          value: clean(_currentClaim.maquinaria?.descricaoSinistro),
+                                          onChanged: (v) {
+                                            if (_currentClaim.maquinaria != null) {
+                                              _currentClaim.maquinaria!.descricaoSinistro = v;
+                                            }
+                                          },
+                                          maxLines: 3,
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+
+                                  const SizedBox(height: 16),
+
+                                  // 📝 RELATO
+                                  SelectableText(
+                                    'Relato do Evento:',
+                                    style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(height: 4),
+
+                                  if (_isEditing)
+                                    TextFormField(
+                                      enabled: _isEditing,
+                                      controller: _relatoController,
+                                      maxLines: 3,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Relato do Evento',
+                                        border: OutlineInputBorder(),
+                                      ),
+                                      onChanged: (value) {
+                                        _currentClaim.relatoEvento = value;
+                                      },
+                                    )
+                                  else
+                                    SelectableText(_currentClaim.relatoEvento),
+
+                                  const Divider(height: 30),
+
+                                  // 👤 CLIENTE
+                                  buildInfoCard(
+                                    title: 'Cliente',
+                                    icon: Icons.business,
+                                    color: Colors.indigo,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: buildEditableField(
+                                              label: 'Nome do Cliente',
+                                              value: _client?.nome,
+                                              onChanged: (v) {
+                                                if (_client != null) {
+                                                  _client!.nome = v;
+                                                }
+                                              },
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: buildEditableField(
+                                              label: 'Telefone do Cliente',
+                                              value: _client?.contato,
+                                              onChanged: (v) {
+                                                if (_client != null) {
+                                                  _client!.contato = v;
+                                                }
+                                              },
+                                            inputFormatters: [BRFormatters.telefoneFormatter],
+                                            ),
+                                          ),
+                                          Expanded(
+                                            child: buildEditableField(
+                                              label: 'Email',
+                                              value: _client?.email,
+                                              onChanged: (v) {
+                                                if (_client != null) {
+                                                  _client!.email = v;
+                                                }
+                                              },
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        children: [
+                                          Expanded(child: buildEditableField(label: 'Nome do Contato do Cliente', value: _currentClaim.nomeContatoSinistro ?? '', onChanged: (v) => _currentClaim.nomeContatoSinistro = v)),
+                                          Expanded(
+                                            child: buildEditableField(
+                                              label: 'Telefone do Contato do Cliente',
+                                              value: _currentClaim.telefoneContatoSinistro ?? '',
+                                              onChanged: (v) => _currentClaim.telefoneContatoSinistro = v,
+                                              inputFormatters: [BRFormatters.telefoneFormatter], // <-- ADICIONADO
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                        children: [
+                                          ElevatedButton.icon(
+                                            icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Colors.green),
+                                            label: const Text('WhatsApp'),
+                                            onPressed: () async {
+                                              final phone = (_client?.contato ?? '').replaceAll(RegExp(r'\D'), '');
+                                              final text = Uri.encodeFull(
+                                                  'Atualização do sinistro número ${_currentClaim.numeroSinistro}');
+                                              final url = 'https://wa.me/$phone?text=$text';
+                                              if (await canLaunchUrlString(url)) {
+                                                await launchUrlString(url, mode: LaunchMode.externalApplication);
+                                              }
+                                            },
+                                          ),
+                                          ElevatedButton.icon(
+                                            icon: const Icon(Icons.email, color: Colors.redAccent),
+                                            label: const Text('E-mail'),
+                                            onPressed: () async {
+                                              final email = _client?.email ?? '';
+                                              final subject =
+                                                  Uri.encodeFull('${_currentClaim.numeroSinistro} - Atualização de Status');
+                                              final url = 'mailto:$email?subject=$subject';
+                                              if (await canLaunchUrlString(url)) {
+                                                await launchUrlString(url);
+                                              }
+                                            },
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+
+                                  // 📸 FOTOS
+                                  Text(
+                                    'Fotos da Ocorrência:',
+                                    style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                                  ),
+                                  if (_currentClaim.fotosUrls.isNotEmpty) const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: _currentClaim.fotosUrls.map((url) {
+                                      final cleanedUrl = url.trim();
+                                      return GestureDetector(
+                                        onTap: () {
+                                          showDialog(
+                                            context: context,
+                                            builder: (_) => Dialog(
+                                              child: Stack(
+                                                children: [
+                                                  InteractiveViewer(
+                                                    child: Image.network(
+                                                      cleanedUrl,
+                                                      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+                                                    ),
+                                                  ),
+                                                  Positioned(
+                                                    top: 8,
+                                                    right: 8,
+                                                    child: IconButton(
+                                                      icon: const Icon(Icons.close, color: Colors.white),
+                                                      onPressed: () => Navigator.of(context).pop(),
+                                                    ),
+                                                  ),
+                                                  if (_isEditing)
+                                                    Positioned(
+                                                      top: 8,
+                                                      left: 8,
+                                                      child: IconButton(
+                                                        icon: const Icon(Icons.delete, color: Colors.red),
+                                                        onPressed: () {
+                                                          Navigator.of(context).pop();
+                                                          _removeFoto(url);
+                                                        },
+                                                      ),
+                                                    ),
+                                                ],
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(8),
+                                          child: Image.network(
+                                            cleanedUrl,
+                                            width: 100,
+                                            height: 100,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
                                           ),
                                         ),
                                       );
-                                    },
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: Image.network(
-                                        cleanedUrl,
-                                        width: 100,
-                                        height: 100,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
-                                      ),
+                                    }).toList(),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  if (_isEditing)
+                                    ElevatedButton.icon(
+                                      onPressed: _uploadFoto,
+                                      icon: const Icon(Icons.add_a_photo),
+                                      label: const Text('Adicionar Foto'),
                                     ),
-                                  );
-                                }).toList(),
-                              ),
+                                  const SizedBox(height: 16),
 
-                              const SizedBox(height: 8),
-
-                              if (_isEditing)
-                                ElevatedButton.icon(
-                                  onPressed: _uploadFoto,
-                                  icon: const Icon(Icons.add_a_photo),
-                                  label: const Text('Adicionar Foto'),
-                                ),
-
-                              const SizedBox(height: 16),
-
-                              // 📎 ARQUIVOS (INALTERADO)
-                              Text(
-                                'Arquivos/Laudos:',
-                                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                              ),
-
-                              const SizedBox(height: 8),
-
-                              if (_currentClaim.arquivosLaudosUrls.isNotEmpty)
-                                ..._currentClaim.arquivosLaudosUrls.map((url) {
-                                  final nomeArquivo = getFileNameFromUrl(url);
-
-                                  return ListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    leading: const Icon(Icons.insert_drive_file, color: Colors.blue),
-                                    title: Text(nomeArquivo),
-                                    trailing: _isEditing
-                                        ? IconButton(
-                                            icon: const Icon(Icons.delete, color: Colors.red),
-                                            onPressed: () => _removeDocumento(url),
-                                          )
-                                        : null,
-                                    onTap: () async {
-                                      final cleanedUrl = url.trim();
-                                      try {
-                                        if (await canLaunchUrlString(cleanedUrl)) {
-                                          await launchUrlString(cleanedUrl, mode: LaunchMode.externalApplication);
-                                        } else {
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            const SnackBar(content: Text('Não foi possível abrir o arquivo')),
-                                          );
-                                        }
-                                      } catch (e) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('Erro ao abrir arquivo: link inválido')),
-                                        );
-                                      }
-                                    },
-                                  );
-                                }),
-
-                              const SizedBox(height: 8),
-
-                              if (_isEditing)
-                                ElevatedButton.icon(
-                                  onPressed: _uploadDocumento,
-                                  icon: const Icon(Icons.attach_file),
-                                  label: const Text('Anexar Documento'),
-                                ),
-
-                              const SizedBox(height: 16),
-                              const SizedBox(width: 16),
-
-                              if (_isEditing)
-                                ElevatedButton.icon(
-                                  onPressed: _showAddThirdPartyDialog,
-                                  icon: const Icon(Icons.person_add),
-                                  label: const Text('Adicionar Terceiro'),
-                                ),
-                            ],
-                            ]
-                          ),
-                        ),
-                        // Widget para terceiros
-                        /// 👥 TERCEIROS (REFATORADO VISUAL — MESMA LÓGICA)
-                        if (_currentClaim.terceiros.isNotEmpty) ...[
-                          const Divider(height: 30),
-
-                          SectionCard(
-                            title: 'Terceiros Envolvidos',
-                            icon: Icons.people_outline,
-                            color: const Color(0xFF6A1B9A),
-                            child: Column(
-                              children: [
-
-                                ..._currentClaim.terceiros.map((tp) => Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 8.0),
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: Colors.grey.shade200),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withOpacity(0.04),
-                                          blurRadius: 6,
-                                          offset: const Offset(0, 2),
-                                        )
-                                      ],
+                                  // 📎 ARQUIVOS
+                                  Text(
+                                    'Arquivos/Laudos:',
+                                    style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  if (_currentClaim.arquivosLaudosUrls.isNotEmpty)
+                                    ..._currentClaim.arquivosLaudosUrls.map((url) {
+                                      final nomeArquivo = getFileNameFromUrl(url);
+                                      return ListTile(
+                                        contentPadding: EdgeInsets.zero,
+                                        leading: const Icon(Icons.insert_drive_file, color: Colors.blue),
+                                        title: Text(nomeArquivo),
+                                        trailing: _isEditing
+                                            ? IconButton(
+                                                icon: const Icon(Icons.delete, color: Colors.red),
+                                                onPressed: () => _removeDocumento(url),
+                                              )
+                                            : null,
+                                        onTap: () async {
+                                          final cleanedUrl = url.trim();
+                                          try {
+                                            if (await canLaunchUrlString(cleanedUrl)) {
+                                              await launchUrlString(cleanedUrl, mode: LaunchMode.externalApplication);
+                                            } else {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                const SnackBar(content: Text('Não foi possível abrir o arquivo')),
+                                              );
+                                            }
+                                          } catch (e) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(content: Text('Erro ao abrir arquivo: link inválido')),
+                                            );
+                                          }
+                                        },
+                                      );
+                                    }),
+                                  const SizedBox(height: 8),
+                                  if (_isEditing)
+                                    ElevatedButton.icon(
+                                      onPressed: _uploadDocumento,
+                                      icon: const Icon(Icons.attach_file),
+                                      label: const Text('Anexar Documento'),
                                     ),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-
-                                        /// 🔵 HEADER
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                          child: Row(
-                                            children: [
-                                              const Icon(Icons.person, size: 18, color: Colors.deepPurple),
-                                              const SizedBox(width: 8),
-
-                                              Expanded(
-                                                child: Text(
-                                                  tp.nome,
-                                                  style: const TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 14,
-                                                  ),
+                                  const SizedBox(height: 16),
+                                  if (_isEditing)
+                                    ElevatedButton.icon(
+                                      onPressed: _showAddThirdPartyDialog,
+                                      icon: const Icon(Icons.person_add),
+                                      label: const Text('Adicionar Terceiro'),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            // 👥 TERCEIROS
+                            const Divider(height: 30),
+                            SectionCard(
+                              title: 'Terceiros Envolvidos',
+                              icon: Icons.people_outline,
+                              color: const Color(0xFF6A1B9A),
+                              child: Column(
+                                children: [
+                                  if (_currentClaim.terceiros.isEmpty) ...[
+                                    // ✨ MENSAGEM QUANDO VAZIO
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 24.0),
+                                      child: Column(
+                                        children: [
+                                          Icon(
+                                            Icons.person_add_outlined,
+                                            size: 48,
+                                            color: Colors.grey.shade400,
+                                          ),
+                                          const SizedBox(height: 12),
+                                          Text(
+                                            'Nenhum terceiro adicionado',
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              color: Colors.grey.shade600,
+                                              fontStyle: FontStyle.italic,
+                                            ),
+                                          ),
+                                          if (_isEditing) ...[
+                                            const SizedBox(height: 16),
+                                            ElevatedButton.icon(
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.blue,
+                                                foregroundColor: Colors.white,
+                                                elevation: 0,
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius: BorderRadius.circular(8),
                                                 ),
                                               ),
-
-                                              if (_isEditing)
-                                                IconButton(
-                                                  icon: const Icon(Icons.edit, size: 18),
-                                                  onPressed: () => _showEditThirdPartyDialog(
-                                                    tp,
-                                                    _currentClaim.terceiros.indexOf(tp),
+                                              onPressed: _showAddThirdPartyDialog,
+                                              icon: const Icon(Icons.person_add),
+                                              label: const Text('Adicionar Terceiro'),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                  ] else ...[
+                                    // ✨ LISTA DE TERCEIROS
+                                    ..._currentClaim.terceiros.map((tp) => Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(color: Colors.grey.shade200),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withOpacity(0.04),
+                                              blurRadius: 6,
+                                              offset: const Offset(0, 2),
+                                            )
+                                          ],
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Padding(
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                              child: Row(
+                                                children: [
+                                                const Icon(Icons.person, size: 18, color: Colors.deepPurple),
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: SelectableText(
+                                                    tp.nome,
+                                                    style: const TextStyle(
+                                                      fontWeight: FontWeight.bold,
+                                                      fontSize: 14,
+                                                    ),
                                                   ),
                                                 ),
-                                            ],
-                                          ),
-                                        ),
+                                                if (_isEditing) ...[
+                                                  IconButton(
+                                                    icon: const Icon(Icons.edit, size: 18),
+                                                    onPressed: () => _showEditThirdPartyDialog(
+                                                      tp,
+                                                      _currentClaim.terceiros.indexOf(tp),
+                                                    ),
+                                                  ),
+                                                  // ✨ BOTÃO DE DELETE
+                                                  IconButton(
+                                                    icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                                                    onPressed: () => _showDeleteTerceiroConfirmation(
+                                                      tp,
+                                                      _currentClaim.terceiros.indexOf(tp),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
+                                              ),
+                                            ),
+                                            const Divider(height: 1),
+                                            Padding(
+                                              padding: const EdgeInsets.all(12.0),
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  // ── INFORMAÇÕES DO TERCEIRO ──
+                                                  // Linha 1: CPF | Telefone
+                                                  Row(
+                                                    children: [
+                                                      if (tp.cpf.isNotEmpty)
+                                                        Expanded(
+                                                          child: Row(
+                                                            children: [
+                                                              Text('CPF do Terceiro: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                                              SelectableText(tp.cpf, style: TextStyle(fontSize: 12)),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                      if (tp.contato.isNotEmpty)
+                                                        Expanded(
+                                                          child: Row(
+                                                            children: [
+                                                              Text('Telefone do Terceiro: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                                              SelectableText(tp.contato, style: TextStyle(fontSize: 12)),
+                                                              const SizedBox(width: 4),
+                                                              IconButton(
+                                                                icon: FaIcon(FontAwesomeIcons.whatsapp, color: Colors.green.shade600, size: 16),
+                                                                constraints: const BoxConstraints(),
+                                                                padding: EdgeInsets.zero,
+                                                                onPressed: () async {
+                                                                  final phone = tp.contato.replaceAll(RegExp(r'\D'), '');
+                                                                  if (phone.isNotEmpty) {
+                                                                    final url = 'https://wa.me/55$phone';
+                                                                    if (await canLaunchUrlString(url)) {
+                                                                      await launchUrlString(url, mode: LaunchMode.externalApplication);
+                                                                    }
+                                                                  }
+                                                                },
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                    ],
+                                                  ),
+                                                  const SizedBox(height: 6),
 
-                                        const Divider(height: 1),
+                                                  // Linha 2: Endereço (largura total)
+                                                  if (tp.enderecoTerceiro.isNotEmpty)
+                                                    Row(
+                                                      children: [
+                                                        Text('Endereço do Terceiro: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                                        Expanded(child: SelectableText(tp.enderecoTerceiro, style: TextStyle(fontSize: 12))),
+                                                      ],
+                                                    ),
+                                                  const SizedBox(height: 6),
 
-                                        /// 🔵 BODY (SEU CÓDIGO ORIGINAL — REORGANIZADO)
-                                        Padding(
-                                          padding: const EdgeInsets.all(12.0),
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
+                                                  // Linha 3: Nome Contato | Telefone Contato | Registro Seguradora
+                                                  Row(
+                                                    children: [
+                                                      if (tp.nomeContatoTerceiro?.isNotEmpty ?? false)
+                                                        Expanded(
+                                                          child: Row(
+                                                            children: [
+                                                              Text('Nome do Contato: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                                              SelectableText(tp.nomeContatoTerceiro!, style: TextStyle(fontSize: 12)),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                      if (tp.telefoneContatoTerceiro?.isNotEmpty ?? false)
+                                                        Expanded(
+                                                          child: Row(
+                                                            children: [
+                                                              Text('Tel. do Contato: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                                              SelectableText(tp.telefoneContatoTerceiro!, style: TextStyle(fontSize: 12)),
+                                                             IconButton(
+                                                                icon: FaIcon(FontAwesomeIcons.whatsapp, color: Colors.green.shade600, size: 16),
+                                                                constraints: const BoxConstraints(),
+                                                                padding: EdgeInsets.zero,
+                                                                onPressed: () async {
+                                                                  final phone = tp.contato.replaceAll(RegExp(r'\D'), '');
+                                                                  if (phone.isNotEmpty) {
+                                                                    final url = 'https://wa.me/55$phone';
+                                                                    if (await canLaunchUrlString(url)) {
+                                                                      await launchUrlString(url, mode: LaunchMode.externalApplication);
+                                                                    }
+                                                                  }
+                                                                },
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                      if (tp.registroSeguradoraTerceiro?.isNotEmpty ?? false)
+                                                        Expanded(
+                                                          child: Row(
+                                                            children: [
+                                                              Text('Registro da Seguradora: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                                              SelectableText(
+                                                                tp.registroSeguradoraTerceiro!,
+                                                                style: TextStyle(fontSize: 12, backgroundColor: Colors.yellow.shade100),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                    ],
+                                                  ),
+                                                  const SizedBox(height: 8),
 
-                                              if (tp.cpf.isNotEmpty)
-                                                Text('CPF: ${tp.cpf}'),
-
-                                              if (tp.contato.isNotEmpty)
-                                                Row(
-                                                  children: [
-                                                    Expanded(child: Text('Telefone: ${tp.contato}')),
-                                                    IconButton(
-                                                      icon: const Icon(Icons.phone, color: Colors.green),
-                                                      onPressed: () async {
-                                                        final uri = Uri(scheme: 'tel', path: tp.contato);
-                                                        if (await canLaunchUrl(uri)) {
-                                                          await launchUrl(uri);
-                                                        }
-                                                      },
+                                                  // ── RELATO (sempre aparece se tiver conteúdo) ──
+                                                  if ((tp.relato ?? '').isNotEmpty) ...[
+                                                    const Text('Relato do Terceiro:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                                    SelectableText(tp.relato!, style: TextStyle(fontSize: 12)),
+                                                    const SizedBox(height: 8),
+                                                  ],
+                                                  const SizedBox(height: 8),
+                                                  buildInfoCard(
+                                                    title: 'Veículo',
+                                                    icon: Icons.directions_car,
+                                                    color: Colors.deepPurple,
+                                                    children: [
+                                                      Row(
+                                                        children: [
+                                                          Expanded(child: buildField('Placa', tp.placa)),
+                                                          Expanded(child: buildField('Chassi', tp.chassi)),
+                                                          Expanded(child: buildField('Cor', tp.cor)),
+                                                        ],
+                                                      ),
+                                                      const SizedBox(height: 8),
+                                                      Row(
+                                                        children: [
+                                                          Expanded(child: buildField('Marca', tp.marcaTerceiro)),
+                                                          Expanded(child: buildField('Modelo', tp.modeloTerceiro)),
+                                                        ],
+                                                      ),
+                                                      const SizedBox(height: 8),
+                                                      Row(
+                                                        children: [
+                                                          Expanded(
+                                                              child: buildField('Ano Fab.', tp.anoFabricacaoTerceiro)),
+                                                          Expanded(
+                                                              child: buildField('Ano Mod.', tp.anoModeloTerceiro)),
+                                                        ],
+                                                      ),
+                                                      if (tp.numeroSinistroTerceiro.isNotEmpty) ...[
+                                                        const SizedBox(height: 8),
+                                                        buildField('Sinistro Terceiro', tp.numeroSinistroTerceiro),
+                                                      ],
+                                                    ],
+                                                  ),
+                                                  const SizedBox(height: 8),
+                                                  // ✨ CONTATO DO TERCEIRO
+/*
+                                                  if ((tp.nomeContatoTerceiro?.isNotEmpty ?? false) ||
+                                                    (tp.telefoneContatoTerceiro?.isNotEmpty ?? false) ||
+                                                    (tp.registroSeguradoraTerceiro?.isNotEmpty ?? false)) ...[
+                                                    const Divider(),
+                                                    const SizedBox(height: 8),
+                                                    const SelectableText(
+                                                      'Contato do Terceiro:',
+                                                      style: TextStyle(fontWeight: FontWeight.bold),
+                                                    ),
+                                                    const SizedBox(height: 4),
+                                                    if (tp.nomeContatoTerceiro?.isNotEmpty ?? false)
+                                                      SelectableText('Nome Contato: ${tp.nomeContatoTerceiro}'),
+                                                    if (tp.telefoneContatoTerceiro?.isNotEmpty ?? false)
+                                                      Row(
+                                                        children: [
+                                                          Expanded(
+                                                            child: SelectableText(
+                                                              'Telefone Contato: ${tp.telefoneContatoTerceiro}',
+                                                            ),
+                                                          ),
+                                                          IconButton(
+                                                            icon: const Icon(Icons.phone, color: Colors.green),
+                                                            onPressed: () async {
+                                                              final uri = Uri(
+                                                                scheme: 'tel',
+                                                                path: tp.telefoneContatoTerceiro!,
+                                                              );
+                                                              if (await canLaunchUrl(uri)) {
+                                                                await launchUrl(uri);
+                                                              }
+                                                            },
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    if (tp.registroSeguradoraTerceiro?.isNotEmpty ?? false)
+                                                      SelectableText(
+                                                        'Registro Seguradora: ${tp.registroSeguradoraTerceiro}',
+                                                      ),
+                                                  ],
+*/
+                                                  const SizedBox(height: 8),
+                                                  if (tp.fotosUrls != null && tp.fotosUrls!.isNotEmpty) ...[
+                                                    Text(
+                                                      'Fotos do veículo:',
+                                                      style: Theme.of(context)
+                                                          .textTheme
+                                                          .bodySmall
+                                                          ?.copyWith(fontWeight: FontWeight.bold),
+                                                    ),
+                                                    const SizedBox(height: 4),
+                                                    Wrap(
+                                                      spacing: 8,
+                                                      runSpacing: 8,
+                                                      children: tp.fotosUrls!.map((url) {
+                                                        final cleanedUrl = url.trim();
+                                                        return GestureDetector(
+                                                          onTap: () {
+                                                            _showImageViewer(NetworkImage(cleanedUrl));
+                                                          },
+                                                          child: ClipRRect(
+                                                            borderRadius: BorderRadius.circular(8),
+                                                            child: Image.network(
+                                                              cleanedUrl,
+                                                              width: 100,
+                                                              height: 100,
+                                                              fit: BoxFit.cover,
+                                                            ),
+                                                          ),
+                                                        );
+                                                      }).toList(),
                                                     ),
                                                   ],
-                                                ),
-
-                                              if (tp.email.isNotEmpty)
-                                                Text('Email: ${tp.email}'),
-
-                                              if (tp.enderecoTerceiro.isNotEmpty)
-                                                Text('Endereço: ${tp.enderecoTerceiro}'),
-
-                                              const SizedBox(height: 8),
-
-                                              /// 🚗 VEÍCULO
-                                              buildInfoCard(
-                                                title: 'Veículo',
-                                                icon: Icons.directions_car,
-                                                color: Colors.deepPurple,
-                                                children: [
-
-                                                  Row(
-                                                    children: [
-                                                      Expanded(child: buildField('Placa', tp.placa)),
-                                                      Expanded(child: buildField('Chassi', tp.chassi)),
-                                                      Expanded(child: buildField('Cor', tp.cor)),
-                                                    ],
-                                                  ),
-
-                                                  const SizedBox(height: 8),
-
-                                                  Row(
-                                                    children: [
-                                                      Expanded(child: buildField('Marca', tp.marcaTerceiro)),
-                                                      Expanded(child: buildField('Modelo', tp.modeloTerceiro)),
-                                                    ],
-                                                  ),
-
-                                                  const SizedBox(height: 8),
-
-                                                  Row(
-                                                    children: [
-                                                      Expanded(child: buildField('Ano Fab.', tp.anoFabricacaoTerceiro)),
-                                                      Expanded(child: buildField('Ano Mod.', tp.anoModeloTerceiro)),
-                                                    ],
-                                                  ),
-
-                                                  if (tp.numeroSinistroTerceiro.isNotEmpty) ...[
-                                                    const SizedBox(height: 8),
-                                                    buildField('Sinistro Terceiro', tp.numeroSinistroTerceiro),
+                                                  if (tp.documentosUrls != null && tp.documentosUrls!.isNotEmpty) ...[
+                                                    const SizedBox(height: 12),
+                                                    Text(
+                                                      'Documentos:',
+                                                      style: Theme.of(context)
+                                                          .textTheme
+                                                          .bodySmall
+                                                          ?.copyWith(fontWeight: FontWeight.bold),
+                                                    ),
+                                                    ...tp.documentosUrls!.map((url) => ListTile(
+                                                      contentPadding: EdgeInsets.zero,
+                                                      leading: const Icon(Icons.insert_drive_file, color: Colors.blue),
+                                                      title: Text(getFileNameFromUrl(url)),
+                                                      onTap: () async {
+                                                        final cleanedUrl = url.trim();
+                                                        if (await canLaunchUrlString(cleanedUrl)) {
+                                                          await launchUrlString(
+                                                            cleanedUrl,
+                                                            mode: LaunchMode.externalApplication,
+                                                          );
+                                                        }
+                                                      },
+                                                    )),
                                                   ],
                                                 ],
                                               ),
-
-                                              const SizedBox(height: 8),
-
-                                              /// 📝 RELATO
-                                              if ((tp.relato ?? '').isNotEmpty) ...[
-                                                const Text(
-                                                  'Relato:',
-                                                  style: TextStyle(fontWeight: FontWeight.bold),
-                                                ),
-                                                Text(tp.relato!),
-                                                const SizedBox(height: 8),
-                                              ],
-
-                                              /// 📸 FOTOS
-                                              if (tp.fotosUrls != null && tp.fotosUrls!.isNotEmpty) ...[
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    )),
+                                    const SizedBox(height: 8),
+                                    if (_isEditing)
+                                      ElevatedButton.icon(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.blue,
+                                          foregroundColor: Colors.white,
+                                          elevation: 0,
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                        ),
+                                        onPressed: _showAddThirdPartyDialog,
+                                        icon: const Icon(Icons.person_add),
+                                        label: const Text('Adicionar Terceiro'),
+                                      ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            // 🔴 DANOS CORPORAIS
+                            if (_currentClaim.danoscorporais.isNotEmpty) ...[
+                              const Divider(height: 30),
+                              SectionCard(
+                                title: 'Danos Corporais',
+                                icon: Icons.medical_information_outlined,
+                                color: const Color(0xFFD32F2F),
+                                child: Column(
+                                  children: [
+                                    ..._currentClaim.danoscorporais.asMap().entries.map((entry) {
+                                      final index = entry.key;
+                                      final dano = entry.value;
+                                      
+                                      return Container(
+                                        margin: const EdgeInsets.only(bottom: 16),
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade50,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: Colors.grey.shade300),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            // Header
+                                            Row(
+                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                              children: [
                                                 Text(
-                                                  'Fotos do veículo:',
-                                                  style: Theme.of(context)
-                                                      .textTheme
-                                                      .bodySmall
-                                                      ?.copyWith(fontWeight: FontWeight.bold),
+                                                  'Dano Corporal ${index + 1}',
+                                                  style: const TextStyle(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: Color(0xFFD32F2F),
+                                                  ),
                                                 ),
-                                                const SizedBox(height: 4),
-                                                Wrap(
-                                                  spacing: 8,
-                                                  runSpacing: 8,
-                                                  children: tp.fotosUrls!.map((url) {
-                                                    final cleanedUrl = url.trim();
-
-                                                    return GestureDetector(
-                                                      onTap: () {
-                                                        _showImageViewer(NetworkImage(cleanedUrl));
-                                                      },
+                                                if (_isEditing)
+                                                  IconButton(
+                                                    icon: const Icon(Icons.edit, size: 18, color: Colors.blue),
+                                                    onPressed: () {
+                                                      ScaffoldMessenger.of(context).showSnackBar(
+                                                        const SnackBar(content: Text('Edição indisponível nesta tela')),
+                                                      );
+                                                    },
+                                                  ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 12),
+                            
+                                            // Dados
+                                            if (dano.nome.isNotEmpty)
+                                              SelectableText(
+                                                'Nome: ${dano.nome}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            if (dano.cpfCnpj.isNotEmpty)
+                                              SelectableText(
+                                                'CPF/CNPJ: ${dano.cpfCnpj}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            if (dano.telefone.isNotEmpty)
+                                              SelectableText(
+                                                'Telefone: ${dano.telefone}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            if (dano.email.isNotEmpty)
+                                              SelectableText(
+                                                'E-mail: ${dano.email}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            if (dano.endereco.isNotEmpty)
+                                              SelectableText(
+                                                'Endereço: ${dano.endereco}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            if (dano.numeroSinistro.isNotEmpty)
+                                              SelectableText(
+                                                'Nº Sinistro: ${dano.numeroSinistro}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            if (dano.relato.isNotEmpty) ...[
+                                              const SizedBox(height: 8),
+                                              SelectableText(
+                                                'Relato: ${dano.relato}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            ],
+                            
+                                            // 🆕 FOTOS (com null check)
+                                            if ((dano.fotosUrls?.isNotEmpty ?? false)) ...[
+                                              const SizedBox(height: 12),
+                                              Text(
+                                                'Fotos',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.grey.shade700,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 6),
+                                              Wrap(
+                                                spacing: 6,
+                                                runSpacing: 6,
+                                                children: [
+                                                  ...dano.fotosUrls!.map((url) {
+                                                    return Container(
+                                                      width: 60,
+                                                      height: 60,
+                                                      decoration: BoxDecoration(
+                                                        borderRadius: BorderRadius.circular(4),
+                                                        border: Border.all(color: Colors.grey.shade300),
+                                                      ),
                                                       child: ClipRRect(
-                                                        borderRadius: BorderRadius.circular(8),
-                                                        child: Image.network(
-                                                          cleanedUrl,
-                                                          width: 100,
-                                                          height: 100,
-                                                          fit: BoxFit.cover,
+                                                        borderRadius: BorderRadius.circular(4),
+                                                        child: GestureDetector(
+                                                          onTap: () {
+                                                            showDialog(
+                                                              context: context,
+                                                              builder: (context) {
+                                                                return Dialog(
+                                                                  insetPadding: const EdgeInsets.all(10),
+                                                                  child: InteractiveViewer(
+                                                                    panEnabled: true,
+                                                                    minScale: 0.5,
+                                                                    maxScale: 4,
+                                                                    child: Container(
+                                                                      color: Colors.black,
+                                                                      child: Image.network(
+                                                                        url,
+                                                                        fit: BoxFit.contain,
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                );
+                                                              },
+                                                            );
+                                                          },
+                                                          child: Image.network(url, fit: BoxFit.cover),
                                                         ),
                                                       ),
                                                     );
                                                   }).toList(),
+                                                ],
+                                              ),
+                                            ],
+                            
+                                            // 🆕 DOCUMENTOS (com null check)
+                                            if ((dano.documentosUrls?.isNotEmpty ?? false)) ...[
+                                              const SizedBox(height: 12),
+                                              Text(
+                                                'Documentos',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.grey.shade700,
                                                 ),
-                                              ],
-
-                                              /// 📄 DOCUMENTOS
-                                              if (tp.documentosUrls != null &&
-                                                  tp.documentosUrls!.isNotEmpty) ...[
-                                                const SizedBox(height: 12),
+                                              ),
+                                              const SizedBox(height: 6),
+                                              Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  ...dano.documentosUrls!.map((url) {
+                                                    final fileName = url.split('/').last;
+                                                    return Padding(
+                                                      padding: const EdgeInsets.symmetric(vertical: 2),
+                                                      child: Row(
+                                                        children: [
+                                                          const Icon(Icons.description, size: 14, color: Colors.grey),
+                                                          const SizedBox(width: 4),
+                                                          Expanded(
+                                                            child: Text(
+                                                              fileName,
+                                                              style: const TextStyle(fontSize: 10),
+                                                              maxLines: 1,
+                                                              overflow: TextOverflow.ellipsis,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  }).toList(),
+                                                ],
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            
+                            // 🟡 DANOS MATERIAIS
+                            if (_currentClaim.danosmateriais.isNotEmpty) ...[
+                              const Divider(height: 30),
+                              SectionCard(
+                                title: 'Danos Materiais',
+                                icon: Icons.home_outlined,
+                                color: const Color(0xFFF57F17),
+                                child: Column(
+                                  children: [
+                                    ..._currentClaim.danosmateriais.asMap().entries.map((entry) {
+                                      final index = entry.key;
+                                      final dano = entry.value;
+                                      
+                                      return Container(
+                                        margin: const EdgeInsets.only(bottom: 16),
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade50,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: Colors.grey.shade300),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            // Header
+                                            Row(
+                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                              children: [
                                                 Text(
-                                                  'Documentos:',
-                                                  style: Theme.of(context)
-                                                      .textTheme
-                                                      .bodySmall
-                                                      ?.copyWith(fontWeight: FontWeight.bold),
+                                                  'Dano Material ${index + 1}',
+                                                  style: const TextStyle(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: Color(0xFFF57F17),
+                                                  ),
                                                 ),
-                                                ...tp.documentosUrls!.map((url) => ListTile(
-                                                  contentPadding: EdgeInsets.zero,
-                                                  leading: const Icon(Icons.insert_drive_file, color: Colors.blue),
-                                                  title: Text(getFileNameFromUrl(url)),
-                                                  onTap: () async {
-                                                    final cleanedUrl = url.trim();
-                                                    if (await canLaunchUrlString(cleanedUrl)) {
-                                                      await launchUrlString(
-                                                        cleanedUrl,
-                                                        mode: LaunchMode.externalApplication,
+                                                if (_isEditing)
+                                                  IconButton(
+                                                    icon: const Icon(Icons.edit, size: 18, color: Colors.blue),
+                                                    onPressed: () {
+                                                      ScaffoldMessenger.of(context).showSnackBar(
+                                                        const SnackBar(content: Text('Edição indisponível nesta tela')),
                                                       );
-                                                    }
-                                                  },
-                                                )),
+                                                    },
+                                                  ),
                                               ],
+                                            ),
+                                            const SizedBox(height: 12),
+                            
+                                            // Dados
+                                            if (dano.nome.isNotEmpty)
+                                              SelectableText(
+                                                'Nome: ${dano.nome}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            if (dano.cpfCnpj.isNotEmpty)
+                                              SelectableText(
+                                                'CPF/CNPJ: ${dano.cpfCnpj}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            if (dano.telefone.isNotEmpty)
+                                              SelectableText(
+                                                'Telefone: ${dano.telefone}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            if (dano.email.isNotEmpty)
+                                              SelectableText(
+                                                'E-mail: ${dano.email}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            if (dano.endereco.isNotEmpty)
+                                              SelectableText(
+                                                'Endereço: ${dano.endereco}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            if (dano.numeroSinistro.isNotEmpty)
+                                              SelectableText(
+                                                'Nº Sinistro: ${dano.numeroSinistro}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            if (dano.tipoPatrimonio.isNotEmpty)
+                                              SelectableText(
+                                                'Tipo de Patrimônio: ${dano.tipoPatrimonio}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            if (dano.descricao.isNotEmpty)
+                                              SelectableText(
+                                                'Descrição: ${dano.descricao}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            if (dano.relato.isNotEmpty) ...[
+                                              const SizedBox(height: 8),
+                                              SelectableText(
+                                                'Relato: ${dano.relato}',
+                                                style: const TextStyle(fontSize: 12),
+                                              ),
+                                            ],
+                            
+                                            // 🆕 FOTOS (com null check)
+                                            if ((dano.fotosUrls?.isNotEmpty ?? false)) ...[
+                                              const SizedBox(height: 12),
+                                              Text(
+                                                'Fotos',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.grey.shade700,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 6),
+                                              Wrap(
+                                                spacing: 6,
+                                                runSpacing: 6,
+                                                children: [
+                                                  ...dano.fotosUrls!.map((url) {
+                                                    return Container(
+                                                      width: 60,
+                                                      height: 60,
+                                                      decoration: BoxDecoration(
+                                                        borderRadius: BorderRadius.circular(4),
+                                                        border: Border.all(color: Colors.grey.shade300),
+                                                      ),
+                                                      child: ClipRRect(
+                                                        borderRadius: BorderRadius.circular(4),
+                                                        child: GestureDetector(
+                                                          onTap: () {
+                                                            showDialog(
+                                                              context: context,
+                                                              builder: (context) {
+                                                                return Dialog(
+                                                                  insetPadding: const EdgeInsets.all(10),
+                                                                  child: InteractiveViewer(
+                                                                    panEnabled: true,
+                                                                    minScale: 0.5,
+                                                                    maxScale: 4,
+                                                                    child: Container(
+                                                                      color: Colors.black,
+                                                                      child: Image.network(
+                                                                        url,
+                                                                        fit: BoxFit.contain,
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                );
+                                                              },
+                                                            );
+                                                          },
+                                                          child: Image.network(url, fit: BoxFit.cover),
+                                                        ),
+                                                      ),
+                                                    );
+                                                  }).toList(),
+                                                ],
+                                              ),
+                                            ],
+                            
+                                            // 🆕 DOCUMENTOS (com null check)
+                                            if ((dano.documentosUrls?.isNotEmpty ?? false)) ...[
+                                              const SizedBox(height: 12),
+                                              Text(
+                                                'Documentos',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.grey.shade700,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 6),
+                                              Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  ...dano.documentosUrls!.map((url) {
+                                                    final fileName = url.split('/').last;
+                                                    return Padding(
+                                                      padding: const EdgeInsets.symmetric(vertical: 2),
+                                                      child: Row(
+                                                        children: [
+                                                          const Icon(Icons.description, size: 14, color: Colors.grey),
+                                                          const SizedBox(width: 4),
+                                                          Expanded(
+                                                            child: Text(
+                                                              fileName,
+                                                              style: const TextStyle(fontSize: 10),
+                                                              maxLines: 1,
+                                                              overflow: TextOverflow.ellipsis,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  }).toList(),
+                                                ],
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 24),
+                            // 📝 ANOTAÇÕES
+                            SectionCard(
+                              title: 'Anotações',
+                              icon: Icons.note_alt_outlined,
+                              color: Colors.grey,
+                              child: _currentClaim.id != null
+                                  ? NotesWidget(
+                                      claimId: _currentClaim.id!,
+                                      anotacoes: _currentClaim.anotacoes,
+                                      isAdmin: _userRole == 'admin',
+                                    )
+                                  : const SelectableText("Carregando ID do sinistro..."),
+                            ),
+                            // ✅ TAREFAS
+                            SectionCard(
+                              title: 'Lista de Tarefas',
+                              icon: Icons.checklist,
+                              color: Colors.orange,
+                              child: TaskListWidget(
+                                numeroSinistro: _currentClaim.numeroSinistro.isNotEmpty
+                                    ? _currentClaim.numeroSinistro
+                                    : 'SEM_NUMERO',
+                                clientId: _currentClaim.idCliente,
+                                clientNome: _currentClaim.clientNome,
+                                clientCnpjCpf: _currentClaim.clientCnpjCpf,
+                                sinistroId: _currentClaim.id,
+                              ),
+                            ),
+                            // 🔧 OFICINAS
+                            SectionCard(
+                              title: 'Oficinas Envolvidas',
+                              icon: Icons.build,
+                              color: Colors.blue,
+                              child: WorkshopWidget(
+                                claimId: _currentClaim.id!,
+                                oficinas: _currentClaim.oficinas,
+                                clientNome: '',
+                                isEditing: _isEditing,
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                            ElevatedButton.icon(
+                              onPressed: _generateAndSharePdf,
+                              icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
+                              label: const Text('Gerar PDF', style: TextStyle(color: Colors.white)),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                backgroundColor: Colors.blueAccent,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            ElevatedButton.icon(
+                              onPressed: _generateExcel,
+                              icon: const Icon(Icons.table_chart, color: Colors.white),
+                              label: const Text('Gerar Excel', style: TextStyle(color: Colors.white)),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                backgroundColor: Colors.green,
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                            Text(
+                              'Atualizar Status',
+                              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 12),
+                            DropdownButtonFormField<String>(
+                              value: _currentClaim.statusAtual,
+                              decoration: const InputDecoration(
+                                labelText: 'Novo Status',
+                                border: OutlineInputBorder(),
+                              ),
+                              items: _statusOptions.map((status) =>
+                                  DropdownMenuItem(value: status, child: Text(status))).toList(),
+                              onChanged: (value) {
+                                if (value != null && value != _currentClaim.statusAtual) {
+                                  if (_isStatusExterno(value)) {
+                                    _showStatusWithDeadlineDialog(value);
+                                  } else if (value == 'Concluído') {
+                                    _showConfirmCloseDialog();
+                                  } else {
+                                    _updateStatus(value);
+                                  }
+                                }
+                              },
+                            ),
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton.icon(
+                                icon: const Icon(Icons.edit_calendar, size: 16),
+                                label: const Text('Atualizar previsão'),
+                                onPressed: _showUpdateDeadlineOnlyDialog,
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                            Text(
+                              'Histórico de Status',
+                              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 12),
+                            if (_currentClaim.historicoStatus.isEmpty)
+                              const Text('Nenhum histórico de status.')
+                            else
+                              ListView.builder(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                itemCount: _currentClaim.historicoStatus.length,
+                                itemBuilder: (context, index) {
+                                  final entry = _currentClaim.historicoStatus[index];
+                                  final status = entry['status'] as String;
+                                  final date = (entry['data'] as Timestamp).toDate();
+                                  final registradoPor = entry['registrado_por'] as String?;
+                                  final responsavel = registradoPor ?? (entry['responsavel'] as String? ?? 'N/A');
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Icon(_getStatusIcon(status), color: _getStatusColor(status)),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                status,
+                                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: _getStatusColor(status),
+                                                ),
+                                              ),
+                                              Text(
+                                                'Data: ${DateFormat('dd/MM/yyyy HH:mm').format(date)}',
+                                                style: Theme.of(context).textTheme.bodySmall,
+                                              ),
+                                              Text(
+                                                'Responsável: $responsavel',
+                                                style: Theme.of(context).textTheme.bodySmall,
+                                              ),
                                             ],
                                           ),
                                         ),
                                       ],
                                     ),
-                                  ),
-                                )),
-
-                                const SizedBox(height: 8),
-
-                                if (_isEditing)
-                                  ElevatedButton.icon(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.blue,
-                                      foregroundColor: Colors.white,
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                    ),
-                                    onPressed: _showAddThirdPartyDialog,
-                                    icon: const Icon(Icons.person_add),
-                                    label: const Text('Adicionar Terceiro'),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 24),
-                        // 📝 ANOTAÇÕES
-                        SectionCard(
-                          title: 'Anotações',
-                          icon: Icons.note_alt_outlined,
-                          color: Colors.grey,
-                          child: _currentClaim.id != null
-                              ? NotesWidget(
-                                  claimId: _currentClaim.id!,
-                                  anotacoes: _currentClaim.anotacoes,
-                                  isAdmin: _userRole == 'admin',
-                                )
-                              : const Text("Carregando ID do sinistro..."),
-                        ),
-
-                        // ✅ TAREFAS
-                        SectionCard(
-                          title: 'Lista de Tarefas',
-                          icon: Icons.checklist,
-                          color: Colors.orange,
-                          child: TaskListWidget(
-                            numeroSinistro: _currentClaim.numeroSinistro.isNotEmpty
-                                ? _currentClaim.numeroSinistro
-                                : 'SEM_NUMERO',
-                            clientId: _currentClaim.idCliente,
-                            clientNome: _currentClaim.clientNome,
-                            clientCnpjCpf: _currentClaim.clientCnpjCpf,
-                            sinistroId: _currentClaim.id,
-                          ),
-                        ),
-
-                        // 🔧 OFICINAS
-                        SectionCard(
-                          title: 'Oficinas Envolvidas',
-                          icon: Icons.build,
-                          color: Colors.blue,
-                          child: WorkshopWidget(
-                            claimId: _currentClaim.id!,
-                            oficinas: _currentClaim.oficinas,
-                            clientNome: '',
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        ElevatedButton.icon(
-                          onPressed: _generateAndSharePdf,
-                          icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
-                          label: const Text('Gerar PDF', style: TextStyle(color: Colors.white)),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            backgroundColor: Colors.blueAccent,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        ElevatedButton.icon(
-                          onPressed: _generateExcel,
-                          icon: const Icon(Icons.table_chart, color: Colors.white),
-                          label: const Text('Gerar Excel', style: TextStyle(color: Colors.white)),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            backgroundColor: Colors.green,
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        Text('Atualizar Status',
-                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 12),
-                        DropdownButtonFormField<String>(
-                          value: _currentClaim.statusAtual,
-                          decoration: const InputDecoration(
-                            labelText: 'Novo Status',
-                            border: OutlineInputBorder(),
-                          ),
-                          items: _statusOptions.map((status) =>
-                            DropdownMenuItem(value: status, child: Text(status))).toList(),
-                          onChanged: (value) {
-                            if (value != null && value != _currentClaim.statusAtual) {
-                              if (_isStatusExterno(value)) {
-                                _showStatusWithDeadlineDialog(value);
-                              } else if (value == 'Concluído') {
-                                _showConfirmCloseDialog();
-                              } else {
-                                _updateStatus(value);
-                              }
-                            }
-                          }
-                        ),
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton.icon(
-                            icon: const Icon(Icons.edit_calendar, size: 16),
-                            label: const Text('Atualizar previsão'),
-                            onPressed: _showUpdateDeadlineOnlyDialog,
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        Text('Histórico de Status',
-                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 12),
-                        if (_currentClaim.historicoStatus.isEmpty)
-                          const Text('Nenhum histórico de status.')
-                        else
-                          ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: _currentClaim.historicoStatus.length,
-                            itemBuilder: (context, index) {
-                              final entry = _currentClaim.historicoStatus[index];
-                              final status = entry['status'] as String;
-                              final date = (entry['data'] as Timestamp).toDate();
-                              final responsavelEmail = entry['responsavelEmail'] as String?;
-                              final responsavel = responsavelEmail ?? (entry['responsavel'] as String? ?? 'N/A');
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Icon(_getStatusIcon(status), color: _getStatusColor(status)),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(status, style: Theme.of(context)
-                                              .textTheme.titleMedium?.copyWith(
-                                                fontWeight: FontWeight.bold,
-                                                color: _getStatusColor(status))),
-                                          Text('Data: ${DateFormat('dd/MM/yyyy HH:mm').format(date)}',
-                                              style: Theme.of(context).textTheme.bodySmall),
-                                          Text('Responsável: $responsavel',
-                                              style: Theme.of(context).textTheme.bodySmall),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
+                                  );
+                                },
+                              ),
+                            if (_userRole == 'admin') ...[
+                              const SizedBox(height: 16),
+                              ElevatedButton.icon(
+                                onPressed: _confirmDeleteClaim,
+                                icon: const Icon(Icons.delete, color: Colors.red),
+                                label: const Text('Excluir Sinistro'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red.shade100,
                                 ),
-                              );
-                            },
-                          ),
-                        if (_userRole == 'admin') ...[
-                          const SizedBox(height: 16),
-                          ElevatedButton.icon(
-                            onPressed: _confirmDeleteClaim,
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            label: const Text('Excluir Sinistro'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red.shade100,
-                            ),
-                          ),
-                        ],
-                      ],
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              );
-            },
-          ),
-  )
-  );
-}
+                  );
+                },
+              ),
+      ),
+    );
+  }
 
   // Formatação de cor de SLA
   Widget _buildTempoPrevisto() {

@@ -86,7 +86,6 @@ class _AuthScreenState extends State<AuthScreen> {
         _passwordController.text,
       );
 
-      // 🔥 novo bloco
       final user = FirebaseAuth.instance.currentUser;
 
       if (user != null) {
@@ -163,16 +162,96 @@ class _AuthScreenState extends State<AuthScreen> {
     });
   }
 
+  // 🔥 NOVO: Método para redefinir senha
+  Future<void> _resetPassword() async {
+    final emailController = TextEditingController();
+    bool isLoading = false;
+
+    return showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setStateDialog) {
+          return AlertDialog(
+            title: const Text('Redefinir Senha'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Digite o e-mail cadastrado para receber o link de redefinição de senha.',
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: emailController,
+                  decoration: const InputDecoration(
+                    labelText: 'E-mail',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.email),
+                  ),
+                  keyboardType: TextInputType.emailAddress,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: isLoading
+                    ? null
+                    : () async {
+                        final email = emailController.text.trim();
+                        if (email.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Informe um e-mail válido.')),
+                          );
+                          return;
+                        }
+                        setStateDialog(() => isLoading = true);
+                        try {
+                          await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('E-mail de redefinição enviado!'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        } catch (e) {
+                          setStateDialog(() => isLoading = false);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Erro: ${e.toString()}'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      },
+                child: isLoading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Enviar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Login - Upgrade Corretora de Seguros'),
-        automaticallyImplyLeading: false, // Remove botão de voltar
+        automaticallyImplyLeading: false,
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          // Se for web ou tablet, limita a largura
           final isLargeScreen = constraints.maxWidth > 600;
           final maxWidth = isLargeScreen ? 400.0 : double.infinity;
 
@@ -280,27 +359,45 @@ class _AuthScreenState extends State<AuthScreen> {
                           ),
                         ),
                       ),
+                      const SizedBox(height: 16.0),
                     ],
-                    const SizedBox(height: 16.0),
-                    // Links
+
+                    // 🔥 Esqueci minha senha (agora funcional)
                     TextButton(
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const RegisterScreen()),
-                        );
-                      },
-                      child: const Text('Não tem conta? Cadastre-se'),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Funcionalidade em desenvolvimento.'),
-                          ),
-                        );
-                      },
+                      onPressed: _resetPassword,
                       child: const Text('Esqueci minha senha'),
                     ),
+                    // ❌ Link "Não tem conta? Cadastre-se" removido
+
+                    // 🔥 Rodapé com navegadores recomendados
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300, width: 0.5),
+                      ),
+                      child: Column(
+                        children: [
+                          const Icon(
+                            Icons.info_outline,
+                            size: 16,
+                            color: Colors.grey,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Navegadores recomendados: Safari, FireFox ou Edge. O Chrome pode apresentar instabilidade e dificuldades de visualizações de imagens.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey.shade600,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                   ],
                 ),
               ),

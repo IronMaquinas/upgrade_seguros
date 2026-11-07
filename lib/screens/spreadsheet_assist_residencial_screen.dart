@@ -13,6 +13,7 @@ import 'package:flutter_google_places_sdk/flutter_google_places_sdk.dart' hide L
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:upgrade_seguros/models/apolice_model.dart';
 import 'package:upgrade_seguros/services/config_service.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import '../models/claim_model.dart';
@@ -56,6 +57,12 @@ class _SpreadsheetAssistResidencialScreenState
   final _franquiaCtrl = TextEditingController();
   final _tempoSlaCtrl = TextEditingController(text: '30');
 
+  final TextEditingController _numeroApoliceCtrl = TextEditingController();
+  final TextEditingController _cpfCnpjCtrl = TextEditingController();
+  final TextEditingController _contatoCtrl = TextEditingController();
+  final TextEditingController _vigenciaCtrl = TextEditingController();
+
+
   // Contato que realizará o serviço (agendamento)
   final _nomeContatoServicoCtrl = TextEditingController();
   final _telefoneContatoServicoCtrl = TextEditingController();
@@ -69,6 +76,8 @@ class _SpreadsheetAssistResidencialScreenState
 
   // Google Places - lat/lng
   LatLng? _enderecoLatLng;
+
+  String _vigenciaApolice = '';
 
   // Anexos
   final Map<String, List<XFile>> _anexos = {
@@ -97,6 +106,21 @@ class _SpreadsheetAssistResidencialScreenState
     _loadConfig();
     _places = FlutterGooglePlacesSdk(_apiKey, locale: const Locale('pt', 'BR'));
     _carregarSeguradoras();
+
+    // 🔥 Listener para resetar quando o nome for apagado
+     _clienteBuscaCtrl.addListener(() {
+      if (_clienteBuscaCtrl.text.trim().isEmpty) {
+        setState(() {
+          _cliente = null;
+          _cpfCnpjCtrl.clear();
+          _telefoneCtrl.clear();
+          _contatoCtrl.clear();
+          _numeroApoliceCtrl.clear();
+          _vigenciaCtrl.clear();
+          _vigenciaApolice = ''; // se você ainda tiver essa variável
+        });
+      }
+    });
   }
 
   Future<void> _loadConfig() async {
@@ -173,23 +197,76 @@ class _SpreadsheetAssistResidencialScreenState
   }
 
   // ── Busca cliente ─────────────────────────────────────────────────────
-    Future<void> _abrirBuscaCliente() async {
+  Future<void> _abrirBuscaCliente() async {
     final result = await showDialog<ClientSearchResult>(
       context: context,
       useRootNavigator: false,
       builder: (_) => ClientSearchDialog(
         initialQuery: _clienteBuscaCtrl.text,
-        onClientSelected: (c) => c != null
-            ? ClientSearchResult.client(c)
-            : null,
+        onClientSelected: (c) => c != null ? ClientSearchResult.client(c) : null,
       ),
     );
 
     if (result?.client != null) {
+      final cliente = result!.client!;
+
+      // Formata CPF/CNPJ
+      final cpfCnpjFormatado = cliente.cnpjCpf.length <= 11
+          ? BRFormatters.formatarCPF(cliente.cnpjCpf)
+          : BRFormatters.formatarCNPJ(cliente.cnpjCpf);
+
+      // Formata telefone (com fallback)
+      final telefoneFormatado = cliente.contatoTelefone.isNotEmpty
+          ? BRFormatters.formatarTelefone(cliente.contatoTelefone)
+          : 'Não informado';
+
+      // 🔥 Busca apólice ativa (residencial) de forma segura
+      Apolice? apoliceAtiva;
+      try {
+        apoliceAtiva = cliente.apolices
+            .where((a) => a.ramo == 'Residencial' &&
+                  a.dataInicio.isBefore(DateTime.now()) &&
+                  a.dataFim.isAfter(DateTime.now()))
+            .firstOrNull;
+      } catch (e) {
+        debugPrint('⚠️ Erro ao buscar apólice ativa: $e');
+      }
+
+      // Fallback: se não houver ativa, pega a primeira apólice residencial
+      final apoliceResidencial = cliente.apolices
+          .where((a) => a.ramo == 'Residencial')
+          .firstOrNull;
+      
+      final apoliceParaMostrar = apoliceAtiva ?? apoliceResidencial;
+
       setState(() {
-        _cliente = result!.client!;
-        _clienteBuscaCtrl.text = _cliente!.nome;
+        _cliente = cliente;
+        _clienteBuscaCtrl.text = cliente.nome;
+
+        // Preenche os dados do cliente
+        _cpfCnpjCtrl.text = cpfCnpjFormatado;
+        _telefoneCtrl.text = telefoneFormatado;
+        _contatoCtrl.text = cliente.contato.isNotEmpty ? cliente.contato : 'Não informado';
+
+        // Preenche a apólice, se houver
+        if (apoliceParaMostrar != null) {
+          _numeroApoliceCtrl.text = apoliceParaMostrar.numeroApolice;
+          _vigenciaCtrl.text = BRFormatters.formatarData(apoliceParaMostrar.dataFim);
+        } else {
+          _numeroApoliceCtrl.clear();
+          _vigenciaCtrl.clear();
+        }
       });
+
+      // Feedback para o usuário
+      if (apoliceAtiva == null) {
+        final msg = cliente.apolices.where((a) => a.ramo == 'Residencial').isEmpty
+            ? '⚠️ Cliente não possui apólice residencial cadastrada.'
+            : '⚠️ Nenhuma apólice residencial ativa. Exibindo a primeira cadastrada.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg), backgroundColor: Colors.orange),
+        );
+      }
     }
   }
 
@@ -712,57 +789,106 @@ class _SpreadsheetAssistResidencialScreenState
 
               // ── 1. Cliente ─────────────────────────────────────────────
               _buildSectionCard(
-                icon: Icons.person,
-                color: const Color(0xFF1565C0),
-                title: 'Cliente',
-                children: [
-                  TextField(
-                    onTap: _abrirBuscaCliente,
-                    readOnly: true,
-                    decoration: InputDecoration(
-                      labelText: 'Nome do Cliente',
-                      hintText: 'Clique para buscar cliente',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                      prefixIcon: const Icon(Icons.business),
-                      suffixIcon: const Icon(Icons.search),
-                    ),
-                    controller: _clienteBuscaCtrl,
+              icon: Icons.person,
+              color: const Color(0xFF1565C0),
+              title: 'Cliente & Apólice',
+              children: [
+                TextField(
+                  controller: _clienteBuscaCtrl,
+                  onTap: _abrirBuscaCliente,
+                  decoration: InputDecoration(
+                    labelText: 'Nome do Cliente',
+                    hintText: 'Digite o nome ou clique para buscar',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    prefixIcon: const Icon(Icons.business),
+                    suffixIcon: _clienteBuscaCtrl.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () {
+                              setState(() {
+                                _clienteBuscaCtrl.clear();
+                                _cliente = null;
+                                _numeroApoliceCtrl.clear();
+                                _vigenciaApolice = '';
+                              });
+                            },
+                          )
+                        : const Icon(Icons.search),
                   ),
-                  if (_cliente != null) ...[
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            readOnly: true,
-                            decoration: InputDecoration(
-                              labelText: 'CNPJ / CPF',
-                              border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8)),
-                            ),
-                            controller: TextEditingController(
-                                text: _cliente!.cnpjCpf),
+                ),
+                if (_cliente != null) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          readOnly: true,
+                          decoration: InputDecoration(
+                            labelText: 'CNPJ / CPF',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                           ),
+                          controller: _cpfCnpjCtrl,
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextField(
-                            readOnly: true,
-                            decoration: InputDecoration(
-                              labelText: 'Telefone',
-                              border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8)),
-                            ),
-                            controller: TextEditingController(
-                                text: _cliente!.contatoTelefone),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          readOnly: true,
+                          decoration: InputDecoration(
+                            labelText: 'Nº Apólice',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                           ),
+                          controller: _numeroApoliceCtrl,
                         ),
-                      ],
-                    ),
-                  ],
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          readOnly: true,
+                          decoration: InputDecoration(
+                            labelText: 'Vigência da Apólice',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            prefixIcon: const Icon(Icons.calendar_today_outlined),
+                            suffixIcon: _vigenciaCtrl.text.isNotEmpty
+                                ? _statusVigenciaIcon(_vigenciaCtrl.text)
+                                : null,
+                          ),
+                          controller: _vigenciaCtrl,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          readOnly: true,
+                          decoration: InputDecoration(
+                            labelText: 'Telefone do Cliente',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            prefixIcon: const Icon(Icons.phone_outlined),
+                          ),
+                          controller: _telefoneCtrl,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          readOnly: true,
+                          decoration: InputDecoration(
+                            labelText: 'Nome do Contato (sócio/representante)',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            prefixIcon: const Icon(Icons.person_outline),
+                          ),
+                          controller: _contatoCtrl,
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
-              ),
+              ],
+            ),
               const SizedBox(height: 12),
 
               // ── 2. Tipo de Serviço & Seguradora ────────────────────────────
@@ -1245,6 +1371,26 @@ class _SpreadsheetAssistResidencialScreenState
       ),
     );
   }
+
+  // --- WIDGET PARA COR DE VIGÊNCIA DA APÓLICE ---
+  Widget? _statusVigenciaIcon(String dataStr) {
+    try {
+      final data = DateFormat('dd/MM/yyyy').parse(dataStr);
+      final hoje = DateTime.now();
+      final diff = data.difference(hoje).inDays;
+
+      if (diff < 0) {
+        return const Icon(Icons.error, color: Colors.red);
+      } else if (diff <= 30) {
+        return const Icon(Icons.warning_amber_rounded, color: Colors.orange);
+      } else {
+        return const Icon(Icons.check_circle, color: Colors.green);
+      }
+    } catch (e) {
+      return null;
+    }
+  }
+
 }
 
 // ── Delegate de busca de clientes ─────────────────────────────────────────

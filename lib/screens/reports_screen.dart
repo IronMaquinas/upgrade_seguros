@@ -2,8 +2,10 @@
 // ignore_for_file: unused_import, deprecated_member_use
 
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:intl/intl.dart';
 import 'package:collection/collection.dart';
 import 'package:printing/printing.dart';
@@ -14,6 +16,10 @@ import 'package:upgrade_seguros/services/config_service.dart';
 import 'package:upgrade_seguros/services/firestore_service.dart';
 import 'package:upgrade_seguros/models/client_model.dart';
 import 'package:upgrade_seguros/models/claim_model.dart';
+import 'package:upgrade_seguros/services/pdf_report_service.dart';
+import '../models/report_data.dart';
+import 'package:upgrade_seguros/widgets/top_clients_widgets.dart';
+import 'package:upgrade_seguros/widgets/employees_performance_widgets.dart';
 
 // ─── Helper para converter datas (Timestamp ou String) ───────────────────────
 DateTime _parseDate(dynamic value) {
@@ -35,100 +41,6 @@ class _C {
   static const bg     = Color(0xFFF4F6F9);
 }
 
-// ─── Modelo interno de métricas ───────────────────────────────────────────────
-class _ReportData {
-  final int totalSinistros;
-  final double valorTotalSinistros;
-  final double valorTotalApolices;
-  final double sinistralidade; // %
-  final double tempoMedioResolucao; // dias
-  final Map<String, int> porStatus;
-  final Map<String, int> porFuncionario;
-  final Map<String, double> tempoMedioEtapa;
-  final Map<String, double> tempoMedioFuncionario;
-  final List<_ClaimAtraso> aprovacoesParadas;   // Aguardando Aprovação > 3 dias
-  final List<_ClaimAtraso> reparosProlongados;  // Reparo em Andamento > 7 dias
-  final List<_ClaimAtraso> emAtraso;            // demais sinistros parados ≥ 7 dias
-  final List<Client> contratosProximos;
-  final List<_ClienteRisco> clientesAltoRisco;
-  final double npsMedia;                          // 1. NPS
-  final Map<String, int> npsCategoria;            // promotor, neutro, detrator
-  final int totalPesquisasEnviadas;               
-  final int totalPesquisasRespondidas;
-  final double tempoMedioSinistros;               // 2. Tempo médio
-  final double tempoMedioAssistencias;
-  final Map<String, int> assistenciasPorRamo;     // 3. Distribuição por ramo
-  final Map<String, int> assistenciasPorTipo;     // 4. Por tipo
-  final double percentualComTerceiros;             // 5. Envolvimento terceiros
-  final Map<String, int> sinistrosPorHorario;     // 6. Período (manha, tarde, noite, madrugada)
-  final Map<String, int> sinistrosPorDia;
-  final Map<String, int> sinistrosPorRamo;
-  final Map<int, double> npsPoMes;           // Mês (1-12) → NPS média
-  final Map<int, int> sinistrosPoMes;        // Mês (1-12) → Quantidade sinistros
-  final Map<int, int> assistenciasPoMes;     // Mês (1-12) → Quantidade assistências
-  final Map<int, double> sinistralidadePoMes; // Mês (1-12) → Loss Ratio %
-  final Map<int, int> contratosAtivosPoMes;        // Mês → Qtd contratos ativos
-  final Map<int, Map<String, int>> contratosPoRamoMes; // Mês → Ramo → Qtd
-  final Map<int, double> valorApolicesPoMes;       // Mês → Valor total apólices
-  final Map<int, double> ticketMedioPoMes;         // Mês → Ticket médio R$
-  final Map<int, double> taxaRetencaoPoMes;        // Mês → Taxa retenção %
-  final Map<int, double> slaComplianceSinistrosPoMes;
-  final Map<int, double> slaComplianceAssistenciasPoMes;
-
-  const _ReportData({
-    required this.totalSinistros,
-    required this.valorTotalSinistros,
-    required this.valorTotalApolices,
-    required this.sinistralidade,
-    required this.tempoMedioResolucao,
-    required this.porStatus,
-    required this.porFuncionario,
-    required this.tempoMedioEtapa,
-    required this.tempoMedioFuncionario,
-    required this.aprovacoesParadas,
-    required this.reparosProlongados,
-    required this.emAtraso,
-    required this.contratosProximos,
-    required this.clientesAltoRisco,
-    required this.npsMedia,
-    required this.npsCategoria,
-    required this.totalPesquisasEnviadas,
-    required this.totalPesquisasRespondidas,
-    required this.tempoMedioSinistros,
-    required this.tempoMedioAssistencias,
-    required this.assistenciasPorRamo,
-    required this.assistenciasPorTipo,
-    required this.percentualComTerceiros,
-    required this.sinistrosPorHorario,
-    required this.sinistrosPorDia,
-    required this.sinistrosPorRamo,
-    required this.npsPoMes,
-    required this.sinistrosPoMes,
-    required this.assistenciasPoMes,
-    required this.sinistralidadePoMes,
-    required this.contratosAtivosPoMes,
-    required this.contratosPoRamoMes,
-    required this.valorApolicesPoMes,
-    required this.ticketMedioPoMes,
-    required this.taxaRetencaoPoMes,
-    required this.slaComplianceSinistrosPoMes,
-    required this.slaComplianceAssistenciasPoMes,
-  });
-}
-
-class _ClaimAtraso {
-  final Claim claim;
-  final int diasSemMovimentacao;
-  const _ClaimAtraso(this.claim, this.diasSemMovimentacao);
-}
-
-class _ClienteRisco {
-  final Client client;
-  final double sinistralidade;
-  final double totalSinistros;
-  const _ClienteRisco(this.client, this.sinistralidade, this.totalSinistros);
-}
-
 // ─── Tela principal ───────────────────────────────────────────────────────────
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -140,7 +52,7 @@ class ReportsScreen extends StatefulWidget {
 class _ReportsScreenState extends State<ReportsScreen> {
   final _firestoreService = FirestoreService();
 
-  _ReportData? _data;
+  ReportData? _data;
   bool _isLoading = true;
   String _periodoSelecionado = 'Últimos 30 dias';
   DateTime? _dataInicio;
@@ -150,24 +62,36 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   final _fmtCurrency = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
   final _fmtDate    = DateFormat('dd/MM/yyyy');
+  List<Claim> _filteredAssistencias = [];
 
   List<Claim> _assistencias = [];
   List<double> _npsNotas = [];
   int _selectedAssistLevel = 0;
+  late final pw.Font _emojiFont;
+  final GlobalKey _pizzaChartKey = GlobalKey();
+  final GlobalKey _sinistrosSectionKey = GlobalKey();
+  Map<int, int> contratosAtivosPoMes = {};
+
+  Map<String, String> _funcionarioNomes = {};
+  Map<String, String> _funcionarioIdNomes = {};
+
+  List<Claim> _sinistros = [];
+  List<Client> _allClients = [];
 
   @override
   void initState() {
     super.initState();
     _setPeriodo('Mês Atual');
     
-    // Garante que as datas foram setadas
     if (_dataInicio == null || _dataFim == null) {
       final now = DateTime.now();
       _dataInicio = DateTime(now.year, now.month, 1);
       _dataFim = now;
     }
     
-    _load();
+    _load().then((_) {
+
+    });
   }
 
   void _setPeriodo(String periodo) {
@@ -203,6 +127,35 @@ class _ReportsScreenState extends State<ReportsScreen> {
     
     setState(() {});
     _load();
+  }
+
+  Future<void> _carregarNomesFuncionarios() async {
+    try {
+      final users = await _firestoreService.getFuncionarios();
+      for (final doc in users) {
+        final data = doc.data() as Map<String, dynamic>;
+        final email = data['email'] as String?;
+        final nome = data['nome'] as String?;
+        final id = doc.id;
+        if (email != null && email.isNotEmpty) {
+          _funcionarioNomes[email] = nome ?? email;
+        }
+        if (id.isNotEmpty) {
+          _funcionarioIdNomes[id] = nome ?? email ?? 'Sem nome';
+        }
+      }
+    } catch (e) {
+      print('Erro ao carregar nomes dos funcionários: $e');
+    }
+  }
+
+  // --- CAPTURAR O WIDGET DE GRÁFICO COMO IMAGEM ---
+Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double height = 400}) async {
+    final RenderRepaintBoundary? boundary = key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    if (boundary == null) throw Exception('Widget não encontrado para captura');
+    final image = await boundary.toImage(pixelRatio: 2.0);
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
   }
 
   Future<void> _pickPeriodoCustomizado() async {
@@ -342,38 +295,89 @@ class _ReportsScreenState extends State<ReportsScreen> {
     setState(() => _isLoading = true);
     try {
       final config = await ConfigService().getConfig();
-      final allClaims  = await _firestoreService.getAllClaims();
+      final allClaims = await _firestoreService.getAllClaims();
       final allClients = await _firestoreService.getAllClients();
       final now = DateTime.now();
 
-      // Filtra por período
-      final claims = allClaims.where((c) {
+      // Carregar funcionários para mapear ID -> Nome
+      final usersSnapshot = await FirebaseFirestore.instance.collection('users').get();
+      _funcionarioNomes = {};
+      for (var doc in usersSnapshot.docs) {
+        final data = doc.data();
+        final id = doc.id;
+        final nome = data['nome'] as String?;
+        if (nome != null && nome.isNotEmpty) {
+          _funcionarioNomes[id] = nome;
+        }
+      }
+
+      // ── LISTA COMPLETA (sem filtro de período) ──
+      final todosSinistros = allClaims.where((c) => c.tipo != 'assistencia').toList();
+
+      // ── LISTA COMPLETA DE ASSISTÊNCIAS ──
+      final assistenciasSnap = await FirebaseFirestore.instance
+          .collection('assistencias')
+          .get();
+      final todasAssistencias = assistenciasSnap.docs
+          .map((doc) => Claim.fromMap({...doc.data(), 'id': doc.id}))
+          .toList();
+
+      // ── LISTA FILTRADA PELO PERÍODO ──
+      final claims = todosSinistros.where((c) {
         if (_dataInicio == null || _dataFim == null) return true;
         return c.dataAbertura.isAfter(_dataInicio!) &&
             c.dataAbertura.isBefore(_dataFim!.add(const Duration(days: 1)));
       }).toList();
 
-      // ── Métricas básicas ───────────────────────────────────────────────────
+      final assistenciasFiltradas = todasAssistencias.where((a) {
+        if (_dataInicio == null || _dataFim == null) return true;
+        return a.dataAbertura.isAfter(_dataInicio!) &&
+            a.dataAbertura.isBefore(_dataFim!.add(const Duration(days: 1)));
+      }).toList();
+
+      // ── ARMAZENA NAS VARIÁVEIS DE ESTADO ──
+      _sinistros = todosSinistros;
+      _assistencias = todasAssistencias;
+      _allClients = allClients;
+
+      // ── Sinistralidade por Seguradora ──
+      final sinistralidadePorSeguradora = <String, double>{};
+      for (var c in claims) {
+        if (c.seguradora.isNotEmpty) {
+          sinistralidadePorSeguradora[c.seguradora] = 
+              (sinistralidadePorSeguradora[c.seguradora] ?? 0) + c.valorTotalSinistro;
+        }
+      }
+
+      // ── Mix de Carteira ──
+      final mixCarteira = <String, double>{};
+      for (var client in allClients) {
+        for (var apolice in client.apolices) {
+          mixCarteira[apolice.ramo] = 
+              (mixCarteira[apolice.ramo] ?? 0) + apolice.valorApolice;
+        }
+      }
+
+      // ── Métricas básicas (usando claims filtrado) ──
       final totalValor = claims.fold(0.0, (s, c) => s + c.valorTotalSinistro);
       final totalApolices = allClients.fold(0.0, (s, c) => s + c.valorTotalApolicesAtivas);
       final sinistralidade = totalApolices > 0 ? (totalValor / totalApolices) * 100 : 0.0;
 
-      // ── Tempo médio de resolução (Aberto → Concluído) ──────────────────────
+      // ── Tempo médio de resolução (usando claims filtrado) ──
       final resolvidos = claims.where((c) => c.statusAtual == 'Concluído');
       double somaResolucao = 0;
-      int countResolucao   = 0;
+      int countResolucao = 0;
       for (final c in resolvidos) {
         if (c.historicoStatus.length >= 2) {
-          final abertura  = _parseDate(c.historicoStatus.first['data']);
+          final abertura = _parseDate(c.historicoStatus.first['data']);
           final conclusao = _parseDate(c.historicoStatus.last['data']);
           somaResolucao += conclusao.difference(abertura).inHours / 24.0;
           countResolucao++;
         }
       }
-      final tempoMedioResolucao =
-          countResolucao > 0 ? somaResolucao / countResolucao : 0.0;
+      final tempoMedioResolucao = countResolucao > 0 ? somaResolucao / countResolucao : 0.0;
 
-      // ── NPS ────────────────────────────────────────────────────────────────
+      // ── NPS (usando filtro de período) ──
       final npsAvalSnap = await FirebaseFirestore.instance
           .collection('avaliacoes')
           .get();
@@ -403,11 +407,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
           .where((d) => d.data()['status'] == 'respondida')
           .length;
 
-      // ── Tempo médio sinistros e assistências ────────────────────────────────
+      // ── Tempo médio sinistros e assistências (filtrados por período) ──
       double tempoMedioSinistros = 0.0;
       double tempoMedioAssistencias = 0.0;
 
-      // Sinistros
       final sinistrosResolvidos = claims.where((c) => c.statusAtual == 'Concluído').toList();
       if (sinistrosResolvidos.isNotEmpty) {
         double somaSinistros = 0;
@@ -417,20 +420,66 @@ class _ReportsScreenState extends State<ReportsScreen> {
         tempoMedioSinistros = somaSinistros / sinistrosResolvidos.length;
       }
 
-      // Assistências (filtradas por período)
-      final assistenciasSnap = await FirebaseFirestore.instance
-          .collection('assistencias')
-          .get();
-      final todasAssistencias = assistenciasSnap.docs
-          .map((doc) => Claim.fromMap({...doc.data(), 'id': doc.id}))
-          .toList();
+      final assistenciasResolvidas = assistenciasFiltradas.where((a) => a.statusAtual == 'Concluído').toList();
+      if (assistenciasResolvidas.isNotEmpty) {
+        double somaAssistencias = 0;
+        for (final a in assistenciasResolvidas) {
+          somaAssistencias += a.dataUltimaAtualizacao.difference(a.dataAbertura).inHours / 24.0;
+        }
+        tempoMedioAssistencias = somaAssistencias / assistenciasResolvidas.length;
+      }
 
-      final assistenciasResolvidas = todasAssistencias.where((a) {
-        if (_dataInicio == null || _dataFim == null) return a.statusAtual == 'Concluído';
-        return a.statusAtual == 'Concluído' &&
-            a.dataAbertura.isAfter(_dataInicio!) &&
-            a.dataAbertura.isBefore(_dataFim!.add(const Duration(days: 1)));
-      }).toList();
+      // ── Assistências por horário ──
+      final assistenciasPorHorario = <String, int>{
+        'Madrugada (0-6h)': 0,
+        'Manhã (6-12h)': 0,
+        'Tarde (12-18h)': 0,
+        'Noite (18-24h)': 0,
+        'Não informado': 0,
+      };
+
+      for (final a in assistenciasFiltradas) {
+        // Prioridade: data/hora do comunicado retroativo, se existir
+        int hora;
+        if (a.dataRecebimentoComunicado != null) {
+          // Se tiver data específica de comunicado, usa a hora dela
+          hora = a.dataRecebimentoComunicado!.hour;
+        } else {
+          // Fallback: usa a hora da abertura
+          hora = a.dataAbertura.hour;
+        }
+        // (Se houver campo horaRecebimentoComunicado como String, use-o; aqui assumimos dataRecebimentoComunicado como DateTime)
+
+        if (hora >= 0 && hora < 6) {
+          assistenciasPorHorario['Madrugada (0-6h)'] = (assistenciasPorHorario['Madrugada (0-6h)'] ?? 0) + 1;
+        } else if (hora >= 6 && hora < 12) {
+          assistenciasPorHorario['Manhã (6-12h)'] = (assistenciasPorHorario['Manhã (6-12h)'] ?? 0) + 1;
+        } else if (hora >= 12 && hora < 18) {
+          assistenciasPorHorario['Tarde (12-18h)'] = (assistenciasPorHorario['Tarde (12-18h)'] ?? 0) + 1;
+        } else if (hora >= 18 && hora < 24) {
+          assistenciasPorHorario['Noite (18-24h)'] = (assistenciasPorHorario['Noite (18-24h)'] ?? 0) + 1;
+        } else {
+          assistenciasPorHorario['Não informado'] = (assistenciasPorHorario['Não informado'] ?? 0) + 1;
+        }
+      }
+
+      // ── Assistências por dia da semana ──
+      final assistenciasPorDia = <int, int>{
+        1: 0, // Segunda
+        2: 0, // Terça
+        3: 0, // Quarta
+        4: 0, // Quinta
+        5: 0, // Sexta
+        6: 0, // Sábado
+        7: 0, // Domingo
+      };
+
+      for (final a in assistenciasFiltradas) {
+        // Prioridade: data do comunicado retroativo, senão dataAbertura
+        final data = a.dataRecebimentoComunicado ?? a.dataAbertura;
+        final diaSemana = data.weekday;
+        assistenciasPorDia[diaSemana] = (assistenciasPorDia[diaSemana] ?? 0) + 1;
+      }
 
       if (assistenciasResolvidas.isNotEmpty) {
         double somaAssistencias = 0;
@@ -456,7 +505,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
       }
 
       // ── Assistências por tipo ──────────────────────────────────────────────
-      // (guincho, vidro, residencial, eletricista, chaveiro, etc)
       final assistenciasPorTipo = <String, int>{};
       for (final a in todasAssistencias) {
         // Filtra por período
@@ -482,43 +530,51 @@ class _ReportsScreenState extends State<ReportsScreen> {
       }
 
       // ── Sinistros por período do dia ───────────────────────────────────────
-      // Manhã (6-12), Tarde (12-18), Noite (18-24), Madrugada (0-6)
       final sinistrosPorHorario = <String, int>{
-        'Madrugada': 0,
-        'Manhã': 0,
-        'Tarde': 0,
-        'Noite': 0,
+        'Madrugada (0-6h)': 0,
+        'Manhã (6-12h)': 0,
+        'Tarde (12-18h)': 0,
+        'Noite (18-24h)': 0,
+        'Não informado': 0,
       };
 
       for (final c in claims) {
-        final hora = c.dataOcorrencia.hour;
+        int hora;
+        if (c.horaOcorrencia != null && c.horaOcorrencia!.isNotEmpty) {
+          final parts = c.horaOcorrencia!.split(':');
+          hora = int.tryParse(parts[0]) ?? 0;
+        } else {
+          // Fallback: usa a hora da data de abertura
+          hora = c.dataAbertura.hour;
+        }
         
         if (hora >= 0 && hora < 6) {
-          sinistrosPorHorario['Madrugada'] = (sinistrosPorHorario['Madrugada'] ?? 0) + 1;
+          sinistrosPorHorario['Madrugada (0-6h)'] = (sinistrosPorHorario['Madrugada (0-6h)'] ?? 0) + 1;
         } else if (hora >= 6 && hora < 12) {
-          sinistrosPorHorario['Manhã'] = (sinistrosPorHorario['Manhã'] ?? 0) + 1;
+          sinistrosPorHorario['Manhã (6-12h)'] = (sinistrosPorHorario['Manhã (6-12h)'] ?? 0) + 1;
         } else if (hora >= 12 && hora < 18) {
-          sinistrosPorHorario['Tarde'] = (sinistrosPorHorario['Tarde'] ?? 0) + 1;
+          sinistrosPorHorario['Tarde (12-18h)'] = (sinistrosPorHorario['Tarde (12-18h)'] ?? 0) + 1;
+        } else if (hora >= 18 && hora < 24) {
+          sinistrosPorHorario['Noite (18-24h)'] = (sinistrosPorHorario['Noite (18-24h)'] ?? 0) + 1;
         } else {
-          sinistrosPorHorario['Noite'] = (sinistrosPorHorario['Noite'] ?? 0) + 1;
+          sinistrosPorHorario['Não informado'] = (sinistrosPorHorario['Não informado'] ?? 0) + 1;
         }
       }
 
-      // ── Sinistros por dia da semana ────────────────────────────────────────
-      // 1=seg, 2=ter, 3=qua, 4=qui, 5=sex, 6=sab, 7=dom
-      final sinistrosPorDia = <String, int>{
-        'Dias de Semana': 0,
-        'Fim de Semana': 0,
+      // ── Sinistros por dia da semana ──
+      final sinistrosPorDia = <int, int>{
+        1: 0, // Segunda
+        2: 0, // Terça
+        3: 0, // Quarta
+        4: 0, // Quinta
+        5: 0, // Sexta
+        6: 0, // Sábado
+        7: 0, // Domingo
       };
 
       for (final c in claims) {
-        final diaSemana = c.dataOcorrencia.weekday; // 1-7 (seg-dom)
-        
-        if (diaSemana >= 1 && diaSemana <= 5) {
-          sinistrosPorDia['Dias de Semana'] = (sinistrosPorDia['Dias de Semana'] ?? 0) + 1;
-        } else {
-          sinistrosPorDia['Fim de Semana'] = (sinistrosPorDia['Fim de Semana'] ?? 0) + 1;
-        }
+        final diaSemana = c.dataOcorrencia.weekday;
+        sinistrosPorDia[diaSemana] = (sinistrosPorDia[diaSemana] ?? 0) + 1;
       }
 
       // ── Por status ────────────────────────────────────────────────────────
@@ -530,20 +586,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
       // ── Por funcionário ───────────────────────────────────────────────────
       final porFuncionario = <String, int>{};
       final temposPorFuncionario = <String, List<double>>{};
-      for (final c in claims) {
-        if (c.historicoStatus.isNotEmpty) {
-          final email =
-              c.historicoStatus.last['responsavelEmail'] as String? ?? 'N/A';
-          porFuncionario[email] = (porFuncionario[email] ?? 0) + 1;
 
-          if (c.statusAtual == 'Concluído' && c.historicoStatus.length >= 2) {
-            final abertura = _parseDate(c.historicoStatus.first['data']);
-            final conclusao = _parseDate(c.historicoStatus.last['data']);
-            final dias = conclusao.difference(abertura).inHours / 24.0;
-            temposPorFuncionario.putIfAbsent(email, () => []).add(dias);
-          }
+      for (final c in claims) {
+        final responsavelId = c.responsavelId ?? '';
+        final nomeExibido = _funcionarioNomes[responsavelId] ?? 'Sem responsável';
+        porFuncionario[nomeExibido] = (porFuncionario[nomeExibido] ?? 0) + 1;
+
+        if (c.statusAtual == 'Concluído' && c.historicoStatus.length >= 2) {
+          final abertura = _parseDate(c.historicoStatus.first['data']);
+          final conclusao = _parseDate(c.historicoStatus.last['data']);
+          final dias = conclusao.difference(abertura).inHours / 24.0;
+          temposPorFuncionario.putIfAbsent(nomeExibido, () => []).add(dias);
         }
       }
+
       final tempoMedioFuncionario = <String, double>{};
       temposPorFuncionario.forEach((k, v) {
         tempoMedioFuncionario[k] = v.reduce((a, b) => a + b) / v.length;
@@ -567,38 +623,37 @@ class _ReportsScreenState extends State<ReportsScreen> {
       });
 
       // ── Aprovações paradas (Aguardando Aprovação > 3 dias) ──────────────────
-      final aprovacoesParadas = <_ClaimAtraso>[];
+      final aprovacoesParadas = <ClaimAtraso>[];
       for (final c in claims) {
         if (c.statusAtual != 'Aguardando Aprovação') continue;
         final ultima = c.historicoStatus.isNotEmpty
             ? _parseDate(c.historicoStatus.last['data'])
             : c.dataAbertura;
         final dias = now.difference(ultima).inDays;
-        if (dias >= 3) aprovacoesParadas.add(_ClaimAtraso(c, dias));
+        if (dias >= 3) aprovacoesParadas.add(ClaimAtraso(c, dias));
       }
       aprovacoesParadas.sort((a, b) =>
           b.diasSemMovimentacao.compareTo(a.diasSemMovimentacao));
 
       // ── Reparos prolongados (Reparo em Andamento > 7 dias) ───────────────
-      final reparosProlongados = <_ClaimAtraso>[];
+      final reparosProlongados = <ClaimAtraso>[];
       for (final c in claims) {
         if (c.statusAtual != 'Reparo em Andamento') continue;
         final ultima = c.historicoStatus.isNotEmpty
             ? _parseDate(c.historicoStatus.last['data'])
             : c.dataAbertura;
         final dias = now.difference(ultima).inDays;
-        if (dias >= 7) reparosProlongados.add(_ClaimAtraso(c, dias));
+        if (dias >= 7) reparosProlongados.add(ClaimAtraso(c, dias));
       }
       reparosProlongados.sort((a, b) =>
           b.diasSemMovimentacao.compareTo(a.diasSemMovimentacao));
 
       // ── Demais sinistros em atraso (outros status, ≥ 7 dias, excluindo
-      //    os dois acima para não duplicar) ──────────────────────────────────
       final _idsJaListados = {
         ...aprovacoesParadas.map((a) => a.claim.id ?? ''),
         ...reparosProlongados.map((a) => a.claim.id ?? ''),
       };
-      final emAtraso = <_ClaimAtraso>[];
+      final emAtraso = <ClaimAtraso>[];
       for (final c in claims) {
         if (c.statusAtual == 'Concluído') continue;
         if (c.statusAtual == 'Aguardando Aprovação') continue;
@@ -608,7 +663,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ? _parseDate(c.historicoStatus.last['data'])
             : c.dataAbertura;
         final dias = now.difference(ultima).inDays;
-        if (dias >= 7) emAtraso.add(_ClaimAtraso(c, dias));
+        if (dias >= 7) emAtraso.add(ClaimAtraso(c, dias));
       }
       emAtraso.sort((a, b) =>
           b.diasSemMovimentacao.compareTo(a.diasSemMovimentacao));
@@ -632,7 +687,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       });
 
       // ── Clientes com alta sinistralidade ──────────────────────────────────
-      final clientesAltoRisco = <_ClienteRisco>[];
+      final clientesAltoRisco = <ClienteRisco>[];
       for (final client in allClients) {
         final valorApoliceTotal = client.valorTotalApolicesAtivas;  // ← MUDA
         if (valorApoliceTotal <= 0) continue;
@@ -642,7 +697,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         final perc = (totalSinistrosCliente / valorApoliceTotal) * 100;
         
         if (perc >= 60) {
-          clientesAltoRisco.add(_ClienteRisco(client, perc, totalSinistrosCliente));
+          clientesAltoRisco.add(ClienteRisco(client, perc, totalSinistrosCliente));
         }
       }
       clientesAltoRisco.sort(
@@ -656,6 +711,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
           .map((doc) => Claim.fromMap({...doc.data(), 'id': doc.id}))
           .toList();
 
+      _filteredAssistencias = allAssistList.where((a) {
+        if (_dataInicio == null || _dataFim == null) return true;
+        return a.dataAbertura.isAfter(_dataInicio!) &&
+            a.dataAbertura.isBefore(_dataFim!.add(const Duration(days: 1)));
+      }).toList();
+
       final npsCategoria = <String, int>{};
       for (final d in npsAvalSnap.docs) {
         final categoria = d.data()['categoria'] as String? ?? 'desconhecido';
@@ -664,25 +725,24 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
       // ── Sinistros por ramo ─────────────────────────────────────────────────
       final sinistrosPorRamo = <String, int>{};
-      for (final c in claims) {
-        if (c.tipo != 'sinistro') continue; // ← FILTRO
-        
-        final ramo = c.ramoSinistro;
-        sinistrosPorRamo[ramo] = (sinistrosPorRamo[ramo] ?? 0) + 1;
-      }
+        for (final c in claims) {
+          final ramo = c.ramoSinistro.trim().isNotEmpty ? c.ramoSinistro : 'Não informado';
+          sinistrosPorRamo[ramo] = (sinistrosPorRamo[ramo] ?? 0) + 1;
+        }
 
       // ── MÉTRICAS MENSAIS (Um único loop organizado) ─────────────────────────────
       final Map<int, double> npsPoMes = {};
       final Map<int, int> sinistrosPoMes = {};
       final Map<int, int> assistenciasPoMes = {};
       final Map<int, double> sinistralidadePoMes = {};
-      final Map<int, int> contratosAtivosPoMes = {};
       final Map<int, Map<String, int>> contratosPoRamoMes = {};
       final Map<int, double> valorApolicesPoMes = {};
       final Map<int, double> slaComplianceSinistrosPoMes = {};
       final Map<int, double> slaComplianceAssistenciasPoMes = {};
       final Map<int, double> ticketMedioPoMes = {};
       final Map<int, double> taxaRetencaoPoMes = {};
+      final Map<int, int> contratosAtivosPoMes = {};
+      final ativasInicioMes = <int, int>{};
 
       for (int mes = 1; mes <= 12; mes++) {
         final mesInicio = DateTime(now.year, mes, 1);
@@ -710,7 +770,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
         // 2. SINISTROS MENSAIS
         final sinistrosMes = allClaims.where((c) {
-          return c.dataAbertura.year == now.year && c.dataAbertura.month == mes;
+          return c.tipo != 'assistencia' && 
+                c.dataAbertura.year == now.year && 
+                c.dataAbertura.month == mes;
         }).toList();
         sinistrosPoMes[mes] = sinistrosMes.length;
 
@@ -728,14 +790,59 @@ class _ReportsScreenState extends State<ReportsScreen> {
           sinistralidadePoMes[mes] = 0.0;
         }
 
-        // 5. CONTRATOS ATIVOS MENSAIS
-        final contratosAtivosMes = allClients.where((c) {
-          return c.apolices.any((a) {
-            // Apólice está ativa em algum ponto do mês
-            return !a.dataFim.isBefore(mesInicio) && !a.dataInicio.isAfter(mesFim);
-          });
-        }).length;
-        contratosAtivosPoMes[mes] = contratosAtivosMes;
+        // 5. CONTRATOS ATIVOS MENSAIS + 11. TAXA DE RETENÇÃO
+        for (int mes = 1; mes <= 12; mes++) {
+          final mesInicio = DateTime(now.year, mes, 1);
+          final mesFim = mes == 12
+              ? DateTime(now.year + 1, 1, 1).subtract(const Duration(days: 1))
+              : DateTime(now.year, mes + 1, 1).subtract(const Duration(days: 1));
+
+          if (mesInicio.isAfter(now)) break;
+
+          // Define a data de referência para "ativas no mês"
+          final dataReferencia = (mes == now.month && now.year == now.year)
+              ? now
+              : mesFim;
+
+          // 🔹 Conta apólices ativas na data de referência (para o gráfico de contratos)
+          int totalApolicesMes = 0;
+          for (var c in allClients) {
+            for (var a in c.apolices) {
+              if (!a.dataFim.isBefore(dataReferencia) && !a.dataInicio.isAfter(dataReferencia)) {
+                totalApolicesMes++;
+              }
+            }
+          }
+          contratosAtivosPoMes[mes] = totalApolicesMes;
+
+          // 🔹 Conta apólices ativas no início do mês (para a retenção)
+          int ativasInicio = 0;
+          for (var c in allClients) {
+            for (var a in c.apolices) {
+              if (!a.dataFim.isBefore(mesInicio) && !a.dataInicio.isAfter(mesInicio)) {
+                ativasInicio++;
+              }
+            }
+          }
+          ativasInicioMes[mes] = ativasInicio;
+
+          // 🔹 Conta apólices ativas no final do mês (para a retenção)
+          int ativasFim = 0;
+          for (var c in allClients) {
+            for (var a in c.apolices) {
+              if (!a.dataFim.isBefore(mesFim) && !a.dataInicio.isAfter(mesFim)) {
+                ativasFim++;
+              }
+            }
+          }
+
+          // 🔹 Taxa de retenção = (ativas fim / ativas início) * 100
+          if (ativasInicio > 0) {
+            taxaRetencaoPoMes[mes] = (ativasFim / ativasInicio) * 100;
+          } else {
+            taxaRetencaoPoMes[mes] = 0.0;
+          }
+        }
 
         // 6. CONTRATOS POR RAMO MENSAIS
         final contratosPorRamo = <String, int>{};
@@ -748,66 +855,63 @@ class _ReportsScreenState extends State<ReportsScreen> {
         }
         contratosPoRamoMes[mes] = contratosPorRamo;
 
-        // 7. VALOR APÓLICES MENSAIS
-        final valorApolicesMes = allClients.fold<double>(0, (sum, c) {
-          final valor = c.apolices
-            .where((a) {
-              return !a.dataFim.isBefore(mesInicio) && !a.dataInicio.isAfter(mesFim);
-            })
-            .fold<double>(0, (s, a) => s + a.valorApolice);
-          return sum + valor;
-        });
-        valorApolicesPoMes[mes] = valorApolicesMes;
+        // 7. VALOR APÓLICES MENSAIS (valor das apólices ativas na data de referência)
+        for (int mes = 1; mes <= 12; mes++) {
+          final mesInicio = DateTime(now.year, mes, 1);
+          
+          // Define a data de referência: hoje para o mês corrente, último dia do mês para os anteriores
+          final dataReferencia = (mes == now.month && now.year == now.year)
+              ? now
+              : (mes == 12
+                  ? DateTime(now.year + 1, 1, 1).subtract(const Duration(days: 1))
+                  : DateTime(now.year, mes + 1, 1).subtract(const Duration(days: 1)));
 
-        // 8. SLA COMPLIANCE SINISTROS (10 dias fixo)
-              if (sinistrosMes.isNotEmpty) {
-                final dentroPrazo = sinistrosMes.where((c) {
-                  if (c.dataConclusao == null) {
-                    if (c.statusAtual == 'Concluído' && c.historicoStatus.isNotEmpty) {
-                      final statusConcluido = c.historicoStatus.lastWhere(
-                        (h) => h['novoStatus'] == 'Concluído',
-                        orElse: () => c.historicoStatus.last,
-                      );
-                      final dataMudanca = statusConcluido['dataMudanca'];
-                      if (dataMudanca is Timestamp) {
-                        final diasAberto = dataMudanca.toDate().difference(c.dataAbertura).inDays;
-                        return diasAberto <= config.slaSinistrosDias;  // ✅ SEM await, usa config
-                      }
-                    }
-                    return false;
-                  }
-                  final diasAberto = c.dataConclusao!.toDate().difference(c.dataAbertura).inDays;
-                  return diasAberto <= config.slaSinistrosDias;  // ✅ SEM await, usa config
-                }).length;
-                slaComplianceSinistrosPoMes[mes] = (dentroPrazo / sinistrosMes.length) * 100;
-              } else {
-                slaComplianceSinistrosPoMes[mes] = 100.0;
+          if (mesInicio.isAfter(now)) break;
+
+          double valorApolicesMes = 0.0;
+          for (var c in allClients) {
+            for (var a in c.apolices) {
+              // 🔥 Verifica se a apólice está ativa na data de referência
+              if (!a.dataFim.isBefore(dataReferencia) && !a.dataInicio.isAfter(dataReferencia)) {
+                valorApolicesMes += a.valorApolice;
               }
+            }
+          }
+          valorApolicesPoMes[mes] = valorApolicesMes;
+        }
+
+        // 8. SLA COMPLIANCE SINISTROS (apenas concluídos)
+        final sinistrosConcluidos = sinistrosMes.where((c) => c.statusAtual == 'Concluído').toList();
+        if (sinistrosConcluidos.isNotEmpty) {
+          final dentroPrazo = sinistrosConcluidos.where((c) {
+            // Usa dataConclusao se disponível
+            final dataConclusao = c.dataConclusao != null
+                ? c.dataConclusao!.toDate()
+                : null;
+            if (dataConclusao == null) return false;
+            final diasAberto = dataConclusao.difference(c.dataAbertura).inDays;
+            return diasAberto <= config.slaSinistrosDias;
+          }).length;
+          slaComplianceSinistrosPoMes[mes] = (dentroPrazo / sinistrosConcluidos.length) * 100;
+        } else {
+          slaComplianceSinistrosPoMes[mes] = 0.0; // ou -1 para não exibir
+        }
 
         // 9. SLA COMPLIANCE ASSISTÊNCIAS (conforme slaPrevisto/slaAtendimento)
-        if (assistenciasMes.isNotEmpty) {
-          final dentroPrazo = assistenciasMes.where((a) {
-            if (a.dataConclusao == null) {
-              if (a.statusAtual == 'Concluído' && a.historicoStatus.isNotEmpty) {
-                final statusConcluido = a.historicoStatus.lastWhere(
-                  (h) => h['novoStatus'] == 'Concluído',
-                  orElse: () => a.historicoStatus.last,
-                );
-                final dataMudanca = statusConcluido['dataMudanca'];
-                final prazolimite = a.slaAtendimento ?? a.slaPrevisto;
-                if (dataMudanca is Timestamp && prazolimite != null) {
-                  return (dataMudanca as Timestamp).toDate().isBefore(prazolimite);
-                }
-              }
-              return false;
-            }
-            final prazolimite = a.slaAtendimento ?? a.slaPrevisto;
-            if (prazolimite == null) return false;
-            return a.dataConclusao!.toDate().isBefore(prazolimite);
+        final assistenciasConcluidas = assistenciasMes.where((a) => a.statusAtual == 'Concluído').toList();
+        if (assistenciasConcluidas.isNotEmpty) {
+          final dentroPrazo = assistenciasConcluidas.where((a) {
+            final dataConclusao = a.dataConclusao != null
+                ? a.dataConclusao!.toDate()
+                : null;
+            if (dataConclusao == null) return false;
+            final prazoLimite = a.slaAtendimento ?? a.slaPrevisto;
+            if (prazoLimite == null) return false;
+            return dataConclusao.isBefore(prazoLimite) || dataConclusao.isAtSameMomentAs(prazoLimite);
           }).length;
-          slaComplianceAssistenciasPoMes[mes] = (dentroPrazo / assistenciasMes.length) * 100;
+          slaComplianceAssistenciasPoMes[mes] = (dentroPrazo / assistenciasConcluidas.length) * 100;
         } else {
-          slaComplianceAssistenciasPoMes[mes] = -1.0;
+          slaComplianceAssistenciasPoMes[mes] = 0.0;
         }
 
         // 10. TICKET MÉDIO (valor médio por sinistro)
@@ -816,22 +920,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
           : 0.0;
         ticketMedioPoMes[mes] = ticketMedio;
 
-        // 11. TAXA DE RETENÇÃO (% de contratos que não venceram no mês)
-       if (contratosAtivosMes > 0) {
-          final naoVencemNoMes = allClients.where((c) {
-            return c.apolices.any((a) {
-              return a.dataFim.isAfter(mesFim);
-            });
-          }).length;
-          taxaRetencaoPoMes[mes] = (naoVencemNoMes / contratosAtivosMes) * 100;
-        } else {
-          taxaRetencaoPoMes[mes] = 0.0;
-        }
       }
 
       if (mounted) {
         setState(() {
-          _data = _ReportData(
+          _data = ReportData(
             totalSinistros:         claims.length,
             valorTotalSinistros:    totalValor,
             valorTotalApolices:     totalApolices,
@@ -869,13 +962,25 @@ class _ReportsScreenState extends State<ReportsScreen> {
             taxaRetencaoPoMes: taxaRetencaoPoMes,
             slaComplianceSinistrosPoMes: slaComplianceSinistrosPoMes,
             slaComplianceAssistenciasPoMes: slaComplianceAssistenciasPoMes,
+            assistenciasPorHorario: assistenciasPorHorario,
+            assistenciasPorDia: assistenciasPorDia,
+            sinistralidadePorSeguradora: sinistralidadePorSeguradora,
+            mixCarteira: mixCarteira,
           );
           _assistencias = allAssistList;
           _assistencias.sort((a, b) => b.dataAbertura.compareTo(a.dataAbertura));
+          _filteredAssistencias = assistenciasFiltradas;
           _npsNotas = npsNotas;
+          _sinistros = todosSinistros;
+          _assistencias = todasAssistencias;
+          _allClients = allClients;
           _isLoading = false;
         });
       }
+
+      await _carregarNomesFuncionarios();
+      if (mounted) setState(() {});
+
     } catch (e) {
       debugPrint('Erro ao carregar relatório: $e');
       if (mounted) setState(() => _isLoading = false);
@@ -1169,6 +1274,169 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
+  // --- GRÁFICO DE ASSISTÊNCIA POR HORÁRIO ---
+  Widget _buildAssistenciasPorHorarioChart() {
+    if (_data == null || _data!.assistenciasPorHorario.isEmpty) return const SizedBox();
+
+    final horariosData = _data!.assistenciasPorHorario;
+    final maxValue = horariosData.values.isNotEmpty
+        ? horariosData.values.reduce((a, b) => a > b ? a : b).toDouble()
+        : 10;
+
+    final cores = {
+      'Madrugada (0-6h)': const Color(0xFF1A237E),
+      'Manhã (6-12h)': const Color(0xFFFFA500),
+      'Tarde (12-18h)': const Color(0xFFFFD700),
+      'Noite (18-24h)': const Color(0xFF37474F),
+      'Não informado': Colors.grey,
+    };
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '🕐 Assistências por Horário do Dia',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 20),
+          ...horariosData.entries.map((e) {
+            final horario = e.key;
+            final valor = e.value;
+            final percent = (valor / maxValue * 100);
+            final cor = cores[horario] ?? Colors.grey;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          horario,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      Text(
+                        '$valor',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: percent / 100,
+                      minHeight: 24,
+                      backgroundColor: Colors.grey.shade100,
+                      valueColor: AlwaysStoppedAnimation<Color>(cor),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAssistenciasPorDiaChart() {
+    if (_data == null || _data!.assistenciasPorDia.isEmpty) return const SizedBox();
+
+    final Map<int, String> dias = {
+      1: 'Segunda',
+      2: 'Terça',
+      3: 'Quarta',
+      4: 'Quinta',
+      5: 'Sexta',
+      6: 'Sábado',
+      7: 'Domingo',
+    };
+
+    final data = _data!.assistenciasPorDia;
+    final maxValue = data.values.isNotEmpty
+        ? data.values.reduce((a, b) => a > b ? a : b).toDouble()
+        : 10;
+
+    final cores = {
+      1: const Color(0xFF1565C0),
+      2: const Color(0xFF1E88E5),
+      3: const Color(0xFF42A5F5),
+      4: const Color(0xFF64B5F6),
+      5: const Color(0xFF90CAF9),
+      6: const Color(0xFFE65100),
+      7: const Color(0xFFC62828),
+    };
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '📅 Assistências por Dia da Semana',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 20),
+          ...data.entries.map((e) {
+            final diaNum = e.key;
+            final valor = e.value;
+            final percent = (valor / maxValue * 100);
+            final cor = cores[diaNum] ?? Colors.grey;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          dias[diaNum]!,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      Text(
+                        '$valor',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: percent / 100,
+                      minHeight: 20,
+                      backgroundColor: Colors.grey.shade100,
+                      valueColor: AlwaysStoppedAnimation<Color>(cor),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ],
+      ),
+    );
+  }
+
   // ── Gráfico Pizza - Sinistros vs Assistências ──────────────────────────────────────────────
   Widget _buildSinistroVsAssistenciaChart() {
     if (_data == null) return const SizedBox();
@@ -1379,15 +1647,31 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // ── Gráfico de Sinitro por Dia da Semana ─────────────────────────────────────────
   Widget _buildSinistrosPorDiaChart() {
     if (_data == null || _data!.sinistrosPorDia.isEmpty) return const SizedBox();
-    
-    final diaData = _data!.sinistrosPorDia;
-    final maxValue = diaData.values.isNotEmpty 
-      ? diaData.values.reduce((a, b) => a > b ? a : b).toDouble() 
-      : 10;
 
+    final Map<int, String> dias = {
+      1: 'Segunda',
+      2: 'Terça',
+      3: 'Quarta',
+      4: 'Quinta',
+      5: 'Sexta',
+      6: 'Sábado',
+      7: 'Domingo',
+    };
+
+    final data = _data!.sinistrosPorDia;
+    final maxValue = data.values.isNotEmpty
+        ? data.values.reduce((a, b) => a > b ? a : b).toDouble()
+        : 10;
+
+    // Cores progressivas para os dias úteis e cores diferentes para fim de semana
     final cores = {
-      'Dias de Semana': const Color(0xFF1565C0),  // Azul
-      'Fim de Semana': const Color(0xFFC62828),   // Vermelho
+      1: const Color(0xFF1565C0),
+      2: const Color(0xFF1E88E5),
+      3: const Color(0xFF42A5F5),
+      4: const Color(0xFF64B5F6),
+      5: const Color(0xFF90CAF9),
+      6: const Color(0xFFE65100),
+      7: const Color(0xFFC62828),
     };
 
     return Container(
@@ -1405,15 +1689,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 20),
-          
-          ...diaData.entries.map((e) {
-            final dia = e.key;
+          ...data.entries.map((e) {
+            final diaNum = e.key;
             final valor = e.value;
             final percent = (valor / maxValue * 100);
-            final cor = cores[dia] ?? Colors.grey;
-            
+            final cor = cores[diaNum] ?? Colors.grey;
             return Padding(
-              padding: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.only(bottom: 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1422,25 +1704,22 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          dia,
+                          dias[diaNum]!,
                           style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                         ),
                       ),
                       Text(
                         '$valor',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(4),
                     child: LinearProgressIndicator(
                       value: percent / 100,
-                      minHeight: 24,
+                      minHeight: 20,
                       backgroundColor: Colors.grey.shade100,
                       valueColor: AlwaysStoppedAnimation<Color>(cor),
                     ),
@@ -1738,15 +2017,35 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // ── Gráfico Sinistros por mês ──────────────────────────────────────────────
   Widget _buildSinistrosAnualChart() {
     if (_data == null || _data!.sinistrosPoMes.isEmpty) return const SizedBox();
-    
+
     final data = _data!.sinistrosPoMes;
-    final spots = <FlSpot>[];
-    
-    for (int mes = 1; mes <= 12; mes++) {
-      final valor = (data[mes] ?? 0).toDouble();
-      spots.add(FlSpot(mes.toDouble(), valor));
+    final meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+    // Prepara os dados para o BarChart
+    final List<BarChartGroupData> barGroups = [];
+    for (int i = 0; i < 12; i++) {
+      final mes = i + 1;
+      final valor = data[mes] ?? 0;
+      barGroups.add(
+        BarChartGroupData(
+          x: i,
+          barRods: [
+            BarChartRodData(
+              toY: valor.toDouble(),
+              color: const Color(0xFFD32F2F),
+              width: 16,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(4),
+                topRight: Radius.circular(4),
+              ),
+            ),
+          ],
+          // Exibe o valor acima da barra
+          showingTooltipIndicators: valor > 0 ? [0] : [],
+        ),
+      );
     }
-    
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -1764,42 +2063,34 @@ class _ReportsScreenState extends State<ReportsScreen> {
           const SizedBox(height: 20),
           SizedBox(
             height: 300,
-            child: LineChart(
-              LineChartData(
-                lineTouchData: LineTouchData(
+            child: BarChart(
+              BarChartData(
+                barTouchData: BarTouchData(
                   enabled: true,
-                  touchTooltipData: LineTouchTooltipData(
-                    getTooltipColor: (touchedSpot) => Colors.white,
-                    tooltipPadding: const EdgeInsets.all(8),
-                    tooltipMargin: 8,
-                    getTooltipItems: (touchedSpots) {
-                      return touchedSpots.map((spot) {
-                      final valor = _formatarValorTooltip(spot.y, 'contador');
-                        return LineTooltipItem(
-                          valor,
-                          const TextStyle(
-                            color: Color(0xFFD32F2F),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        );
-                      }).toList();
+                  touchTooltipData: BarTouchTooltipData(
+                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                      final valor = rod.toY.toInt();
+                      return BarTooltipItem(
+                        '$valor',
+                        const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      );
                     },
                   ),
                 ),
-                gridData: FlGridData(show: true),
                 titlesData: FlTitlesData(
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      interval: 1.0,
                       getTitlesWidget: (value, meta) {
-                        const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-                                      'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-                        final mes = value.toInt();
-                        return mes >= 1 && mes <= 12 
-                          ? Text(meses[mes - 1], style: const TextStyle(fontSize: 10))
-                          : const SizedBox();
+                        final index = value.toInt();
+                        if (index >= 0 && index < meses.length) {
+                          return Text(meses[index], style: const TextStyle(fontSize: 10));
+                        }
+                        return const SizedBox();
                       },
                     ),
                   ),
@@ -1809,26 +2100,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       getTitlesWidget: (value, meta) {
                         return Text('${value.toInt()}', style: const TextStyle(fontSize: 10));
                       },
+                      reservedSize: 40,
                     ),
                   ),
                   topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                   rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                 ),
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: spots,
-                    isCurved: false,
-                    color: const Color(0xFFD32F2F),
-                    barWidth: 3,
-                    dotData: FlDotData(show: true),
-                    belowBarData: BarAreaData(
-                      show: true,
-                      color: const Color(0xFFD32F2F).withOpacity(0.1),
-                    ),
-                  ),
-                ],
-                minY: 0,
                 borderData: FlBorderData(show: true),
+                barGroups: barGroups,
+                gridData: FlGridData(show: true),
               ),
             ),
           ),
@@ -1840,15 +2120,33 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // ── ASSISTÊNCIAS MENSAIS
   Widget _buildAssistenciasAnualChart() {
     if (_data == null || _data!.assistenciasPoMes.isEmpty) return const SizedBox();
-    
+
     final data = _data!.assistenciasPoMes;
-    final spots = <FlSpot>[];
-    
-    for (int mes = 1; mes <= 12; mes++) {
-      final valor = (data[mes] ?? 0).toDouble();
-      spots.add(FlSpot(mes.toDouble(), valor));
+    final meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+    final List<BarChartGroupData> barGroups = [];
+    for (int i = 0; i < 12; i++) {
+      final mes = i + 1;
+      final valor = data[mes] ?? 0;
+      barGroups.add(
+        BarChartGroupData(
+          x: i,
+          barRods: [
+            BarChartRodData(
+              toY: valor.toDouble(),
+              color: const Color(0xFF1976D2),
+              width: 16,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(4),
+                topRight: Radius.circular(4),
+              ),
+            ),
+          ],
+          showingTooltipIndicators: valor > 0 ? [0] : [],
+        ),
+      );
     }
-    
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -1866,42 +2164,34 @@ class _ReportsScreenState extends State<ReportsScreen> {
           const SizedBox(height: 20),
           SizedBox(
             height: 300,
-            child: LineChart(
-              LineChartData(
-                lineTouchData: LineTouchData(
+            child: BarChart(
+              BarChartData(
+                barTouchData: BarTouchData(
                   enabled: true,
-                  touchTooltipData: LineTouchTooltipData(
-                    getTooltipColor: (touchedSpot) => Colors.white,
-                    tooltipPadding: const EdgeInsets.all(8),
-                    tooltipMargin: 8,
-                    getTooltipItems: (touchedSpots) {
-                      return touchedSpots.map((spot) {
-                      final valor = _formatarValorTooltip(spot.y, 'contador');
-                        return LineTooltipItem(
-                          valor,
-                          const TextStyle(
-                            color: const Color(0xFF1976D2),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        );
-                      }).toList();
+                  touchTooltipData: BarTouchTooltipData(
+                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                      final valor = rod.toY.toInt();
+                      return BarTooltipItem(
+                        '$valor',
+                        const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      );
                     },
                   ),
                 ),
-                gridData: FlGridData(show: true),
                 titlesData: FlTitlesData(
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      interval: 1.0,
                       getTitlesWidget: (value, meta) {
-                        const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-                                      'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-                        final mes = value.toInt();
-                        return mes >= 1 && mes <= 12 
-                          ? Text(meses[mes - 1], style: const TextStyle(fontSize: 10))
-                          : const SizedBox();
+                        final index = value.toInt();
+                        if (index >= 0 && index < meses.length) {
+                          return Text(meses[index], style: const TextStyle(fontSize: 10));
+                        }
+                        return const SizedBox();
                       },
                     ),
                   ),
@@ -1911,26 +2201,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       getTitlesWidget: (value, meta) {
                         return Text('${value.toInt()}', style: const TextStyle(fontSize: 10));
                       },
+                      reservedSize: 40,
                     ),
                   ),
                   topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                   rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                 ),
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: spots,
-                    isCurved: false,
-                    color: const Color(0xFF1976D2),
-                    barWidth: 3,
-                    dotData: FlDotData(show: true),
-                    belowBarData: BarAreaData(
-                      show: true,
-                      color: const Color(0xFF1976D2).withOpacity(0.1),
-                    ),
-                  ),
-                ],
-                minY: 0,
                 borderData: FlBorderData(show: true),
+                barGroups: barGroups,
+                gridData: FlGridData(show: true),
               ),
             ),
           ),
@@ -2068,18 +2347,25 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   // ── CONTRATOS ATIVOS MENSAIS
-  Widget _buildContratosAnualChart() {
-    if (_data == null || _data!.contratosAtivosPoMes.isEmpty) return const SizedBox();
-    
-    final data = _data!.contratosAtivosPoMes;
-    final spots = <FlSpot>[];
-    
-    for (int mes = 1; mes <= 12; mes++) {
-      final valor = (data[mes] ?? 0).toDouble();
-      spots.add(FlSpot(mes.toDouble(), valor));
-    }
-    
-    return Container(
+Widget _buildContratosAnualChart() {
+  if (_data != null) {
+  }
+  if (_data == null || _data!.contratosAtivosPoMes.isEmpty) {
+    return const SizedBox();
+  }
+
+  // 🔹 CONSTRUIR OS SPOTS DO GRÁFICO
+  final data = _data!.contratosAtivosPoMes;
+  final spots = <FlSpot>[];
+  for (int mes = 1; mes <= 12; mes++) {
+    final valor = (data[mes] ?? 0).toDouble();
+    spots.add(FlSpot(mes.toDouble(), valor));
+  }
+
+  // 🔹 FORÇAR ALTURA FIXA
+  return SizedBox(
+    height: 320,
+    child: Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -2094,8 +2380,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 20),
-          SizedBox(
-            height: 300,
+          Expanded(
             child: LineChart(
               LineChartData(
                 lineTouchData: LineTouchData(
@@ -2106,11 +2391,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     tooltipMargin: 8,
                     getTooltipItems: (touchedSpots) {
                       return touchedSpots.map((spot) {
-                      final valor = _formatarValorTooltip(spot.y, 'contador');
+                        final valor = _formatarValorTooltip(spot.y, 'contador');
                         return LineTooltipItem(
                           valor,
                           const TextStyle(
-                            color: const Color(0xFF388E3C),
+                            color: Color(0xFF388E3C),
                             fontWeight: FontWeight.bold,
                             fontSize: 12,
                           ),
@@ -2126,12 +2411,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       showTitles: true,
                       interval: 1.0,
                       getTitlesWidget: (value, meta) {
-                        const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-                                      'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+                        const meses = [
+                          'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                          'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'
+                        ];
                         final mes = value.toInt();
-                        return mes >= 1 && mes <= 12 
-                          ? Text(meses[mes - 1], style: const TextStyle(fontSize: 10))
-                          : const SizedBox();
+                        return mes >= 1 && mes <= 12
+                            ? Text(meses[mes - 1], style: const TextStyle(fontSize: 10))
+                            : const SizedBox();
                       },
                     ),
                   ),
@@ -2166,21 +2453,38 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   // ── VALOR APÓLICES MENSAL
   Widget _buildValorApolicesAnualChart() {
     if (_data == null || _data!.valorApolicesPoMes.isEmpty) return const SizedBox();
-    
+
     final data = _data!.valorApolicesPoMes;
     final spots = <FlSpot>[];
-    
+
+    double maxValor = 0.0;
     for (int mes = 1; mes <= 12; mes++) {
-      final valor = (data[mes] ?? 0.0) / 1000; // Converter para milhares
+      final valor = data[mes] ?? 0.0;
       spots.add(FlSpot(mes.toDouble(), valor));
+      if (valor > maxValor) maxValor = valor;
     }
-    
+
+    // Se não houver dados, retorna vazio
+    if (maxValor == 0) return const SizedBox();
+
+    // Ajusta o máximo do eixo Y com 10% de margem
+    final maxY = maxValor * 1.1;
+
+    // 🔹 Função para formatar o valor do eixo com sufixo (k, M, B)
+    String _formatAxisLabel(double value) {
+      if (value >= 1e9) return 'R\$${(value / 1e9).toStringAsFixed(1)}B';
+      if (value >= 1e6) return 'R\$${(value / 1e6).toStringAsFixed(1)}M';
+      if (value >= 1e3) return 'R\$${(value / 1e3).toStringAsFixed(1)}k';
+      return 'R\$${value.toStringAsFixed(0)}';
+    }
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -2192,7 +2496,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '💰 Valor Apólices Mensais - Ano ${DateTime.now().year} (R\$)',
+            '💰 Valor Apólices Mensais - Ano ${DateTime.now().year}',
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 20),
@@ -2208,11 +2512,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     tooltipMargin: 8,
                     getTooltipItems: (touchedSpots) {
                       return touchedSpots.map((spot) {
-                      final valor = _formatarValorTooltip(spot.y, 'moeda');
+                        // 🔹 Tooltip com valor exato em reais
+                        final valor = spot.y;
+                        final formatted = NumberFormat.currency(
+                          locale: 'pt_BR',
+                          symbol: 'R\$',
+                        ).format(valor);
                         return LineTooltipItem(
-                          valor,
+                          formatted,
                           const TextStyle(
-                            color: const Color(0xFF7B1FA2),
+                            color: Color(0xFF7B1FA2),
                             fontWeight: FontWeight.bold,
                             fontSize: 12,
                           ),
@@ -2228,12 +2537,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       showTitles: true,
                       interval: 1.0,
                       getTitlesWidget: (value, meta) {
-                        const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-                                      'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+                        const meses = [
+                          'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                          'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'
+                        ];
                         final mes = value.toInt();
-                        return mes >= 1 && mes <= 12 
-                          ? Text(meses[mes - 1], style: const TextStyle(fontSize: 10))
-                          : const SizedBox();
+                        return mes >= 1 && mes <= 12
+                            ? Text(meses[mes - 1], style: const TextStyle(fontSize: 10))
+                            : const SizedBox();
                       },
                     ),
                   ),
@@ -2241,8 +2552,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     sideTitles: SideTitles(
                       showTitles: true,
                       getTitlesWidget: (value, meta) {
-                        return Text('R\$${value.toStringAsFixed(0)}k', style: const TextStyle(fontSize: 10));
+                        // 🔹 Eixo Y com formatação inteligente
+                        return Text(
+                          _formatAxisLabel(value),
+                          style: const TextStyle(fontSize: 10),
+                        );
                       },
+                      reservedSize: 50,
                     ),
                   ),
                   topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -2262,6 +2578,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   ),
                 ],
                 minY: 0,
+                maxY: maxY,
                 borderData: FlBorderData(show: true),
               ),
             ),
@@ -2382,11 +2699,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
     
     final data = _data!.taxaRetencaoPoMes;
     final spots = <FlSpot>[];
-    
+    double maxValor = 100.0; // Padrão 100%
+
     for (int mes = 1; mes <= 12; mes++) {
       final valor = data[mes] ?? 0.0;
+      // Limita a 100% para exibição, mas mantém o valor original para tooltip
       spots.add(FlSpot(mes.toDouble(), valor));
+      if (valor > maxValor) maxValor = valor;
     }
+    // Adiciona uma margem de 10% acima do máximo encontrado
+    final maxY = (maxValor * 1.1).clamp(100.0, double.infinity);
     
     return Container(
       padding: const EdgeInsets.all(20),
@@ -2469,7 +2791,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   ),
                 ],
                 minY: 0,
-                maxY: 100,
+                maxY: maxY,
                 borderData: FlBorderData(show: true),
               ),
             ),
@@ -2479,18 +2801,92 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
+  // --- MÉTODOS PARA GERAR O GRÁFICO DE SLA ---
+
+  Map<int, double> _calculateSlaByMesSinistros() {
+    final result = <int, double>{};
+    
+    for (int mes = 1; mes <= 12; mes++) {
+      final dataInicio = DateTime(DateTime.now().year, mes, 1);
+      final dataFim = mes == 12 
+          ? DateTime(DateTime.now().year + 1, 1, 1).subtract(const Duration(days: 1))
+          : DateTime(DateTime.now().year, mes + 1, 1).subtract(const Duration(days: 1));
+
+      final sinistrosMes = _sinistros.where((s) {
+        return s.dataAbertura.isAfter(dataInicio) &&
+            s.dataAbertura.isBefore(dataFim.add(const Duration(days: 1)));
+      }).toList();
+
+      final concluidos = sinistrosMes
+          .where((c) => c.statusAtual == 'Concluído' && c.dataConclusao != null && c.slaPrevisto != null)
+          .toList();
+
+      if (concluidos.isEmpty) {
+        result[mes] = 0;
+        continue;
+      }
+
+      int slaCumprido = 0;
+      for (var e in concluidos) {
+        final dataConclusaoDateTime = (e.dataConclusao as Timestamp?)?.toDate() ?? DateTime.now();
+        if (dataConclusaoDateTime.isBefore(e.slaPrevisto!)) {
+          slaCumprido++;
+        }
+      }
+
+      result[mes] = (slaCumprido / concluidos.length * 100);
+    }
+    
+    return result;
+  }
+
+  Map<int, double> _calculateSlaByMesAssistencias() {
+    final result = <int, double>{};
+    
+    for (int mes = 1; mes <= 12; mes++) {
+      final dataInicio = DateTime(DateTime.now().year, mes, 1);
+      final dataFim = mes == 12 
+          ? DateTime(DateTime.now().year + 1, 1, 1).subtract(const Duration(days: 1))
+          : DateTime(DateTime.now().year, mes + 1, 1).subtract(const Duration(days: 1));
+
+      final assistenciasMes = _assistencias.where((a) {
+        return a.dataAbertura.isAfter(dataInicio) &&
+            a.dataAbertura.isBefore(dataFim.add(const Duration(days: 1)));
+      }).toList();
+
+      final concluidas = assistenciasMes
+          .where((c) => c.statusAtual == 'Concluído' && c.dataConclusao != null && c.slaPrevisto != null)
+          .toList();
+
+      if (concluidas.isEmpty) {
+        result[mes] = 0;
+        continue;
+      }
+
+      int slaCumprido = 0;
+      for (var e in concluidas) {
+        final dataConclusaoDateTime = (e.dataConclusao as Timestamp?)?.toDate() ?? DateTime.now();
+        if (dataConclusaoDateTime.isBefore(e.slaPrevisto!)) {
+          slaCumprido++;
+        }
+      }
+
+      result[mes] = (slaCumprido / concluidas.length * 100);
+    }
+    
+    return result;
+  }
+
   // ── SLA COMPLIANCE SINISTROS
   Widget _buildSlaComplianceSinistrosAnualChart() {
-    if (_data == null || _data!.slaComplianceSinistrosPoMes.isEmpty) return const SizedBox();
-    
-    final data = _data!.slaComplianceSinistrosPoMes;
+    final data = _calculateSlaByMesSinistros();
     final spots = <FlSpot>[];
     
     for (int mes = 1; mes <= 12; mes++) {
       final valor = data[mes] ?? 0.0;
       spots.add(FlSpot(mes.toDouble(), valor));
     }
-    
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -2502,7 +2898,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '✅ SLA Compliance Sinistros - Ano ${DateTime.now().year} (%)',
+            '✅ SLA Compliance Sinistros - Ano ${DateTime.now().year} (%) — Eventos Concluídos',
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 20),
@@ -2558,12 +2954,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   LineChartBarData(
                     spots: spots,
                     isCurved: false,
-                    color: const Color(0xFF00796B),
+                    color: _C.red,
                     barWidth: 3,
                     dotData: FlDotData(show: true),
                     belowBarData: BarAreaData(
                       show: true,
-                      color: const Color(0xFF00796B).withOpacity(0.1),
+                      color: _C.red.withOpacity(0.1),
                     ),
                   ),
                 ],
@@ -2578,18 +2974,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
-  // ── SLA COMPLIANCE ASSISTÊNCIAS
   Widget _buildSlaComplianceAssistenciasAnualChart() {
-    if (_data == null || _data!.slaComplianceAssistenciasPoMes.isEmpty) return const SizedBox();
-    
-    final data = _data!.slaComplianceAssistenciasPoMes;
+    final data = _calculateSlaByMesAssistencias();
     final spots = <FlSpot>[];
     
     for (int mes = 1; mes <= 12; mes++) {
       final valor = data[mes] ?? 0.0;
       spots.add(FlSpot(mes.toDouble(), valor));
     }
-    
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -2601,7 +2994,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '✅ SLA Compliance Assistências - Ano ${DateTime.now().year} (%)',
+            '✅ SLA Compliance Assistências - Ano ${DateTime.now().year} (%) — Eventos Concluídos',
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 20),
@@ -2657,12 +3050,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   LineChartBarData(
                     spots: spots,
                     isCurved: false,
-                    color: const Color(0xFF0288D1),
+                    color: _C.teal,
                     barWidth: 3,
                     dotData: FlDotData(show: true),
                     belowBarData: BarAreaData(
                       show: true,
-                      color: const Color(0xFF0288D1).withOpacity(0.1),
+                      color: _C.teal.withOpacity(0.1),
                     ),
                   ),
                 ],
@@ -2682,440 +3075,41 @@ class _ReportsScreenState extends State<ReportsScreen> {
     if (_data == null) return;
     setState(() => _isExporting = true);
     try {
-      final pdf = pw.Document();
-      final d = _data!;
-      final periodo = _dataInicio != null && _dataFim != null
-          ? '${_fmtDate.format(_dataInicio!)} a ${_fmtDate.format(_dataFim!)}'
-          : _periodoSelecionado;
 
-      // Cores PDF
-      const corBlue   = PdfColor.fromInt(0xFF1565C0);
-      const corGreen  = PdfColor.fromInt(0xFF2E7D32);
-      const corRed    = PdfColor.fromInt(0xFFC62828);
-      const corAmber  = PdfColor.fromInt(0xFFE65100);
-      const corGray   = PdfColor.fromInt(0xFF546E7A);
-      const corBg     = PdfColor.fromInt(0xFFF4F6F9);
+      final slaMap = _calculateSlaPercentageAll();
+      final slaGeral = slaMap['geral'] ?? 0;
+      final slaSinistros = slaMap['sinistros'] ?? 0;
+      final slaAssistencias = slaMap['assistencias'] ?? 0;
 
-      pw.Widget metricBox(String label, String value, {PdfColor color = corBlue}) {
-        return pw.Container(
-          padding: const pw.EdgeInsets.all(10),
-          decoration: pw.BoxDecoration(
-            color: corBg,
-            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
-          ),
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text(label,
-                  style: pw.TextStyle(fontSize: 8, color: corGray)),
-              pw.SizedBox(height: 4),
-              pw.Text(value,
-                  style: pw.TextStyle(
-                      fontSize: 16,
-                      fontWeight: pw.FontWeight.bold,
-                      color: color)),
-            ],
-          ),
-        );
-      }
+      Uint8List? imagemPizza;
+        try {
+          imagemPizza = await _capturarWidget(_pizzaChartKey);
+        } catch (e) {
+          print('Erro ao capturar gráfico: $e');
+          // continua sem a imagem
+        }
 
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(32),
-          build: (pw.Context ctx) => [
+      Uint8List? imagemSinistros;
+        try {
+          imagemSinistros = await _capturarWidget(_sinistrosSectionKey, height: 400); // altura maior
+        } catch (e) { print('Erro sinistros: $e'); }
 
-            // Cabeçalho
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text('Upgrade Corretora de Seguros',
-                        style: pw.TextStyle(
-                            fontSize: 18,
-                            fontWeight: pw.FontWeight.bold,
-                            color: corBlue)),
-                    pw.Text('Sumário Executivo · $periodo',
-                        style: pw.TextStyle(
-                            fontSize: 10, color: corGray)),
-                  ],
-                ),
-                pw.Text(
-                  'Gerado em ${_fmtDate.format(DateTime.now())}',
-                  style: pw.TextStyle(fontSize: 8, color: corGray),
-                ),
-              ],
-            ),
-            pw.Divider(color: corBlue, height: 20),
-
-            // Métricas principais
-            pw.Text('Visão geral do período',
-                style: pw.TextStyle(
-                    fontSize: 13, fontWeight: pw.FontWeight.bold)),
-            pw.SizedBox(height: 8),
-            pw.Row(
-              children: [
-                pw.Expanded(child: metricBox('Total de sinistros', d.totalSinistros.toString())),
-                pw.SizedBox(width: 8),
-                pw.Expanded(child: metricBox('Valor total', _fmtCurrency.format(d.valorTotalSinistros))),
-                pw.SizedBox(width: 8),
-                pw.Expanded(child: metricBox(
-                    'Sinistralidade',
-                    '${d.sinistralidade.toStringAsFixed(1)}%',
-                    color: d.sinistralidade > 75
-                        ? corRed
-                        : d.sinistralidade > 50
-                            ? corAmber
-                            : corGreen)),
-                pw.SizedBox(width: 8),
-                pw.Expanded(child: metricBox(
-                    'Tempo médio resolução',
-                    '${d.tempoMedioResolucao.toStringAsFixed(1)} dias')),
-              ],
-            ),
-            pw.SizedBox(height: 16),
-
-            // Distribuição por status
-            pw.Text('Distribuição por status',
-                style: pw.TextStyle(
-                    fontSize: 13, fontWeight: pw.FontWeight.bold)),
-            pw.SizedBox(height: 6),
-            pw.Table(
-              border: pw.TableBorder.all(
-                  color: PdfColors.grey300, width: 0.5),
-              children: [
-                pw.TableRow(
-                  decoration: const pw.BoxDecoration(color: corBg),
-                  children: ['Status', 'Quantidade', '% do total']
-                      .map((h) => pw.Padding(
-                            padding: const pw.EdgeInsets.all(6),
-                            child: pw.Text(h,
-                                style: pw.TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: pw.FontWeight.bold)),
-                          ))
-                      .toList(),
-                ),
-                ...d.porStatus.entries.map((e) {
-                  final pct = d.totalSinistros > 0
-                      ? (e.value / d.totalSinistros * 100)
-                          .toStringAsFixed(1)
-                      : '0';
-                  return pw.TableRow(
-                    children: [e.key, '${e.value}', '$pct%']
-                        .map((cell) => pw.Padding(
-                              padding: const pw.EdgeInsets.all(6),
-                              child: pw.Text(cell,
-                                  style:
-                                      const pw.TextStyle(fontSize: 9)),
-                            ))
-                        .toList(),
-                  );
-                }),
-              ],
-            ),
-            pw.SizedBox(height: 16),
-
-            // Sinistros em atraso
-            if (d.emAtraso.isNotEmpty) ...[
-              pw.Text(
-                  'Sinistros em atraso (sem movimentação ≥ 7 dias)',
-                  style: pw.TextStyle(
-                      fontSize: 13,
-                      fontWeight: pw.FontWeight.bold,
-                      color: corRed)),
-              pw.SizedBox(height: 6),
-              pw.Table(
-                border: pw.TableBorder.all(
-                    color: PdfColors.grey300, width: 0.5),
-                children: [
-                  pw.TableRow(
-                    decoration:
-                        const pw.BoxDecoration(color: corBg),
-                    children:
-                        ['Nº Sinistro', 'Cliente', 'Status', 'Dias parado']
-                            .map((h) => pw.Padding(
-                                  padding: const pw.EdgeInsets.all(6),
-                                  child: pw.Text(h,
-                                      style: pw.TextStyle(
-                                          fontSize: 9,
-                                          fontWeight:
-                                              pw.FontWeight.bold)),
-                                ))
-                            .toList(),
-                  ),
-                  ...d.emAtraso.take(15).map((a) => pw.TableRow(
-                        children: [
-                          a.claim.numeroSinistro,
-                          a.claim.clientNome,
-                          a.claim.statusAtual,
-                          '${a.diasSemMovimentacao} dias',
-                        ]
-                            .map((cell) => pw.Padding(
-                                  padding: const pw.EdgeInsets.all(6),
-                                  child: pw.Text(cell,
-                                      style: const pw.TextStyle(
-                                          fontSize: 9)),
-                                ))
-                            .toList(),
-                      )),
-                ],
-              ),
-              pw.SizedBox(height: 16),
-            ],
-
-            // Tempo médio por etapa
-            if (d.tempoMedioEtapa.isNotEmpty) ...[
-              pw.Text('Tempo médio por etapa do processo',
-                  style: pw.TextStyle(
-                      fontSize: 13, fontWeight: pw.FontWeight.bold)),
-              pw.SizedBox(height: 6),
-              pw.Table(
-                border: pw.TableBorder.all(
-                    color: PdfColors.grey300, width: 0.5),
-                children: [
-                  pw.TableRow(
-                    decoration:
-                        const pw.BoxDecoration(color: corBg),
-                    children: ['Transição', 'Média (dias)']
-                        .map((h) => pw.Padding(
-                              padding: const pw.EdgeInsets.all(6),
-                              child: pw.Text(h,
-                                  style: pw.TextStyle(
-                                      fontSize: 9,
-                                      fontWeight:
-                                          pw.FontWeight.bold)),
-                            ))
-                        .toList(),
-                  ),
-                  ...d.tempoMedioEtapa.entries.map((e) =>
-                      pw.TableRow(
-                        children: [e.key, e.value.toStringAsFixed(1)]
-                            .map((cell) => pw.Padding(
-                                  padding:
-                                      const pw.EdgeInsets.all(6),
-                                  child: pw.Text(cell,
-                                      style: const pw.TextStyle(
-                                          fontSize: 9)),
-                                ))
-                            .toList(),
-                      )),
-                ],
-              ),
-              pw.SizedBox(height: 16),
-            ],
-
-            // Clientes em risco
-            if (d.clientesAltoRisco.isNotEmpty) ...[
-              pw.Text('Clientes com sinistralidade elevada (≥ 60%)',
-                  style: pw.TextStyle(
-                      fontSize: 13,
-                      fontWeight: pw.FontWeight.bold,
-                      color: corAmber)),
-              pw.SizedBox(height: 6),
-              pw.Table(
-                border: pw.TableBorder.all(
-                    color: PdfColors.grey300, width: 0.5),
-                children: [
-                  pw.TableRow(
-                    decoration:
-                        const pw.BoxDecoration(color: corBg),
-                    children: [
-                      'Cliente',
-                      'Sinistralidade',
-                      'Total sinistros',
-                      'Vencimento apólice'
-                    ]
-                        .map((h) => pw.Padding(
-                              padding: const pw.EdgeInsets.all(6),
-                              child: pw.Text(h,
-                                  style: pw.TextStyle(
-                                      fontSize: 9,
-                                      fontWeight:
-                                          pw.FontWeight.bold)),
-                            ))
-                        .toList(),
-                  ),
-                  ...d.clientesAltoRisco.map((r) => pw.TableRow(
-                        children: [
-                          r.client.nome,
-                          '${r.sinistralidade.toStringAsFixed(1)}%',
-                          _fmtCurrency.format(r.totalSinistros),
-                          _fmtDate.format(
-                            r.client.apolices.reduce((a, b) => a.dataFim.isBefore(b.dataFim) ? a : b).dataFim
-                          ),
-                        ]
-                            .map((cell) => pw.Padding(
-                                  padding:
-                                      const pw.EdgeInsets.all(6),
-                                  child: pw.Text(cell,
-                                      style: const pw.TextStyle(
-                                          fontSize: 9)),
-                                ))
-                            .toList(),
-                      )),
-                ],
-              ),
-              pw.SizedBox(height: 16),
-            ],
-
-            // Aprovações travadas
-            if (d.aprovacoesParadas.isNotEmpty) ...[
-              pw.Text('Aprovações travadas (> 3 dias)',
-                  style: pw.TextStyle(
-                      fontSize: 13,
-                      fontWeight: pw.FontWeight.bold,
-                      color: corAmber)),
-              pw.SizedBox(height: 6),
-              pw.Table(
-                border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
-                children: [
-                  pw.TableRow(
-                    decoration: const pw.BoxDecoration(color: corBg),
-                    children: ['Nº Sinistro', 'Cliente', 'Seguradora', 'Dias parado']
-                        .map((h) => pw.Padding(
-                              padding: const pw.EdgeInsets.all(6),
-                              child: pw.Text(h,
-                                  style: pw.TextStyle(
-                                      fontSize: 9,
-                                      fontWeight: pw.FontWeight.bold)),
-                            ))
-                        .toList(),
-                  ),
-                  ...d.aprovacoesParadas.map((a) => pw.TableRow(
-                        children: [
-                          a.claim.numeroSinistro,
-                          a.claim.clientNome,
-                          a.claim.seguradora.isNotEmpty ? a.claim.seguradora : '—',
-                          '${a.diasSemMovimentacao} dias',
-                        ]
-                            .map((cell) => pw.Padding(
-                                  padding: const pw.EdgeInsets.all(6),
-                                  child: pw.Text(cell,
-                                      style: const pw.TextStyle(fontSize: 9)),
-                                ))
-                            .toList(),
-                      )),
-                ],
-              ),
-              pw.SizedBox(height: 16),
-            ],
-
-            // Reparos prolongados
-            if (d.reparosProlongados.isNotEmpty) ...[
-              pw.Text('Veículos em manutenção prolongada (> 7 dias)',
-                  style: pw.TextStyle(
-                      fontSize: 13,
-                      fontWeight: pw.FontWeight.bold,
-                      color: corBlue)),
-              pw.SizedBox(height: 6),
-              pw.Table(
-                border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
-                children: [
-                  pw.TableRow(
-                    decoration: const pw.BoxDecoration(color: corBg),
-                    children: ['Nº Sinistro', 'Cliente', 'Veículo / Placa', 'Dias em reparo']
-                        .map((h) => pw.Padding(
-                              padding: const pw.EdgeInsets.all(6),
-                              child: pw.Text(h,
-                                  style: pw.TextStyle(
-                                      fontSize: 9,
-                                      fontWeight: pw.FontWeight.bold)),
-                            ))
-                        .toList(),
-                  ),
-                  ...d.reparosProlongados.map((a) {
-                    String veiculo = '—';
-                    if (a.claim.veiculoSelecionado != null) {
-                      final v = a.claim.veiculoSelecionado!;
-                      veiculo = '${v.placa.isNotEmpty ? v.placa : "N/I"} · ${v.marca}';
-                    } else if (a.claim.transporte != null) {
-                      veiculo = 'Cavalo: ${a.claim.transporte!.placaCavalo}';
-                    }
-                    return pw.TableRow(
-                      children: [
-                        a.claim.numeroSinistro,
-                        a.claim.clientNome,
-                        veiculo,
-                        '${a.diasSemMovimentacao} dias${a.diasSemMovimentacao > 14 ? " ⚠" : ""}',
-                      ]
-                          .map((cell) => pw.Padding(
-                                padding: const pw.EdgeInsets.all(6),
-                                child: pw.Text(cell,
-                                    style: const pw.TextStyle(fontSize: 9)),
-                              ))
-                          .toList(),
-                    );
-                  }),
-                ],
-              ),
-              pw.SizedBox(height: 16),
-            ],
-
-            // Contratos próximos
-            if (d.contratosProximos.isNotEmpty) ...[
-              pw.Text('Contratos próximos do vencimento (30 dias)',
-                  style: pw.TextStyle(
-                      fontSize: 13, fontWeight: pw.FontWeight.bold)),
-              pw.SizedBox(height: 6),
-              pw.Table(
-                border: pw.TableBorder.all(
-                    color: PdfColors.grey300, width: 0.5),
-                children: [
-                  pw.TableRow(
-                    decoration:
-                        const pw.BoxDecoration(color: corBg),
-                    children: ['Cliente', 'Vencimento', 'Valor apólice']
-                        .map((h) => pw.Padding(
-                              padding: const pw.EdgeInsets.all(6),
-                              child: pw.Text(h,
-                                  style: pw.TextStyle(
-                                      fontSize: 9,
-                                      fontWeight:
-                                          pw.FontWeight.bold)),
-                            ))
-                        .toList(),
-                  ),
-                  ...d.contratosProximos.map((c) => pw.TableRow(
-                        children: [
-                        c.nome,
-                        _fmtDate.format(
-                          c.apolices.isNotEmpty 
-                              ? c.apolices.reduce((a, b) => a.dataFim.isBefore(b.dataFim) ? a : b).dataFim
-                              : DateTime.now()
-                        ),
-                        // MUDA PARA: valor total
-                        _fmtCurrency.format(c.valorTotalApolicesAtivas),
-                      ]
-                            .map((cell) => pw.Padding(
-                                  padding:
-                                      const pw.EdgeInsets.all(6),
-                                  child: pw.Text(cell,
-                                      style: const pw.TextStyle(
-                                          fontSize: 9)),
-                                ))
-                            .toList(),
-                      )),
-                ],
-              ),
-            ],
-
-            pw.SizedBox(height: 24),
-            pw.Divider(color: PdfColors.grey300),
-            pw.Text(
-              'Upgrade Corretora de Seguros · Relatório gerado automaticamente pelo sistema de gestão',
-              style: pw.TextStyle(fontSize: 7, color: corGray),
-            ),
-          ],
-        ),
+      final pdf = await PdfReportService().generateReport(
+        data: _data!,
+        dataInicio: _dataInicio,
+        dataFim: _dataFim,
+        periodoLabel: _periodoSelecionado,
+        totalClientes: _allClients.where((c) =>
+          c.apolices.any((a) => a.dataFim.isAfter(DateTime.now()))
+        ).length,
+        slaGeral: slaGeral,
+        imagemPizza: imagemPizza,
+        slaSinistros: slaSinistros,
+        slaAssistencias: slaAssistencias,
       );
-
       await Printing.sharePdf(
         bytes: await pdf.save(),
-        filename:
-            'Upgrade_Relatorio_${_fmtDate.format(DateTime.now()).replaceAll('/', '-')}.pdf',
+        filename: 'Upgrade_Relatorio_${_fmtDate.format(DateTime.now()).replaceAll('/', '-')}.pdf',
       );
     } catch (e) {
       if (mounted) {
@@ -3124,13 +3118,26 @@ class _ReportsScreenState extends State<ReportsScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isExporting = false);
+      setState(() => _isExporting = false);
     }
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
-  @override
-  Widget build(BuildContext context) {
+    @override
+    Widget build(BuildContext context) {
+    
+    final sinistrosFiltrados = _sinistros.where((s) {
+      if (_dataInicio == null || _dataFim == null) return true;
+      return s.dataAbertura.isAfter(_dataInicio!) &&
+          s.dataAbertura.isBefore(_dataFim!.add(const Duration(days: 1)));
+    }).toList();
+ 
+    final assistenciasFiltradas = _assistencias.where((a) {
+      if (_dataInicio == null || _dataFim == null) return true;
+      return a.dataAbertura.isAfter(_dataInicio!) &&
+          a.dataAbertura.isBefore(_dataFim!.add(const Duration(days: 1)));
+    }).toList();
+    
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FB),
       body: _isLoading
@@ -3145,71 +3152,874 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     : Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          // 1️⃣ CABEÇALHO: VISÃO GERAL DO NEGÓCIO (KPI EXECUTIVO)
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                           _buildHeader(),
-                          const SizedBox(height: 20),
-                          _buildMetricasGerais(),
+                          const SizedBox(height: 12),
+                          _buildExecutiveKpiHeader(),
                           const SizedBox(height: 16),
+                          RepaintBoundary(
+                            key: _pizzaChartKey,
+                            child: _buildSinistroVsAssistenciaChart(),
+                          ),
+                          const SizedBox(height: 28),
+ 
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          // 2️⃣ SEÇÃO: SINISTROS
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          _buildSectionDivider('📊 SINISTROS', _C.red),
+                          const SizedBox(height: 12),
+                          RepaintBoundary(
+                            key: _sinistrosSectionKey,
+                            child: _buildSinistrosSection(),
+                          ),
+                          const SizedBox(height: 16),
+                          _buildSinistrosAnualChart(),
+                          const SizedBox(height: 16),
+                          _buildSinistralidadeAnualChart(),
+                          const SizedBox(height: 16),
+                          _buildSlaComplianceSinistrosAnualChart(),
+                          const SizedBox(height: 16),
+                          _buildSlaByRamoTable(),
+                          const SizedBox(height: 28),
+                          _buildSinistrosPorRamoChart(),
+                          const SizedBox(height: 16),
+                          _buildSinistrosPorDiaChart(),
+                          const SizedBox(height: 16),                          
+                          _buildSinistrosPorHorarioChart(),
+                          const SizedBox(height: 16),                          
                           _buildDistribuicaoStatus(),
                           const SizedBox(height: 16),
                           _buildFunilEtapas(),
                           const SizedBox(height: 16),
-                          _buildAprovacoesParadas(),
-                          const SizedBox(height: 16),
                           _buildReparosProlongados(),
                           const SizedBox(height: 16),
-                          _buildFuncionarios(),
+                           _buildEnvolvimentoTerceirosCard(),
+                          const SizedBox(height: 16),
+                          _buildTicketMedioAnualChart(),
+                          const SizedBox(height: 16),
+ 
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          // 3️⃣ SEÇÃO: ASSISTÊNCIAS
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          _buildSectionDivider('🆘 ASSISTÊNCIAS', _C.teal),
+                          const SizedBox(height: 12),
+                          _buildAssistenciasSection(),
+                          const SizedBox(height: 16),
+                          _buildAssistenciasAnualChart(),
+                          const SizedBox(height: 16),
+                          _buildSlaComplianceAssistenciasAnualChart(),
+                          const SizedBox(height: 16),
+                          _buildAssistenciasPorRamoChart(),
+                          const SizedBox(height: 16),
+                          _buildSlaByTipoAssistenciaTable(),
+                          const SizedBox(height: 28),
+                          _buildAssistenciasPorDiaChart(),
+                          const SizedBox(height: 16),
+                          _buildAssistenciasPorHorarioChart(),
+                          const SizedBox(height: 16),
+ 
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          // 4️⃣ SEÇÃO: CLIENTES
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          _buildSectionDivider('👥 CLIENTES', _C.blue),
+                          const SizedBox(height: 12),
+                          TopClientsWidgets.buildTopClientesPorReceita(_allClients),
+                          const SizedBox(height: 16),
+                          TopClientsWidgets.buildTopClientesPorRisco(_allClients,_sinistros),
                           const SizedBox(height: 16),
                           _buildClientesRisco(),
                           const SizedBox(height: 16),
+                          _buildContratosAnualChart(),
+                          const SizedBox(height: 16),
+                          _buildValorApolicesAnualChart(),
+                          const SizedBox(height: 16),
+                          _buildTaxaRetencaoAnualChart(),
+                          const SizedBox(height: 28),
                           _buildContratosProximos(),
                           const SizedBox(height: 16),
-                          _buildSinistrosEmAtraso(),
+ 
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          // 5️⃣ SEÇÃO: SEGURADORAS
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          _buildSectionDivider('🏢 SEGURADORAS', _C.amber),
+                          const SizedBox(height: 12),
+                          _buildMixCarteiraChart(_data!.mixCarteira),
                           const SizedBox(height: 16),
+                          _buildTopSeguradorasChart(_data!.sinistralidadePorSeguradora),
+                          const SizedBox(height: 16),
+                          _buildTopSeguradorasAcionamentosChart(_sinistros),
+                          const SizedBox(height: 28),
+ 
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          // 6️⃣ SEÇÃO: FUNCIONÁRIOS
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          _buildSectionDivider('👔 FUNCIONÁRIOS', _C.purple),
+                          const SizedBox(height: 12),
+                          EmployeesPerformanceWidgets.buildFuncionariosSinistros(
+                            sinistrosFiltrados,
+                            _funcionarioIdNomes,
+                          ),
+                          const SizedBox(height: 16),
+                          EmployeesPerformanceWidgets.buildFuncionariosAssistencias(
+                            assistenciasFiltradas,
+                            _funcionarioIdNomes,
+                          ),
+                          const SizedBox(height: 28),
+ 
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          // 7️⃣ SEÇÃO: SATISFAÇÃO (NPS)
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          _buildSectionDivider('⭐ SATISFAÇÃO DOS CLIENTES', const Color(0xFF6A1B9A)),
+                          const SizedBox(height: 12),
                           _buildNpsSection(),
                           const SizedBox(height: 16),
                           _buildNpsCard(),
                           const SizedBox(height: 16),
                           _buildTempoMedioCard(),
                           const SizedBox(height: 16),
-                          _buildAssistenciasPorRamoChart(),
-                          const SizedBox(height: 16),
-                          _buildSinistroVsAssistenciaChart(),
-                          const SizedBox(height: 16),
-                          _buildSinistrosPorRamoChart(),
-                          const SizedBox(height: 16),
-                          _buildSinistrosPorHorarioChart(),
-                          const SizedBox(height: 16),
-                          _buildSinistrosPorDiaChart(),
-                          const SizedBox(height: 16),
-                          _buildEnvolvimentoTerceirosCard(),
-                          const SizedBox(height: 16),
                           _buildNpsAnualChart(),
+                          const SizedBox(height: 28),
+ 
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          // 8️⃣ SEÇÃO: ANÁLISE ESTRATÉGICA (SWOT)
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          _buildSectionDivider('🎯 ANÁLISE ESTRATÉGICA (SWOT)', _C.green),
+                          const SizedBox(height: 12),
+                          _buildOperationalBlock(_sinistros, _assistencias),
                           const SizedBox(height: 16),
-                          _buildSinistrosAnualChart(),
+                          _buildTacticalBlock(_sinistros, _assistencias, _allClients),
                           const SizedBox(height: 16),
-                          _buildAssistenciasAnualChart(),
-                          const SizedBox(height: 16),
-                          _buildSinistralidadeAnualChart(),
-                          const SizedBox(height: 16),
-                          _buildContratosAnualChart(),
-                          const SizedBox(height: 16),
-                          _buildValorApolicesAnualChart(),
-                          const SizedBox(height: 16),
-                          const SizedBox(height: 16),
-                          _buildSlaComplianceSinistrosAnualChart(),
-                          const SizedBox(height: 16),
-                          _buildSlaComplianceAssistenciasAnualChart(),
-                          const SizedBox(height: 16),
-                          _buildTicketMedioAnualChart(),
-                          const SizedBox(height: 16),
-                          _buildTaxaRetencaoAnualChart(),
-                          const SizedBox(height: 16),
-                          _buildAssistenciasSection(),
+                          _buildStrategicBlock(_sinistros, _assistencias, _allClients),
                           const SizedBox(height: 32),
+
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          // 9️⃣ SEÇÃO: PENDÊNCIAS & AÇÕES
+                          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                          _buildSectionDivider('⚠️ PENDÊNCIAS & AÇÕES', _C.red),
+                          const SizedBox(height: 12),
+                          _buildAprovacoesParadas(),
+                          const SizedBox(height: 16),
+                          _buildSinistrosEmAtraso(),
+                          const SizedBox(height: 16),
                         ],
                       ),
               ),
             ),
+    );
+  }
+ 
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // NOVO: Cabeçalho Executivo com KPIs principais
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Widget _buildExecutiveKpiHeader() {
+    // Filtra os dados PELO PERÍODO SELECIONADO
+    final sinistrosFiltrados = _sinistros.where((s) {
+      if (_dataInicio == null || _dataFim == null) return true;
+      return s.dataAbertura.isAfter(_dataInicio!) &&
+          s.dataAbertura.isBefore(_dataFim!.add(const Duration(days: 1)));
+    }).toList();
+ 
+    final assistenciasFiltradas = _assistencias.where((a) {
+      if (_dataInicio == null || _dataFim == null) return true;
+      return a.dataAbertura.isAfter(_dataInicio!) &&
+          a.dataAbertura.isBefore(_dataFim!.add(const Duration(days: 1)));
+    }).toList();
+ 
+    final totalSinistros = sinistrosFiltrados.length;
+    final totalAssistencias = assistenciasFiltradas.length;
+    final totalClientes = _allClients.where((c) =>
+      c.apolices.any((a) => a.dataFim.isAfter(DateTime.now()))
+    ).length;
+ 
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Cabeçalho com título e período
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Visão Geral do Negócio',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.grey.shade800,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Icon(Icons.calendar_today, size: 13, color: _C.blue),
+                  const SizedBox(width: 6),
+                  Text(
+                    _periodoSelecionado,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: _C.blue,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  if (_dataInicio != null && _dataFim != null)
+                    Text(
+                      '${_fmtDate.format(_dataInicio!)} a ${_fmtDate.format(_dataFim!)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+ 
+        const SizedBox(height: 16),
+ 
+        // 3 Cards em row - cada um responsivo ao período
+        Row(
+          children: [
+ 
+            // Card 1: Clientes (sempre total)
+            Expanded(
+              child: _buildKpiCardV2(
+                icon: Icons.people_alt_rounded,
+                iconColor: _C.green,
+                label: 'Clientes Ativos',
+                value: totalClientes.toString(),
+                subtext: totalClientes == 1 ? '1 cliente' : '$totalClientes clientes com apólice vigente',
+                bgColor: _C.green.withOpacity(0.08),
+                borderColor: _C.green.withOpacity(0.2),
+              ),
+            ),
+            const SizedBox(width: 12),
+            
+            // Card 2: Ticket Médio
+            Expanded(
+              child: _buildKpiCardV2(
+                icon: Icons.receipt_long_rounded,
+                iconColor: _C.amber,
+                label: 'Ticket Médio',
+                value: _calculateTicketMedio(),
+                subtext: 'R\$ Por evento',
+                bgColor: _C.amber.withOpacity(0.08),
+                borderColor: _C.amber.withOpacity(0.2),
+              ),
+            ),
+            const SizedBox(width: 12),
+
+            //Card 3: VGV em Carteira
+            Expanded(
+              child: _buildKpiCardV2(
+                icon: Icons.trending_up_rounded,
+                iconColor: _C.blue,
+                label: 'Valor Total das Apólices (VGV)',
+                value: _fmtCurrency.format(_calculateVgvPeriodo()),
+                subtext: 'Em carteira',
+                bgColor: _C.blue.withOpacity(0.08),
+                borderColor: _C.blue.withOpacity(0.2),
+              ),
+            ),
+
+          ],
+        ),
+      const SizedBox(height: 16),
+
+        // Segunda linha
+        Row(
+          children: [
+            
+            // Card 1: Sinistros
+            Expanded(
+              child: _buildKpiCardV2(
+                icon: Icons.warning_amber_rounded,
+                iconColor: _C.red,
+                label: 'Sinistros',
+                value: totalSinistros.toString(),
+                subtext: totalSinistros == 1 ? '1 evento' : '$totalSinistros eventos',
+                bgColor: _C.red.withOpacity(0.08),
+                borderColor: _C.red.withOpacity(0.2),
+              ),
+            ),
+            const SizedBox(width: 12),
+ 
+            // Card 2: Assistências
+            Expanded(
+              child: _buildKpiCardV2(
+                icon: Icons.support_agent_rounded,
+                iconColor: _C.teal,
+                label: 'Assistências',
+                value: totalAssistencias.toString(),
+                subtext: totalAssistencias == 1 ? '1 evento' : '$totalAssistencias eventos',
+                bgColor: _C.teal.withOpacity(0.08),
+                borderColor: _C.teal.withOpacity(0.2),
+              ),
+            ),
+            const SizedBox(width: 12),
+
+            // SLA Compliance (Geral)
+            Expanded(
+              child: Builder(
+                builder: (context) {
+                  final slaMap = _calculateSlaPercentageAll();
+                  final slaGeral = slaMap['geral'] ?? 0;
+                  return _buildKpiCardV2(
+                    icon: Icons.check_circle_rounded,
+                    iconColor: slaGeral >= 80 ? _C.green : (slaGeral >= 60 ? _C.amber : _C.red),
+                    label: 'SLA Geral',
+                    value: slaGeral.toStringAsFixed(0) + '%',
+                    subtext: 'Eventos concluídos',
+                    bgColor: (slaGeral >= 80 ? _C.green : (slaGeral >= 60 ? _C.amber : _C.red)).withOpacity(0.08),
+                    borderColor: (slaGeral >= 80 ? _C.green : (slaGeral >= 60 ? _C.amber : _C.red)).withOpacity(0.2),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(width: 12),
+            
+            // NPS Score
+            Expanded(
+              child: _buildKpiCardV2(
+                icon: Icons.star_rounded,
+                iconColor: const Color(0xFF6A1B9A),
+                label: 'NPS Score',
+                value: _npsNotas.isEmpty ? '--' : (_npsNotas.reduce((a, b) => a + b) / _npsNotas.length).toStringAsFixed(1),
+                subtext: _npsNotas.isEmpty ? 'Sem dados' : '${_npsNotas.length} votos',
+                bgColor: const Color(0xFF6A1B9A).withOpacity(0.08),
+                borderColor: const Color(0xFF6A1B9A).withOpacity(0.2),
+              ),
+            ),
+          ],
+        ),
+      ]
+    );
+  }
+ 
+  Widget _buildSlaByRamoTable() {
+    final slaByRamo = _calculateSlaByRamo();
+    
+    if (slaByRamo.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: const Text('Nenhum sinistro concluído neste período'),
+      );
+    }
+
+    return _Section(
+      title: 'SLA por Ramo de Sinistro',
+      icon: Icons.analytics_outlined,
+      color: _C.red,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ...slaByRamo.entries.map((entry) {
+            final ramo = entry.key;
+            final slaPercent = entry.value;
+            final color = slaPercent >= 80 ? _C.green : (slaPercent >= 60 ? _C.amber : _C.red);
+            
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        ramo,
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: color.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '${slaPercent.toStringAsFixed(1)}%',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: color,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: slaPercent / 100,
+                      minHeight: 8,
+                      backgroundColor: Colors.grey[200],
+                      valueColor: AlwaysStoppedAnimation<Color>(color),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSlaByTipoAssistenciaTable() {
+    final slaByTipo = _calculateSlaByTipoAssistencia();
+    
+    if (slaByTipo.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: const Text('Nenhuma assistência concluída neste período'),
+      );
+    }
+
+    return _Section(
+      title: 'SLA por Tipo de Assistência',
+      icon: Icons.analytics_outlined,
+      color: _C.teal,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ...slaByTipo.entries.map((entry) {
+            final tipo = entry.key;
+            final slaPercent = entry.value;
+            final color = slaPercent >= 80 ? _C.green : (slaPercent >= 60 ? _C.amber : _C.red);
+            
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _getTipoAssistenciaLabel(tipo),
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: color.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '${slaPercent.toStringAsFixed(1)}%',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: color,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: slaPercent / 100,
+                      minHeight: 8,
+                      backgroundColor: Colors.grey[200],
+                      valueColor: AlwaysStoppedAnimation<Color>(color),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildKpiCardV2({
+      required IconData icon,
+      required Color iconColor,
+      required String label,
+      required String value,
+      required String subtext,
+      required Color bgColor,
+      required Color borderColor,
+    }) {
+      return Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: borderColor,
+            width: 1.2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Ícone
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: bgColor,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                icon,
+                color: iconColor,
+                size: 20,
+              ),
+            ),
+  
+            const SizedBox(height: 12),
+  
+            // Label (pequeno, muted)
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade600,
+                letterSpacing: 0.2,
+              ),
+            ),
+  
+            const SizedBox(height: 6),
+  
+            // Valor grande
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w800,
+                color: iconColor,
+                height: 1.0,
+              ),
+            ),
+  
+            const SizedBox(height: 4),
+  
+            // Subtext (contexto)
+            Text(
+              subtext,
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.grey.shade500,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+ 
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // NOVO: Divisor de seção temática
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Widget _buildSectionDivider(String title, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 4,
+            height: 24,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: color,
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Container(
+              height: 1,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [color.withOpacity(0.3), color.withOpacity(0)],
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- TOP SEGURADORAS ---
+  Widget _buildTopSeguradorasChart(Map<String, double> sinistralidadePorSeguradora) {
+    if (sinistralidadePorSeguradora.isEmpty) return const SizedBox();
+
+    // Ordena por valor decrescente e pega top 5
+    final top5 = sinistralidadePorSeguradora.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final top5List = top5.take(5).toList();
+    final maxValue = top5List.isNotEmpty ? top5List.first.value : 1;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '🏢 Top 5 Seguradoras por Sinistralidade (12 meses)',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 20),
+          ...top5List.map((e) {
+            final percent = maxValue > 0 ? (e.value / maxValue * 100) : 0;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          e.key,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Text(
+                        _fmtCurrency.format(e.value),
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: percent / 100,
+                      minHeight: 16,
+                      backgroundColor: Colors.grey.shade100,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        e.value > 10000 ? _C.red : _C.amber,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopSeguradorasAcionamentosChart(List<Claim> sinistros) {
+    if (sinistros.isEmpty) return const SizedBox();
+
+    // Conta acionamentos por seguradora
+    final acionamentosPorSeguradora = <String, int>{};
+    for (final s in sinistros) {
+      acionamentosPorSeguradora[s.seguradora] = 
+        (acionamentosPorSeguradora[s.seguradora] ?? 0) + 1;
+    }
+
+    if (acionamentosPorSeguradora.isEmpty) return const SizedBox();
+
+    // Ordena por quantidade decrescente e pega top 5
+    final top5 = acionamentosPorSeguradora.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final top5List = top5.take(5).toList();
+    final maxValue = top5List.isNotEmpty ? top5List.first.value : 1;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '📞 Top 5 Seguradoras por Acionamentos',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 20),
+          ...top5List.map((e) {
+            final percent = maxValue > 0 ? (e.value / maxValue * 100) : 0;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          e.key,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _C.blue.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '${e.value} acionamentos',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: _C.blue,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: percent / 100,
+                      minHeight: 16,
+                      backgroundColor: Colors.grey.shade100,
+                      valueColor: AlwaysStoppedAnimation<Color>(_C.blue),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ],
+      ),
+    );
+  }
+
+  // --- MIX DE CARTEIRA DE SEGUROS ---
+  Widget _buildMixCarteiraChart(Map<String, double> mixCarteira) {
+    if (mixCarteira.isEmpty) return const SizedBox();
+
+    final total = mixCarteira.values.fold(0.0, (a, b) => a + b);
+    final entries = mixCarteira.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    // Cores para cada ramo (pode ajustar conforme preferir)
+    final cores = [
+      const Color(0xFF1565C0),
+      const Color(0xFF2E7D32),
+      const Color(0xFFE65100),
+      const Color(0xFFC62828),
+      const Color(0xFF6A1B9A),
+      const Color(0xFF00695C),
+      const Color(0xFFF57F17),
+      const Color(0xFF37474F),
+      const Color(0xFF00838F),
+      const Color(0xFF4E342E),
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '📊 Mix de Carteira (Prêmio por Ramo)',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 20),
+          ...entries.map((e) {
+            final percent = total > 0 ? (e.value / total * 100) : 0;
+            final color = cores[entries.indexOf(e) % cores.length];
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                children: [
+                  // Nome do ramo
+                  SizedBox(
+                    width: 120,
+                    child: Text(
+                      e.key,
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Barra de progresso
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: percent / 100, // value deve ser entre 0 e 1
+                        minHeight: 16,
+                        backgroundColor: Colors.grey.shade100,
+                        valueColor: AlwaysStoppedAnimation<Color>(color),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Porcentagem
+                  SizedBox(
+                    width: 50,
+                    child: Text(
+                      '${percent.toStringAsFixed(1)}%',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      textAlign: TextAlign.right,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ],
+      ),
     );
   }
 
@@ -3354,30 +4164,121 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
+  // --- CABEÇALHO DA SEÇÃO DE SINISTRO ---
+  Widget _buildSinistrosSection() {
+    final sinistros = _sinistros.where((s) {
+      if (_dataInicio == null || _dataFim == null) return true;
+      return s.dataAbertura.isAfter(_dataInicio!) &&
+          s.dataAbertura.isBefore(_dataFim!.add(const Duration(days: 1)));
+    }).toList();
+
+    if (sinistros.isEmpty) return const SizedBox.shrink();
+
+    // Agrupa por ramo
+    final ramoMap = <String, int>{};
+    for (final s in sinistros) {
+      ramoMap[s.ramoSinistro] = (ramoMap[s.ramoSinistro] ?? 0) + 1;
+    }
+    final ramosOrdenados = ramoMap.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    // SLA stats - apenas eventos CONCLUÍDOS
+    final concluidos = sinistros.where((s) => s.statusAtual == 'Concluído').toList();
+    final comSlaCompleto = concluidos
+        .where((s) => s.dataConclusao != null && s.slaPrevisto != null)
+        .toList();
+    
+    int slaCumprido = 0;
+    for (var s in comSlaCompleto) {
+      final dataConc = (s.dataConclusao as Timestamp?)?.toDate() ?? DateTime.now();
+      if (dataConc.isBefore(s.slaPrevisto!)) {
+        slaCumprido++;
+      }
+    }
+    
+    final taxaSla = comSlaCompleto.isEmpty ? 0 : ((slaCumprido / comSlaCompleto.length) * 100).round();
+    final vencidos = comSlaCompleto.length - slaCumprido;
+
+    // Distribuição por status
+    final statusMap = <String, int>{};
+    for (final s in sinistros) {
+      statusMap[s.statusAtual] = (statusMap[s.statusAtual] ?? 0) + 1;
+    }
+
+    return _Section(
+      title: 'Sinistros — Análise Completa',
+      subtitle: '${sinistros.length} registros · Concluídos: ${concluidos.length}',
+      icon: Icons.warning_amber_rounded,
+      color: _C.red,
+      child: Column(
+        children: [
+          // KPI grid
+          LayoutBuilder(builder: (ctx, c) {
+            final cols = c.maxWidth > 600 ? 4 : 2;
+            return GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: cols,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+                mainAxisExtent: 80,
+              ),
+              itemCount: 4,
+              itemBuilder: (_, i) => [
+                _MetricCard(label: 'Total Sinistros', value: '${sinistros.length}',
+                    icon: Icons.warning_amber_rounded, color: _C.red),
+                _MetricCard(label: 'Concluídos', value: '${concluidos.length}',
+                    icon: Icons.check_circle_outlined, color: _C.green),
+                _MetricCard(label: 'Abertos', value: '${sinistros.length - concluidos.length}',
+                    icon: Icons.open_in_new, color: _C.blue),
+                _MetricCard(
+                    label: 'SLA Cumprido',
+                    value: '$taxaSla%',
+                    icon: Icons.timer_outlined,
+                    color: taxaSla >= 80 ? _C.green : taxaSla >= 60 ? _C.amber : _C.red,
+                    subtitle: '$slaCumprido no prazo · $vencidos vencidos'),
+              ][i],
+            );
+          }),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
   // ── Assistências Section ──────────────────────────────────────────────────
   Widget _buildAssistenciasSection() {
-    if (_assistencias.isEmpty) return const SizedBox.shrink();
+    final assistencias = _filteredAssistencias;
+    if (assistencias.isEmpty) return const SizedBox.shrink();
 
-    final veiculares = _assistencias
+    final veiculares = assistencias
         .where((a) => a.tipoAssistencia != 'residencial')
         .toList();
-    final residenciais = _assistencias
+    final residenciais = assistencias
         .where((a) => a.tipoAssistencia == 'residencial')
         .toList();
 
-    // SLA stats
-    final agora = DateTime.now();
-    final comSla = _assistencias.where((a) => a.slaPrevisto != null || a.slaAtendimento != null).toList();
-    final noPrazo = comSla.where((a) {
-      final sla = a.slaAtendimento ?? a.slaPrevisto;
-      return sla != null && sla.isAfter(agora);
-    }).length;
-    final vencidas = comSla.length - noPrazo;
-    final taxaSla = comSla.isEmpty ? 0 : ((noPrazo / comSla.length) * 100).round();
+    // SLA stats - CORRIGIDO: apenas eventos CONCLUÍDOS
+    final concluidas = assistencias.where((a) => a.statusAtual == 'Concluído').toList();
+    final comSlaCompleto = concluidas
+        .where((a) => a.dataConclusao != null && a.slaPrevisto != null)
+        .toList();
+    
+    int slaCumprido = 0;
+    for (var a in comSlaCompleto) {
+      final dataConc = (a.dataConclusao as Timestamp?)?.toDate() ?? DateTime.now();
+      if (dataConc.isBefore(a.slaPrevisto!)) {
+        slaCumprido++;
+      }
+    }
+    
+    final taxaSla = comSlaCompleto.isEmpty ? 0 : ((slaCumprido / comSlaCompleto.length) * 100).round();
+    final vencidas = comSlaCompleto.length - slaCumprido;
 
     // Tipos mais frequentes
     final tiposMap = <String, int>{};
-    for (final a in _assistencias) {
+    for (final a in assistencias) {
       final label = _getTipoLabel(a.tipoAssistencia);
       tiposMap[label] = (tiposMap[label] ?? 0) + 1;
     }
@@ -3387,7 +4288,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
     return _Section(
       title: 'Assistências — Análise Completa',
-      subtitle: '${_assistencias.length} registros · Veiculares: ${veiculares.length} · Residenciais: ${residenciais.length}',
+      subtitle: '${assistencias.length} registros · Veiculares: ${veiculares.length} · Residenciais: ${residenciais.length}',
       icon: Icons.car_repair,
       color: Colors.orange,
       child: Column(
@@ -3406,7 +4307,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ),
               itemCount: 4,
               itemBuilder: (_, i) => [
-                _MetricCard(label: 'Total Assistências', value: '${_assistencias.length}',
+                _MetricCard(label: 'Total Assistências', value: '${assistencias.length}',
                     icon: Icons.handshake_outlined, color: Colors.orange),
                 _MetricCard(label: 'Veiculares', value: '${veiculares.length}',
                     icon: Icons.directions_car_outlined, color: _C.blue),
@@ -3417,7 +4318,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     value: '$taxaSla%',
                     icon: Icons.timer_outlined,
                     color: taxaSla >= 80 ? _C.green : taxaSla >= 60 ? _C.amber : _C.red,
-                    subtitle: '$noPrazo no prazo · $vencidas vencidas'),
+                    subtitle: '$slaCumprido concluídos no prazo · $vencidas vencidos'),
               ][i],
             );
           }),
@@ -3442,12 +4343,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       child: SizedBox(
                         height: 20,
                         child: Row(children: [
-                          if (_assistencias.isNotEmpty) ...[
+                          if (assistencias.isNotEmpty) ...[
                             Flexible(
                               flex: veiculares.length,
                               child: Container(color: _C.blue,
                                   child: Center(child: Text(
-                                    '${((veiculares.length / _assistencias.length) * 100).toStringAsFixed(0)}%',
+                                    '${((veiculares.length / assistencias.length) * 100).toStringAsFixed(0)}%',
                                     style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
                                   ))),
                             ),
@@ -3456,7 +4357,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                 flex: residenciais.isNotEmpty ? residenciais.length : 1,
                                 child: Container(color: _C.teal,
                                     child: Center(child: Text(
-                                      '${((residenciais.length / _assistencias.length) * 100).toStringAsFixed(0)}%',
+                                      '${((residenciais.length / assistencias.length) * 100).toStringAsFixed(0)}%',
                                       style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
                                     ))),
                               ),
@@ -3479,67 +4380,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ),
             ],
           ),
-
           const SizedBox(height: 16),
-
-          // Tipos mais frequentes
-          Text('Tipos mais solicitados',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                  color: Colors.grey.shade700)),
-          const SizedBox(height: 8),
-          ...tiposOrdenados.take(6).map((e) {
-            final pct = e.value / maxTipo;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(children: [
-                SizedBox(width: 130,
-                    child: Text(e.key, style: const TextStyle(fontSize: 12),
-                        overflow: TextOverflow.ellipsis)),
-                Expanded(child: Stack(children: [
-                  Container(height: 8, decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(4))),
-                  FractionallySizedBox(
-                    widthFactor: pct.clamp(0.0, 1.0),
-                    child: Container(height: 8, decoration: BoxDecoration(
-                        color: Colors.orange.shade400,
-                        borderRadius: BorderRadius.circular(4))),
-                  ),
-                ])),
-                const SizedBox(width: 8),
-                Text('${e.value}',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
-                        color: Colors.grey.shade600)),
-              ]),
-            );
-          }),
-
-          const SizedBox(height: 16),
-
-          // Sub-tabs nível operacional/tático/estratégico (existente)
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.grey.shade50,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.grey.shade200),
-            ),
-            child: Column(
-              children: [
-                Row(children: [
-                  _buildSubTab('Operacional', 0),
-                  _buildSubTab('Tático', 1),
-                  _buildSubTab('Estratégico', 2),
-                ]),
-                Divider(height: 1, color: Colors.grey.shade200),
-                if (_selectedAssistLevel == 0)
-                  _buildOperationalLevel()
-                else if (_selectedAssistLevel == 1)
-                  _buildTacticalLevel()
-                else
-                  _buildStrategicLevel(),
-              ],
-            ),
-          ),
         ],
       ),
     );
@@ -4091,85 +4932,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
-  // ── Funcionários ────────────────────────────────────────────────────────────
-  Widget _buildFuncionarios() {
-    final d = _data!;
-    if (d.porFuncionario.isEmpty) return const SizedBox.shrink();
-
-    return _Section(
-      title: 'Desempenho por funcionário',
-      icon: Icons.people_outline,
-      color: _C.purple,
-      child: Column(
-        children: d.porFuncionario.entries
-            .sorted((a, b) => b.value.compareTo(a.value))
-            .map((e) {
-          final nome = e.key.split('@').first;
-          final tempoMedio = d.tempoMedioFuncionario[e.key];
-          return Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border.all(
-                  color: Colors.grey.shade200, width: 0.8),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: _C.purple.withOpacity(0.1),
-                  child: Text(
-                    nome[0].toUpperCase(),
-                    style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: _C.purple),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(nome,
-                          style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500)),
-                      if (tempoMedio != null)
-                        Text(
-                          'Tempo médio: ${tempoMedio.toStringAsFixed(1)} dias',
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey.shade600),
-                        ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: _C.purple.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '${e.value} sinistros',
-                    style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: _C.purple),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
   // ── Clientes em risco ──────────────────────────────────────────────────────
   Widget _buildClientesRisco() {
     final d = _data!;
@@ -4243,13 +5005,58 @@ class _ReportsScreenState extends State<ReportsScreen> {
     if (d.contratosProximos.isEmpty) return const SizedBox.shrink();
     final now = DateTime.now();
 
+    // Calcula valor total em risco (vencendo nos próximos 30 dias)
+    double valorEmRisco = 0;
+    for (var c in d.contratosProximos) {
+      if (c.apolices.isNotEmpty) {
+        final apoliceProxVencer = c.apolices.reduce((a, b) => 
+          a.dataFim.isBefore(b.dataFim) ? a : b
+        );
+        final dias = apoliceProxVencer.dataFim.difference(now).inDays;
+        if (dias <= 30) { // Apenas as que vençam nos próximos 30 dias
+          valorEmRisco += apoliceProxVencer.valorApolice;
+        }
+      }
+    }
+
     return _Section(
       title: 'Contratos próximos do vencimento',
-      subtitle: 'Vencendo nos próximos 30 dias',
+      subtitle: '${d.contratosProximos.length} contratos',
       icon: Icons.event_outlined,
       color: _C.teal,
       child: Column(
-        children: d.contratosProximos.map((c) {
+        children: [
+          // ⚠️ DESTAQUE: Valor em risco
+          // ⚠️ DESTAQUE: Valor em risco
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _C.red.withOpacity(0.08),
+              border: Border.all(color: _C.red.withOpacity(0.3), width: 1.5),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded, color: _C.red, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Risco de perda de receita',
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+                Text(
+                  _fmtCurrency.format(valorEmRisco),
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: _C.red),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          ...d.contratosProximos.map((c) {
             final apoliceProxVencer = c.apolices.reduce((a, b) => 
               a.dataFim.isBefore(b.dataFim) ? a : b
             );
@@ -4309,6 +5116,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ),
           );
         }).toList(),
+        ]
       ),
     );
   }
@@ -4318,185 +5126,134 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // ───────────────────────────────────────────────────────────────────────────
 
   /// Operacional: Tempo real
-  Map<String, dynamic> _getOperationalMetrics() {
+  Map<String, dynamic> _getOperationalMetrics(List<Claim> sinistros, List<Claim> assistencias) {
     final now = DateTime.now();
-    final assistenciasAbertas = _assistencias
-        .where((a) => a.statusAtual == 'Aberto' || a.statusAtual == 'Em Andamento')
-        .toList();
+    final inicio = now.subtract(const Duration(days: 30));
+    final todos = [...sinistros, ...assistencias];
+    final eventosNoPeriodo = todos.where((e) => e.dataAbertura.isAfter(inicio)).toList();
 
-    // Tempo médio de resposta
-    double tempoMedioMinutos = 0;
-    if (assistenciasAbertas.isNotEmpty) {
-      final totalMinutos = assistenciasAbertas.fold<double>(0, (sum, a) {
-        if (a.slaPrevisto != null) {
-          final minutos = a.slaPrevisto!.difference(a.dataAbertura).inMinutes;
-          return sum + minutos;
-        }
-        return sum;
-      });
-      tempoMedioMinutos = totalMinutos / assistenciasAbertas.length;
+    final abertos = eventosNoPeriodo.where((e) => e.statusAtual == 'Aberto' || e.statusAtual == 'Em Andamento').length;
+
+    final concluidos = eventosNoPeriodo.where((e) => e.statusAtual == 'Concluído').toList();
+    double tempoMedioDias = 0;
+    if (concluidos.isNotEmpty) {
+      double soma = 0;
+      for (var e in concluidos) {
+        soma += e.dataUltimaAtualizacao.difference(e.dataAbertura).inHours / 24;
+      }
+      tempoMedioDias = soma / concluidos.length;
     }
 
-    // SLA cumprido vs excedido (últimas 24h)
-    final assistenciasUltimas24h = _assistencias
-        .where((a) => now.difference(a.dataAbertura).inHours <= 24)
-        .toList();
-    
+    // SLA
     int slaCumprido = 0;
-    int slaExcedido = 0;
-    for (var a in assistenciasUltimas24h) {
-      if (a.slaPrevisto != null) {
-        if (a.slaPrevisto!.isAfter(now)) {
+    int slaTotal = 0;
+    for (var e in concluidos) {
+      if (e.slaPrevisto != null) {
+        slaTotal++;
+        if (e.dataUltimaAtualizacao.isBefore(e.slaPrevisto!)) {
           slaCumprido++;
-        } else {
-          slaExcedido++;
         }
       }
     }
-    
-    double slaCumpridoPercent = assistenciasUltimas24h.isEmpty
-        ? 0
-        : (slaCumprido / assistenciasUltimas24h.length) * 100;
+    final slaPercentual = slaTotal == 0 ? 0 : (slaCumprido / slaTotal * 100).round();
 
-    // Distribuição por status
     final statusMap = <String, int>{};
-    for (var a in _assistencias) {
-      statusMap[a.statusAtual] = (statusMap[a.statusAtual] ?? 0) + 1;
+    for (var e in eventosNoPeriodo) {
+      statusMap[e.statusAtual] = (statusMap[e.statusAtual] ?? 0) + 1;
     }
-
-    // Top 5 tipos mais frequentes (hoje)
-    final assistenciasHoje = _assistencias
-        .where((a) => now.difference(a.dataAbertura).inDays == 0)
-        .toList();
-    
-    final tiposMap = <String, int>{};
-    for (var a in assistenciasHoje) {
-      final tipo = _getTipoLabel(a.tipoAssistencia);
-      tiposMap[tipo] = (tiposMap[tipo] ?? 0) + 1;
-    }
-    final top5Tipos = tiposMap.entries.toList()
-        ..sort((a, b) => b.value.compareTo(a.value));
-
-    // Alertas SLA (as que excederam nas últimas 24h)
-    final alertasSLA = assistenciasUltimas24h
-        .where((a) => a.slaPrevisto != null && a.slaPrevisto!.isBefore(now))
-        .toList();
 
     return {
-      'abertas': assistenciasAbertas.length,
-      'tempoMedio': tempoMedioMinutos.round(),
-      'slaCompliance': slaCumpridoPercent.round(),
-      'distribuicaoStatus': statusMap,
-      'top5Tipos': top5Tipos.take(5).toList(),
-      'alertasSLA': alertasSLA,
-      'totalUltimas24h': assistenciasUltimas24h.length,
+      'abertos': abertos,
+      'tempoMedioDias': tempoMedioDias,
+      'slaPercentual': slaPercentual,
+      'totalEventos': eventosNoPeriodo.length,
+      'statusMap': statusMap,
     };
   }
 
-  /// Tático: Tendências (últimos 30 dias)
-  Map<String, dynamic> _getTacticalMetrics() {
+  /// Tático: Tendências (últimos 90 dias)
+  Map<String, dynamic> _getTacticalMetrics(List<Claim> sinistros, List<Claim> assistencias, List<Client> allClients) {
+        
     final now = DateTime.now();
-    final inicio30dias = now.subtract(const Duration(days: 30));
+    final inicio = now.subtract(const Duration(days: 90));
+    final todos = [...sinistros, ...assistencias];
+    final eventosNoPeriodo = todos.where((e) => e.dataAbertura.isAfter(inicio)).toList();
 
-    final assistencias30dias = _assistencias
-        .where((a) => a.dataAbertura.isAfter(inicio30dias))
-        .toList();
+    final volume = eventosNoPeriodo.length;
 
-    // Tempo médio por tipo
-    final temposPorTipo = <String, List<int>>{};
-    for (var a in assistencias30dias) {
-      final tipo = _getTipoLabel(a.tipoAssistencia);
-      final minutos = a.slaPrevisto != null
-          ? a.slaPrevisto!.difference(a.dataAbertura).inMinutes
-          : 0;
-      if (!temposPorTipo.containsKey(tipo)) {
-        temposPorTipo[tipo] = [];
+    final concluidos = eventosNoPeriodo.where((e) => e.statusAtual == 'Concluído').toList();
+    int slaCumprido = 0;
+    int slaTotal = 0;
+    for (var e in concluidos) {
+      if (e.slaPrevisto != null) {
+        slaTotal++;
+        if (e.dataUltimaAtualizacao.isBefore(e.slaPrevisto!)) {
+          slaCumprido++;
+        }
       }
-      temposPorTipo[tipo]!.add(minutos);
     }
+    final slaPercentual = slaTotal == 0 ? 0 : (slaCumprido / slaTotal * 100).round();
 
-    final mediasPorTipo = temposPorTipo.map((tipo, valores) {
-      final media = valores.isEmpty
-          ? 0
-          : (valores.reduce((a, b) => a + b) / valores.length).round();
-      return MapEntry(tipo, media);
-    });
-
-    // Taxa de resolução
-    final concluidas = assistencias30dias
-        .where((a) => a.statusAtual == 'Concluído')
-        .length;
-    final taxaResolucao = assistencias30dias.isEmpty
-        ? 0
-        : ((concluidas / assistencias30dias.length) * 100).round();
-
-    // Ranking de clientes
-    final clientesMap = <String, int>{};
-    for (var a in assistencias30dias) {
-      clientesMap[a.clientNome] = (clientesMap[a.clientNome] ?? 0) + 1;
-    }
-    final rankingClientes = clientesMap.entries.toList()
-        ..sort((a, b) => b.value.compareTo(a.value));
+    // Cross-Selling
+    final clientesComApolices = allClients.where((c) => c.apolices.isNotEmpty).toList();
+    final totalApolices = clientesComApolices.fold(0, (sum, c) => sum + c.apolices.length);
+    final crossSelling = clientesComApolices.isEmpty ? 0 : (totalApolices / clientesComApolices.length);
 
     return {
-      'mediaTemposPorTipo': mediasPorTipo,
-      'taxaResolucao': taxaResolucao,
-      'rankingClientes': rankingClientes.take(10).toList(),
-      'assistenciasVolume': assistencias30dias.length,
-      'periodo': '${DateFormat('dd/MM').format(inicio30dias)} - ${DateFormat('dd/MM').format(now)}',
+      'volume': volume,
+      'slaPercentual': slaPercentual,
+      'crossSelling': crossSelling,
+      'periodo': '${DateFormat('dd/MM').format(inicio)} - ${DateFormat('dd/MM').format(now)}',
     };
   }
 
   /// Estratégico: SWOT Analysis (últimos 12 meses)
-  Map<String, dynamic> _getStrategicMetrics() {
+  Map<String, dynamic> _getStrategicMetrics(List<Claim> sinistros, List<Claim> assistencias, List<Client> allClients) {
+    
     final now = DateTime.now();
-    final inicio12meses = now.subtract(const Duration(days: 365));
+    final inicio = now.subtract(const Duration(days: 365));
+    final todos = [...sinistros, ...assistencias];
+    final eventosNoPeriodo = todos.where((e) => e.dataAbertura.isAfter(inicio)).toList();
 
-    final assistencias12m = _assistencias
-        .where((a) => a.dataAbertura.isAfter(inicio12meses))
-        .toList();
+    final totalEventos = eventosNoPeriodo.length;
 
-    // Strengths: SLA cumprido %
+    final concluidos = eventosNoPeriodo.where((e) => e.statusAtual == 'Concluído').toList();
     int slaCumprido = 0;
-    for (var a in assistencias12m) {
-      if (a.slaPrevisto != null && a.slaPrevisto!.isAfter(now)) {
-        slaCumprido++;
+    int slaTotal = 0;
+    for (var e in concluidos) {
+      if (e.slaPrevisto != null) {
+        slaTotal++;
+        if (e.dataUltimaAtualizacao.isBefore(e.slaPrevisto!)) {
+          slaCumprido++;
+        }
       }
     }
-    final slaCumpridoPercent = assistencias12m.isEmpty
-        ? 0
-        : ((slaCumprido / assistencias12m.length) * 100).round();
+    final slaPercentual = slaTotal == 0 ? 0 : (slaCumprido / slaTotal * 100).round();
 
-    // Weaknesses: SLA excedido %
-    final slaExcedidoPercent = 100 - slaCumpridoPercent;
-
-    // Taxa de reincidência
-    final clientesComMult = <String, int>{};
-    for (var a in assistencias12m) {
-      clientesComMult[a.clientNome] = (clientesComMult[a.clientNome] ?? 0) + 1;
+    // Reincidência
+    final eventosPorCliente = <String, int>{};
+    for (var e in eventosNoPeriodo) {
+      eventosPorCliente[e.idCliente] = (eventosPorCliente[e.idCliente] ?? 0) + 1;
     }
-    final reincidentes = clientesComMult.values
-        .where((count) => count > 1)
-        .length;
-    final taxaReincidencia = assistencias12m.isEmpty
-        ? 0
-        : ((reincidentes / clientesComMult.length) * 100).round();
+    final clientesReincidentes = eventosPorCliente.values.where((v) => v > 1).length;
+    final totalClientes = eventosPorCliente.length;
+    final taxaReincidencia = totalClientes == 0 ? 0 : (clientesReincidentes / totalClientes * 100).round();
 
-    // Distribuição por tipo
-    final tipos12m = <String, int>{};
-    for (var a in assistencias12m) {
-      final tipo = _getTipoLabel(a.tipoAssistencia);
-      tipos12m[tipo] = (tipos12m[tipo] ?? 0) + 1;
-    }
+    // VGV
+    final vgv = allClients.fold(0.0, (sum, c) => sum + c.valorTotalApolicesAtivas);
+
+    // Cross-Selling
+    final clientesComApolices = allClients.where((c) => c.apolices.isNotEmpty).toList();
+    final totalApolices = clientesComApolices.fold(0, (sum, c) => sum + c.apolices.length);
+    final crossSelling = clientesComApolices.isEmpty ? 0 : (totalApolices / clientesComApolices.length);
 
     return {
-      'slaCumpridoPercent': slaCumpridoPercent,
-      'slaExcedidoPercent': slaExcedidoPercent,
+      'slaPercentual': slaPercentual,
       'taxaReincidencia': taxaReincidencia,
-      'tiposDistribuicao': tipos12m,
-      'totalAssistencias12m': assistencias12m.length,
-      'clientesUnicos': clientesComMult.length,
-      'periodo': '${DateFormat('dd/MM/yyyy').format(inicio12meses)} - ${DateFormat('dd/MM/yyyy').format(now)}',
+      'vgv': vgv,
+      'totalEventos': totalEventos,
+      'crossSelling': crossSelling,
+      'periodo': '${DateFormat('dd/MM/yyyy').format(inicio)} - ${DateFormat('dd/MM/yyyy').format(now)}',
     };
   }
 
@@ -4519,306 +5276,278 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return map[tipo] ?? 'Outro';
   }
 
-Widget _buildSubTab(String label, int index) {
-  final isActive = _selectedAssistLevel == index;
-  return Expanded(
-    child: GestureDetector(
-      onTap: () => setState(() => _selectedAssistLevel = index),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: isActive ? _C.teal : Colors.transparent,
-              width: 3,
+  Widget _buildSubTab(String label, int index) {
+    final isActive = _selectedAssistLevel == index;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _selectedAssistLevel = index),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: isActive ? _C.teal : Colors.transparent,
+                width: 3,
+              ),
+            ),
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: isActive ? _C.teal : Colors.grey,
             ),
           ),
         ),
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: isActive ? _C.teal : Colors.grey,
-          ),
-        ),
       ),
-    ),
-  );
-}
+    );
+  }
 
-Widget _buildOperationalLevel() {
-  final metrics = _getOperationalMetrics();
+  Widget _buildOperationalBlock(List<Claim> sinistros, List<Claim> assistencias) {
+    final metrics = _getOperationalMetrics(sinistros, assistencias);
+    final abertos = metrics['abertos'] as int;
+    final tempoMedioDias = metrics['tempoMedioDias'] as double;
+    final slaPercentual = metrics['slaPercentual'] as int;
+    final totalEventos = metrics['totalEventos'] as int;
+    final statusMap = metrics['statusMap'] as Map<String, int>;
 
-  return SingleChildScrollView(
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // KPIs
-          GridView.count(
-            crossAxisCount: 2,
-            childAspectRatio: 1.3,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            children: [
-              _buildKpiCard(
-                'Assistências Abertas',
-                '${metrics['abertas']}',
-                Icons.open_in_new,
-                _C.blue,
-              ),
-              _buildKpiCard(
-                'Tempo Médio',
-                '${metrics['tempoMedio']}min',
-                Icons.timer,
-                _C.amber,
-              ),
-              _buildKpiCard(
-                'SLA Cumprido',
-                '${metrics['slaCompliance']}%',
-                Icons.check_circle,
-                _C.green,
-              ),
-              _buildKpiCard(
-                'Total 24h',
-                '${metrics['totalUltimas24h']}',
-                Icons.history,
-                _C.purple,
+    Color slaColor;
+    if (slaPercentual >= 80) slaColor = _C.green;
+    else if (slaPercentual >= 60) slaColor = _C.amber;
+    else slaColor = _C.red;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: _C.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.timeline, color: _C.blue),
+                ),
+                const SizedBox(width: 12),
+                const Text(
+                  '📊 Nível Operacional (30 dias)',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                Text(
+                  'Últimos 30 dias',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildKpiCard('Eventos Abertos', '$abertos', Icons.open_in_new, _C.blue),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildKpiCard('Tempo Médio', '${tempoMedioDias.toStringAsFixed(1)}d', Icons.timer, _C.amber),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildKpiCard('SLA Cumprido', '${slaPercentual}%', Icons.check_circle, slaColor),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildKpiCard('Total Eventos', '$totalEventos', Icons.history, _C.purple),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (statusMap.isNotEmpty) ...[
+              const Text('Distribuição por Status', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              ...statusMap.entries.map(
+                (e) => _buildStatusBar(e.key, e.value, totalEventos),
               ),
             ],
-          ),
-          const SizedBox(height: 24),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
 
-          // Distribuição por status
-          Text(
-            'Distribuição por Status',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 12),
-          ...(metrics['distribuicaoStatus'] as Map<String, int>).entries.map(
-            (e) => _buildStatusBar(e.key, e.value, metrics['totalUltimas24h']),
-          ),
-          const SizedBox(height: 24),
+  Widget _buildTacticalBlock(List<Claim> sinistros, List<Claim> assistencias, List<Client> allClients) {
+    final metrics = _getTacticalMetrics(sinistros, assistencias, allClients);
+    final volume = metrics['volume'] as int;
+    final slaPercentual = metrics['slaPercentual'] as int;
+    final crossSelling = metrics['crossSelling'] as double;
+    final periodo = metrics['periodo'] as String;
 
-          // Top 5 tipos
-          if ((metrics['top5Tipos'] as List).isNotEmpty) ...[
-            Text(
-              'Top 5 Tipos (Hoje)',
-              style: Theme.of(context).textTheme.titleMedium,
+    Color slaColor;
+    if (slaPercentual >= 80) slaColor = _C.green;
+    else if (slaPercentual >= 60) slaColor = _C.amber;
+    else slaColor = _C.red;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: _C.teal.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.trending_up, color: _C.teal),
+                ),
+                const SizedBox(width: 12),
+                const Text(
+                  '📈 Nível Tático (3 meses)',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                Text(
+                  periodo,
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildKpiCard('Volume', '$volume', Icons.trending_up, _C.teal),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildKpiCard('SLA Cumprido', '${slaPercentual}%', Icons.check_circle, slaColor),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildKpiCard('Cross-Selling', '${crossSelling.toStringAsFixed(1)} apól./cliente', Icons.link, Colors.purple),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStrategicBlock(List<Claim> sinistros, List<Claim> assistencias, List<Client> allClients) {
+    final metrics = _getStrategicMetrics(sinistros, assistencias, allClients);
+    final slaPercentual = metrics['slaPercentual'] as int;
+    final taxaReincidencia = metrics['taxaReincidencia'] as int;
+    final vgv = metrics['vgv'] as double;
+    final totalEventos = metrics['totalEventos'] as int;
+    final crossSelling = metrics['crossSelling'] as double;
+    final periodo = metrics['periodo'] as String;
+
+    Color slaColor;
+    if (slaPercentual >= 80) slaColor = _C.green;
+    else if (slaPercentual >= 60) slaColor = _C.amber;
+    else slaColor = _C.red;
+
+    // Gerar textos da SWOT com base nos números
+    final forcas = slaPercentual >= 80 ? 'SLA alto (${slaPercentual}%) indica boa performance operacional.' : 'SLA em ${slaPercentual}% - há espaço para melhoria.';
+    final fraquezas = taxaReincidencia > 30 ? 'Taxa de reincidência alta (${taxaReincidencia}%) - clientes recorrentes podem indicar insatisfação.' : 'Reincidência em ${taxaReincidencia}% - estável.';
+    final oportunidades = 'Cross-Selling de ${crossSelling.toStringAsFixed(1)} apólices/cliente. Oportunidade de aumentar para 2.0.';
+    final ameacas = 'VGV total de ${_fmtCurrency.format(vgv)}. Monitorar mix de carteira para evitar concentração.';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.purple.shade100.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.analytics, color: Colors.purple),
+                ),
+                const SizedBox(width: 12),
+                const Text(
+                  '🎯 Nível Estratégico (12 meses)',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                Text(
+                  periodo,
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildKpiCard('SLA Cumprido', '${slaPercentual}%', Icons.check_circle, slaColor),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildKpiCard('Reincidência', '${taxaReincidencia}%', Icons.person_add, Colors.orange),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildKpiCard('VGV (Prêmios)', _fmtCurrency.format(vgv), Icons.attach_money, _C.blue),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildKpiCard('Total Eventos', '$totalEventos', Icons.event, _C.purple),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
-            ...(metrics['top5Tipos'] as List).map(
-              (e) => _buildTopTypeRow(e.key, e.value),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildKpiCard('Cross-Selling', '${crossSelling.toStringAsFixed(1)} apól./cliente', Icons.link, Colors.purple),
+                ),
+              ],
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+            const Text('Análise SWOT', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            _buildSwotBox('Forças', forcas, _C.green),
+            _buildSwotBox('Fraquezas', fraquezas, _C.red),
+            _buildSwotBox('Oportunidades', oportunidades, _C.amber),
+            _buildSwotBox('Ameaças', ameacas, _C.purple),
+            const SizedBox(height: 8),
           ],
-
-          // Alertas SLA
-          if ((metrics['alertasSLA'] as List).isNotEmpty) ...[
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFEBEE),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: _C.red),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.warning, color: _C.red, size: 18),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Alertas SLA (${(metrics['alertasSLA'] as List).length})',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: _C.red,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  ...(metrics['alertasSLA'] as List<Claim>).take(5).map(
-                    (a) => Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
-                        '${a.numeroSinistro} - ${a.clientNome}',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
+        ),
       ),
-    ),
-  );
-}
-
-Widget _buildTacticalLevel() {
-  final metrics = _getTacticalMetrics();
-
-  return SingleChildScrollView(
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Período: ${metrics['periodo']}', 
-            style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          const SizedBox(height: 16),
-
-          // KPIs tático
-          GridView.count(
-            crossAxisCount: 2,
-            childAspectRatio: 1.3,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            children: [
-              _buildKpiCard(
-                'Assistências 30d',
-                '${metrics['assistenciasVolume']}',
-                Icons.trending_up,
-                _C.teal,
-              ),
-              _buildKpiCard(
-                'Taxa Resolução',
-                '${metrics['taxaResolucao']}%',
-                Icons.done_all,
-                _C.green,
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-
-          // Tempo médio por tipo
-          Text(
-            'Tempo Médio por Tipo',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 12),
-          ...(metrics['mediaTemposPorTipo'] as Map<String, int>).entries.map(
-            (e) => _buildTypePerformanceBar(e.key, e.value),
-          ),
-          const SizedBox(height: 24),
-
-          // Ranking de clientes
-          Text(
-            'Top 10 Clientes',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 12),
-          ...(metrics['rankingClientes'] as List).map(
-            (e) => _buildRankingRow(e.key, e.value),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-Widget _buildStrategicLevel() {
-  final metrics = _getStrategicMetrics();
-
-  return SingleChildScrollView(
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Período: ${metrics['periodo']}', 
-            style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          const SizedBox(height: 16),
-
-          // KPIs estratégico
-          GridView.count(
-            crossAxisCount: 2,
-            childAspectRatio: 1.3,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            children: [
-              _buildKpiCard(
-                'SLA Cumprido',
-                '${metrics['slaCumpridoPercent']}%',
-                Icons.check_circle,
-                _C.green,
-              ),
-              _buildKpiCard(
-                'SLA Excedido',
-                '${metrics['slaExcedidoPercent']}%',
-                Icons.cancel,
-                _C.red,
-              ),
-              _buildKpiCard(
-                'Taxa Reincidência',
-                '${metrics['taxaReincidencia']}%',
-                Icons.person_add,
-                Colors.orange,
-              ),
-              _buildKpiCard(
-                'Total 12m',
-                '${metrics['totalAssistencias12m']}',
-                Icons.calendar_month,
-                _C.purple,
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-
-          // SWOT Text
-          Text(
-            'Análise SWOT',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 12),
-          _buildSwotBox(
-            'Forças (Strengths)',
-            'SLA cumprido em ${metrics['slaCumpridoPercent']}% dos casos.',
-            _C.green,
-          ),
-          _buildSwotBox(
-            'Fraquezas (Weaknesses)',
-            'SLA excedido em ${metrics['slaExcedidoPercent']}% dos casos. Taxa de reincidência: ${metrics['taxaReincidencia']}%',
-            _C.red,
-          ),
-          _buildSwotBox(
-            'Oportunidades (Opportunities)',
-            'Crescimento em tipos com melhor performance. ${metrics['clientesUnicos']} clientes únicos para expansão.',
-            _C.amber,
-          ),
-          _buildSwotBox(
-            'Ameaças (Threats)',
-            'Tipos com SLA fraco podem levar à perda de clientes. Monitorar sazonalidade.',
-            _C.purple,
-          ),
-          const SizedBox(height: 24),
-
-          // Distribuição de tipos
-          Text(
-            'Distribuição por Tipo',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 12),
-          ...(metrics['tiposDistribuicao'] as Map<String, int>).entries.map(
-            (e) => _buildTypeDistributionBar(e.key, e.value, metrics['totalAssistencias12m']),
-          ),
-        ],
-      ),
-    ),
-  );
-}
+    );
+  }
 
   // ─── Componentes reutilizáveis ───
   Widget _buildKpiCard(String label, String value, IconData icon, Color color) {
@@ -4850,6 +5579,67 @@ Widget _buildStrategicLevel() {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopSeguradoraRow(String seguradora, double valor) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 120,
+            child: Text(
+              seguradora,
+              style: const TextStyle(fontSize: 12),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Expanded(
+            child: LinearProgressIndicator(
+              value: (valor / 10000).clamp(0, 1), // valor fictício para escala
+              backgroundColor: Colors.grey.shade200,
+              valueColor: const AlwaysStoppedAnimation(_C.teal),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            _fmtCurrency.format(valor),
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMixRow(String ramo, double valor, double total) {
+    final percent = total > 0 ? (valor / total * 100) : 0;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              ramo,
+              style: const TextStyle(fontSize: 12),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Expanded(
+            child: LinearProgressIndicator(
+              value: percent / 100,
+              backgroundColor: Colors.grey.shade200,
+              valueColor: const AlwaysStoppedAnimation(Colors.orange),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${percent.toStringAsFixed(1)}%',
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           ),
         ],
       ),
@@ -5059,7 +5849,143 @@ Widget _buildStrategicLevel() {
     }
   }
 
+  // ─── SLA Calculations (Estratificado por tipo) ────────────────────────────
+  Map<String, double> _calculateSlaPercentageAll() {
+    final sinistrosFiltrados = _sinistros.where((s) {
+      if (_dataInicio == null || _dataFim == null) return true;
+      return s.dataAbertura.isAfter(_dataInicio!) &&
+          s.dataAbertura.isBefore(_dataFim!.add(const Duration(days: 1)));
+    }).toList();
+
+    final assistenciasFiltradas = _assistencias.where((a) {
+      if (_dataInicio == null || _dataFim == null) return true;
+      return a.dataAbertura.isAfter(_dataInicio!) &&
+          a.dataAbertura.isBefore(_dataFim!.add(const Duration(days: 1)));
+    }).toList();
+
+    // SLA = eventos CONCLUÍDOS que foram fechados no prazo vs total concluídos
+    final slaGeral = _calculateSlaForConcludedEvents([...sinistrosFiltrados, ...assistenciasFiltradas]);
+    final slaSinistros = _calculateSlaForConcludedEvents(sinistrosFiltrados);
+    final slaAssistencias = _calculateSlaForConcludedEvents(assistenciasFiltradas);
+
+    return {
+      'geral': slaGeral,
+      'sinistros': slaSinistros,
+      'assistencias': slaAssistencias,
+    };
+  }
+
+  double _calculateSlaForConcludedEvents(List<Claim> eventos) {
+    // Pega apenas CONCLUÍDOS com dataConclusao e slaPrevisto
+    final concluidos = eventos
+        .where((c) => c.statusAtual == 'Concluído' && c.dataConclusao != null && c.slaPrevisto != null)
+        .toList();
+    
+    if (concluidos.isEmpty) return 0; // Sem eventos concluídos = sem SLA a medir
+    
+    int slaCumprido = 0;
+    
+    for (var e in concluidos) {
+      final dataConclusaoDateTime = (e.dataConclusao as Timestamp?)?.toDate() ?? DateTime.now();
+      
+      // SLA cumprido = conclusão foi ANTES do prazo
+      if (dataConclusaoDateTime.isBefore(e.slaPrevisto!)) {
+        slaCumprido++;
+      }
+    }
+    
+    return (slaCumprido / concluidos.length * 100);
+  }
+
+  Map<String, double> _calculateSlaByRamo() {
+    final sinistrosFiltrados = _sinistros.where((s) {
+      if (_dataInicio == null || _dataFim == null) return true;
+      return s.dataAbertura.isAfter(_dataInicio!) &&
+          s.dataAbertura.isBefore(_dataFim!.add(const Duration(days: 1)));
+    }).toList();
+
+    final concluidos = sinistrosFiltrados
+        .where((c) => c.statusAtual == 'Concluído' && c.dataConclusao != null && c.slaPrevisto != null)
+        .toList();
+
+    final ramosUnicos = concluidos.map((c) => c.ramoSinistro).toSet();
+    final result = <String, double>{};
+
+    for (var ramo in ramosUnicos) {
+      final ramoEventos = concluidos.where((c) => c.ramoSinistro == ramo).toList();
+      int slaCumprido = 0;
+
+      for (var e in ramoEventos) {
+        final dataConclusaoDateTime = (e.dataConclusao as Timestamp?)?.toDate() ?? DateTime.now();
+        
+        if (dataConclusaoDateTime.isBefore(e.slaPrevisto!)) {
+          slaCumprido++;
+        }
+      }
+
+      result[ramo] = ramoEventos.isEmpty ? 0 : (slaCumprido / ramoEventos.length * 100);
+    }
+
+    return result;
+  }
+
+  Map<String, double> _calculateSlaByTipoAssistencia() {
+    final assistenciasFiltradas = _assistencias.where((a) {
+      if (_dataInicio == null || _dataFim == null) return true;
+      return a.dataAbertura.isAfter(_dataInicio!) &&
+          a.dataAbertura.isBefore(_dataFim!.add(const Duration(days: 1)));
+    }).toList();
+
+    final concluidos = assistenciasFiltradas
+        .where((c) => c.statusAtual == 'Concluído' && c.dataConclusao != null && c.slaPrevisto != null)
+        .toList();
+
+    final tiposUnicos = concluidos.map((c) => c.tipoAssistencia ?? 'outro').toSet();
+    final result = <String, double>{};
+
+    for (var tipo in tiposUnicos) {
+      final tipoEventos = concluidos.where((c) => (c.tipoAssistencia ?? 'outro') == tipo).toList();
+      int slaCumprido = 0;
+
+      for (var e in tipoEventos) {
+        final dataConclusaoDateTime = (e.dataConclusao as Timestamp?)?.toDate() ?? DateTime.now();
+        
+        if (dataConclusaoDateTime.isBefore(e.slaPrevisto!)) {
+          slaCumprido++;
+        }
+      }
+
+      result[tipo] = tipoEventos.isEmpty ? 0 : (slaCumprido / tipoEventos.length * 100);
+    }
+
+    return result;
+  }
+
+  String _calculateTicketMedio() {
+    final sinistrosFiltrados = _sinistros.where((s) {
+      if (_dataInicio == null || _dataFim == null) return true;
+      return s.dataAbertura.isAfter(_dataInicio!) &&
+          s.dataAbertura.isBefore(_dataFim!.add(const Duration(days: 1)));
+    }).toList();
+
+    if (sinistrosFiltrados.isEmpty) return '--';
+    
+    double totalValor = 0;
+    for (var s in sinistrosFiltrados) {
+      totalValor += s.valorTotalSinistro;
+    }
+    
+    final media = totalValor / sinistrosFiltrados.length;
+    return _fmtCurrency.format(media);
+  }
+
+  double _calculateVgvPeriodo() {
+    return _allClients.fold(0.0, (sum, c) => sum + c.valorTotalApolicesAtivas);
+  }
+
 }
+
+
 
 // ─── Widgets auxiliares ───────────────────────────────────────────────────────
 
@@ -5200,105 +6126,6 @@ class _Section extends StatelessWidget {
           Padding(
               padding: const EdgeInsets.all(14), child: child),
         ],
-      ),
-    );
-  }
-
-  // ─── Widgets de UI para Assistências ───────────────────────────────────────
-  Widget _buildKpiCard(String label, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: color, size: 20),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-              ),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: color,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatusBar(String status, int count, int total) {
-    final percentage = total == 0 ? 0 : (count / total * 100).round();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(status, style: const TextStyle(fontSize: 13)),
-              Text('$count ($percentage%)', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-            ],
-          ),
-          const SizedBox(height: 4),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: percentage / 100,
-              minHeight: 6,
-              backgroundColor: Colors.grey[200],
-              valueColor: AlwaysStoppedAnimation(
-                status == 'Concluído' ? _C.green : _C.blue,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSwotBox(String titulo, String conteudo, Color color) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color.withOpacity(0.3)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              titulo,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: color,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              conteudo,
-              style: const TextStyle(fontSize: 12),
-            ),
-          ],
-        ),
       ),
     );
   }

@@ -73,4 +73,31 @@ class ConfigService {
       'enableNpsSurvey': enabled,
     });
   }
+
+  // --- Configurações de Envio de Notificações ---
+  Future<void> updateNotificacaoConfig({
+    required bool ativas,
+    required String horarioInicio,
+    required String horarioFim,
+    required int intervaloMinutos,
+    required int atrasoMinimo,
+    required List<String> chatIds,
+  }) async {
+    await _ensureConfigExists();
+    await _db.collection(_configCollection).doc(_configDoc).update({
+      'notificacoesAtivas': ativas,
+      'notificacaoHorarioInicio': horarioInicio,
+      'notificacaoHorarioFim': horarioFim,
+      'notificacaoIntervaloMinutos': intervaloMinutos,
+      'notificacaoAtrasoMinimo': atrasoMinimo,
+      'notificacaoTelegramChatIds': chatIds,
+    });
+  }
+
+  // Getter individual (opcional)
+  Future<bool> getNotificacoesAtivas() async {
+    final config = await getConfig();
+    return config.notificacoesAtivas;
+  }
+
 }

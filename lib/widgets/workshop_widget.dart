@@ -15,12 +15,14 @@ class WorkshopWidget extends StatefulWidget {
   final String claimId;
   final List<Workshop> oficinas;
   final String clientNome;
+  final bool isEditing;
 
   const WorkshopWidget({
     super.key,
     required this.claimId,
     required this.oficinas,
     required this.clientNome,
+    required this.isEditing,
   });
 
   @override
@@ -32,7 +34,6 @@ class _WorkshopWidgetState extends State<WorkshopWidget> {
   final AuthService _authService = AuthService();
   bool _isLoading = false;
   LatLng? _localOcorrenciaLatLng;
-
 
   final _places = FlutterGooglePlacesSdk("AIzaSyCoE3ZT1_EMmET0RaSmBeFMWQiYwJcl1YE");
   final String _apiKey = 'AIzaSyCoE3ZT1_EMmET0RaSmBeFMWQiYwJcl1YE';
@@ -444,10 +445,15 @@ class _WorkshopWidgetState extends State<WorkshopWidget> {
                               ),
                             ),
                             ...oficinasSegurado.map((oficina) => _WorkshopCard(
-                                  oficina: oficina,
-                                  onEdit: () => _showAddEditWorkshopDialog(oficina: oficina),
-                                  onDelete: () => _removeOficina(oficina),
-                                )),
+                              oficina: oficina,
+                              onEdit: () => widget.isEditing  // ← Mude aqui
+                                ? _showAddEditWorkshopDialog(oficina: oficina)
+                                : null,
+                              onDelete: () => widget.isEditing  // ← E aqui
+                                ? _removeOficina(oficina)
+                                : null,
+                              isEditing: widget.isEditing,  // ← E aqui
+                            )),
                             const SizedBox(height: 16),
                           ],
 
@@ -487,11 +493,13 @@ class _WorkshopCard extends StatelessWidget {
   final Workshop oficina;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final bool isEditing;
 
   const _WorkshopCard({
     required this.oficina,
     required this.onEdit,
     required this.onDelete,
+    this.isEditing = false,
   });
 
   Color _getCardColor(String tipo) {
@@ -554,18 +562,20 @@ class _WorkshopCard extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                IconButton(
-                  icon: Icon(Icons.edit, size: 20, color: _getTextColor(oficina.tipo)),
-                  onPressed: onEdit,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.delete, size: 20, color: Colors.red),
-                  onPressed: onDelete,
-                ),
+                if (isEditing) ...[  // ← Mostra botões apenas em edição
+                  IconButton(
+                    icon: Icon(Icons.edit, size: 20, color: _getTextColor(oficina.tipo)),
+                    onPressed: onEdit,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete, size: 20, color: Colors.red),
+                    onPressed: onDelete,
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 8),
-            Text(
+            SelectableText(
               oficina.nome, 
               style: TextStyle(
                 fontWeight: FontWeight.bold,
@@ -574,13 +584,13 @@ class _WorkshopCard extends StatelessWidget {
               ),
             ),
             if (oficina.contato != null) 
-              Text('Contato: ${oficina.contato}', style: const TextStyle(fontSize: 14)),
+              SelectableText('Contato: ${oficina.contato}', style: const TextStyle(fontSize: 14)),
             if (oficina.telefone != null) 
-              Text('Telefone: ${oficina.telefone}', style: const TextStyle(fontSize: 14)),
+              SelectableText('Telefone: ${oficina.telefone}', style: const TextStyle(fontSize: 14)),
             if (oficina.email != null) 
-              Text('Email: ${oficina.email}', style: const TextStyle(fontSize: 14)),
+              SelectableText('Email: ${oficina.email}', style: const TextStyle(fontSize: 14)),
             if (oficina.endereco != null) 
-              Text('Endereço: ${oficina.endereco}', style: const TextStyle(fontSize: 14)),
+              SelectableText('Endereço: ${oficina.endereco}', style: const TextStyle(fontSize: 14)),
             
             if (oficina.documentosUrls.isNotEmpty) ...[
               const SizedBox(height: 12),

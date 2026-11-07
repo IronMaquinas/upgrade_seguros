@@ -49,6 +49,7 @@ class Apolice {
       valorApolice: (data['valor_apolice'] as num?)?.toDouble() ?? 0.0,
       valorGatilho: (data['valor_gatilho'] as num?)?.toDouble() ?? 0.0,
       bensSegurados: (data['bens_segurados'] as List<dynamic>?)  // ← NOVO
+          // ignore: unnecessary_cast
           ?.map((b) => BemSegurado.fromMap(b as Map<String, dynamic>, (b as Map<String, dynamic>)['id'] ?? ''))
           .toList() ?? [],
     );

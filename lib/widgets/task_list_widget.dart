@@ -27,9 +27,8 @@ class TaskListWidget extends StatefulWidget {
 
 class _TaskListWidgetState extends State<TaskListWidget> {
   final _firestore = FirebaseFirestore.instance;
-  final _dateFormat = DateFormat('dd/MM/yyyy');
+  final _dateFormat = DateFormat('dd/MM/yyyy HH:mm');
 
-  // ✅ Mudança: Agora a coleção é de nível superior, para que seja visível em todas as telas
   CollectionReference<Map<String, dynamic>> get _tasksCollection =>
     _firestore.collection('tasks');
 
@@ -40,124 +39,387 @@ class _TaskListWidgetState extends State<TaskListWidget> {
     final List<String> statusOptions = ['Aberta', 'Pendente', 'Concluída'];
     String? rawStatus = taskDoc != null ? taskDoc['status'] as String? : null;
     String statusValue = statusOptions.contains(rawStatus) ? rawStatus! : 'Aberta';
-    DateTime prazo = taskDoc != null
+    
+    // ✅ AJUSTE 1: Campo prazo começa vazio para novas tarefas (sem pré-definição)
+    DateTime? prazo = taskDoc != null
         ? (taskDoc['prazo'] as Timestamp).toDate()
-        : DateTime.now().add(const Duration(days: 3));
+        : null; // ← Agora começa null em vez de +3 dias
+    
     DateTime criadoEm = taskDoc != null && taskDoc.data().toString().contains('criado_em')
         ? (taskDoc['criado_em'] as Timestamp).toDate()
         : DateTime.now();
 
     await showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (context) {
-        return AlertDialog(
-          title: Text(isEditing ? 'Editar Tarefa' : 'Nova Tarefa'),
-          content: SizedBox(
-            width: 400, // popup maior
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: descricaoController,
-                    decoration: const InputDecoration(
-                      labelText: 'Descrição',
-                      border: OutlineInputBorder(),
-                    ),
-                    maxLines: null,
-                    minLines: 3,
-                    keyboardType: TextInputType.multiline,
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    value: statusValue,
-                    decoration: const InputDecoration(
-                      labelText: 'Status',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: statusOptions
-                        .map((status) => DropdownMenuItem(value: status, child: Text(status)))
-                        .toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() {
-                          statusValue = value;
-                        });
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
+        return StatefulBuilder(
+          builder: (context, setModalState) => Dialog(
+            backgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 60),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 500),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Prazo:'),
-                      const SizedBox(width: 8),
-                      Text(DateFormat('dd/MM/yyyy').format(prazo)),
-                      IconButton(
-                        icon: const Icon(Icons.calendar_today),
-                        onPressed: () async {
-                          final picked = await showDatePicker(
-                            context: context,
-                            initialDate: prazo,
-                            firstDate: DateTime(2020),
-                            lastDate: DateTime(2100),
-                          );
-                          if (picked != null) {
-                            setState(() {
-                              prazo = picked;
+                      // CABEÇALHO
+                      Text(
+                        isEditing ? 'Editar Tarefa' : 'Nova Tarefa',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1A1A2E),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // CAMPO DESCRIÇÃO
+                      TextField(
+                        controller: descricaoController,
+                        decoration: const InputDecoration(
+                          labelText: 'Descrição*',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        ),
+                        maxLines: null,
+                        minLines: 3,
+                        keyboardType: TextInputType.multiline,
+                      ),
+                      const SizedBox(height: 16),
+
+                      // CAMPO STATUS
+                      DropdownButtonFormField<String>(
+                        value: statusValue,
+                        decoration: const InputDecoration(
+                          labelText: 'Status',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        ),
+                        items: statusOptions
+                            .map((status) => DropdownMenuItem(value: status, child: Text(status)))
+                            .toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setModalState(() {
+                              statusValue = value;
                             });
                           }
                         },
                       ),
+                      const SizedBox(height: 16),
+
+                      // CAMPO PRAZO COM DATA E HORA
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Prazo*',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: Color(0xFF1A1A2E),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          
+                          // ✅ ATALHOS RÁPIDOS: HOJE E AMANHÃ
+                          Row(
+                            children: [
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () {
+                                    final hoje = DateTime.now();
+                                    setModalState(() {
+                                      prazo = DateTime(
+                                        hoje.year,
+                                        hoje.month,
+                                        hoje.day,
+                                        prazo?.hour ?? 09,
+                                        prazo?.minute ?? 0,
+                                      );
+                                    });
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                                    decoration: BoxDecoration(
+                                      color: prazo != null && 
+                                             prazo!.day == DateTime.now().day &&
+                                             prazo!.month == DateTime.now().month &&
+                                             prazo!.year == DateTime.now().year
+                                        ? const Color(0xFF2563EB).withOpacity(0.1)
+                                        : Colors.grey.shade100,
+                                      border: Border.all(
+                                        color: prazo != null && 
+                                               prazo!.day == DateTime.now().day &&
+                                               prazo!.month == DateTime.now().month &&
+                                               prazo!.year == DateTime.now().year
+                                          ? const Color(0xFF2563EB)
+                                          : Colors.grey.shade300,
+                                      ),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        'Hoje',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w500,
+                                          color: prazo != null && 
+                                                 prazo!.day == DateTime.now().day &&
+                                                 prazo!.month == DateTime.now().month &&
+                                                 prazo!.year == DateTime.now().year
+                                            ? const Color(0xFF2563EB)
+                                            : Colors.grey.shade600,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () {
+                                    final amanha = DateTime.now().add(const Duration(days: 1));
+                                    setModalState(() {
+                                      prazo = DateTime(
+                                        amanha.year,
+                                        amanha.month,
+                                        amanha.day,
+                                        prazo?.hour ?? 09,
+                                        prazo?.minute ?? 0,
+                                      );
+                                    });
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                                    decoration: BoxDecoration(
+                                      color: prazo != null && 
+                                             prazo!.day == DateTime.now().add(const Duration(days: 1)).day &&
+                                             prazo!.month == DateTime.now().add(const Duration(days: 1)).month &&
+                                             prazo!.year == DateTime.now().add(const Duration(days: 1)).year
+                                        ? const Color(0xFF2563EB).withOpacity(0.1)
+                                        : Colors.grey.shade100,
+                                      border: Border.all(
+                                        color: prazo != null && 
+                                               prazo!.day == DateTime.now().add(const Duration(days: 1)).day &&
+                                               prazo!.month == DateTime.now().add(const Duration(days: 1)).month &&
+                                               prazo!.year == DateTime.now().add(const Duration(days: 1)).year
+                                          ? const Color(0xFF2563EB)
+                                          : Colors.grey.shade300,
+                                      ),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        'Amanhã',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w500,
+                                          color: prazo != null && 
+                                                 prazo!.day == DateTime.now().add(const Duration(days: 1)).day &&
+                                                 prazo!.month == DateTime.now().add(const Duration(days: 1)).month &&
+                                                 prazo!.year == DateTime.now().add(const Duration(days: 1)).year
+                                            ? const Color(0xFF2563EB)
+                                            : Colors.grey.shade600,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+
+                          Row(
+                            children: [
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () async {
+                                    final picked = await showDatePicker(
+                                      context: context,
+                                      initialDate: prazo ?? DateTime.now(),
+                                      firstDate: DateTime(2020),
+                                      lastDate: DateTime(2100),
+                                    );
+                                    if (picked != null) {
+                                      setModalState(() {
+                                        prazo = DateTime(
+                                          picked.year,
+                                          picked.month,
+                                          picked.day,
+                                          prazo?.hour ?? 09,
+                                          prazo?.minute ?? 0,
+                                        );
+                                      });
+                                    }
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(color: Colors.grey.shade400),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          prazo != null 
+                                            ? DateFormat('dd/MM/yyyy').format(prazo!)
+                                            : 'Selecione uma data',
+                                          style: TextStyle(
+                                            color: prazo != null ? Colors.black : Colors.grey.shade600,
+                                          ),
+                                        ),
+                                        const Icon(Icons.calendar_today, size: 18, color: Colors.grey),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              // CAMPO HORA
+                              SizedBox(
+                                width: 100,
+                                child: GestureDetector(
+                                  onTap: () async {
+                                    final picked = await showTimePicker(
+                                      context: context,
+                                      initialTime: TimeOfDay.fromDateTime(prazo ?? DateTime.now()),
+                                    );
+                                    if (picked != null && prazo != null) {
+                                      setModalState(() {
+                                        prazo = prazo!.copyWith(
+                                          hour: picked.hour,
+                                          minute: picked.minute,
+                                        );
+                                      });
+                                    }
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(color: Colors.grey.shade400),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          prazo != null 
+                                            ? DateFormat('HH:mm').format(prazo!)
+                                            : '--:--',
+                                          style: TextStyle(
+                                            color: prazo != null ? Colors.black : Colors.grey.shade600,
+                                          ),
+                                        ),
+                                        const Icon(Icons.access_time, size: 18, color: Colors.grey),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+
+                      if (isEditing) ...[
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            const Text(
+                              'Data de abertura: ',
+                              style: TextStyle(fontSize: 13, color: Color(0xFF666666)),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              DateFormat('dd/MM/yyyy HH:mm').format(criadoEm),
+                              style: const TextStyle(fontSize: 13, color: Color(0xFF666666)),
+                            ),
+                          ],
+                        ),
+                      ],
+
+                      const SizedBox(height: 24),
+
+                      // BOTÕES
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text(
+                              'Cancelar',
+                              style: TextStyle(color: Color(0xFF666666)),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF2563EB),
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                            ),
+                            onPressed: () async {
+                              // ✅ Validar se prazo foi preenchido
+                              if (prazo == null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Por favor, defina uma data e hora para o prazo')),
+                                );
+                                return;
+                              }
+                            
+                              if (descricaoController.text.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Por favor, preencha a descrição')),
+                                );
+                                return;
+                              }
+
+                              final currentUser = FirebaseAuth.instance.currentUser;
+                              final responsavelEmail = currentUser?.email ?? '';
+                              final responsavelId = currentUser?.uid ?? '';
+
+                              final data = {
+                                'descricao': descricaoController.text,
+                                'status': statusValue,
+                                'prazo': Timestamp.fromDate(prazo!),
+                                'claimId': widget.sinistroId,
+                                'responsavelEmail': responsavelEmail,
+                                'responsavelId': responsavelId,
+                                if (!isEditing) ...{
+                                  'criado_em': FieldValue.serverTimestamp(),
+                                  'numeroSinistro': widget.numeroSinistro,
+                                  'clientId': widget.clientId,
+                                  'clientNome': widget.clientNome,
+                                  'clientCnpjCpf': widget.clientCnpjCpf,
+                                },
+                              };
+
+                              if (isEditing) {
+                                await _tasksCollection.doc(taskDoc!.id).update(data);
+                              } else {
+                                await _tasksCollection.add(data);
+                              }
+                              Navigator.pop(context);
+                            },
+                            child: Text(  // ← AQUI! Adicione o child
+                              isEditing ? 'Salvar' : 'Adicionar',
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      const Text('Data de abertura: '),
-                      const SizedBox(width: 8),
-                      Text(DateFormat('dd/MM/yyyy HH:mm').format(criadoEm)),
-                    ],
-                  ),
-                ],
+                ),
               ),
             ),
           ),
-          actions: [
-            TextButton(
-              child: const Text('Cancelar'),
-              onPressed: () => Navigator.pop(context),
-            ),
-            ElevatedButton(
-              child: Text(isEditing ? 'Salvar' : 'Adicionar'),
-              onPressed: () async {
-                final currentUser = FirebaseAuth.instance.currentUser;
-                final responsavelEmail = currentUser?.email ?? '';
-
-                final data = {
-                  'descricao': descricaoController.text,
-                  'status': statusValue,
-                  'prazo': Timestamp.fromDate(prazo),
-                  // ✅ Adiciona o sinistroId ao documento da tarefa
-                  'claimId': widget.sinistroId,
-                  if (!isEditing) ...{
-                    'criado_em': FieldValue.serverTimestamp(),
-                    'numeroSinistro': widget.numeroSinistro,
-                    'clientId': widget.clientId,
-                    'clientNome': widget.clientNome,
-                    'clientCnpjCpf': widget.clientCnpjCpf,
-                    'responsavelEmail': responsavelEmail,
-                  },
-                };
-
-                if (isEditing) {
-                  await _tasksCollection.doc(taskDoc!.id).update(data);
-                } else {
-                  await _tasksCollection.add(data);
-                }
-                Navigator.pop(context);
-              },
-            ),
-          ],
         );
       },
     );
@@ -200,7 +462,7 @@ class _TaskListWidgetState extends State<TaskListWidget> {
                   return const Center(child: CircularProgressIndicator());
                 }
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Text('Nenhuma tarefa adicionada ainda.');
+                  return const SelectableText('Nenhuma tarefa adicionada ainda.');
                 }
 
                 final tasks = snapshot.data!.docs.toList();
@@ -281,7 +543,7 @@ class _TaskListWidgetState extends State<TaskListWidget> {
                         borderRadius: BorderRadius.circular(8),
                       ),
 
-                      title: Text(
+                      title: SelectableText(
                         descricao,
                         style: TextStyle(
                           fontWeight: isAtrasada ? FontWeight.bold : FontWeight.normal,
@@ -291,17 +553,17 @@ class _TaskListWidgetState extends State<TaskListWidget> {
                       subtitle: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Status: $status'),
-                          Text('Prazo: ${_dateFormat.format(prazo)}'),
+                          SelectableText('Status: $status'),
+                          SelectableText('Prazo: ${_dateFormat.format(prazo)}'),
 
                           if (criadoEm != null)
-                            Text(
+                            SelectableText(
                               'Criada em: ${DateFormat('dd/MM/yyyy HH:mm').format(criadoEm)}',
                             ),
 
                           // 🔥 feedback de prazo
                           if (!isConcluida)
-                            Text(
+                            SelectableText(
                               isAtrasada
                                   ? 'Atrasada há ${diasRestantes.abs()} dias'
                                   : 'Prazo em $diasRestantes dias',

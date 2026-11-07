@@ -8,10 +8,12 @@ import 'dart:js' as js;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:upgrade_seguros/models/apolice_model.dart';
 import 'package:upgrade_seguros/screens/assist_detail_screen.dart';
 import 'package:upgrade_seguros/screens/assist_list_screen.dart';
 import 'package:upgrade_seguros/screens/claim_detail_screen.dart';
 import 'package:upgrade_seguros/screens/claim_list_screen.dart';
+import 'package:upgrade_seguros/screens/client_detail_screen.dart';
 import 'package:upgrade_seguros/services/notification_service.dart';
 import '../models/claim_model.dart';
 import '../models/client_model.dart';
@@ -51,6 +53,7 @@ class _DashboardContentState extends State<DashboardContent> {
     _fetchNPS();
     _fetchNpsMedia();
     // _iniciarMonitoramentoAlertas();
+    _diagnosticarContratos();
   }
 
   @override
@@ -76,6 +79,56 @@ class _DashboardContentState extends State<DashboardContent> {
     } catch (_) {}
   }
 
+void _diagnosticarContratos() {
+  final totalClientes = _clients.length;
+  final now = DateTime.now();
+
+  // 1. Clientes sem apólice (já temos o getter)
+  final semApolice = _clientesSemApolice.length;
+
+  // 2. Clientes com apólice vencida (já temos o getter)
+  final comApoliceVencida = _clientesComApoliceVencida.length;
+
+  // 3. Clientes com apólice ativa (pelo menos uma com dataFim > hoje)
+  final comApoliceAtiva = _clients.where((c) =>
+    c.apolices.any((a) => a.dataFim.isAfter(now))
+  ).length;
+
+  // 4. Total de apólices ativas (soma de todas com dataFim > hoje)
+  int totalApolicesAtivas = 0;
+  for (var c in _clients) {
+    for (var a in c.apolices) {
+      if (a.dataFim.isAfter(now)) {
+        totalApolicesAtivas++;
+      }
+    }
+  }
+
+  // 5. Validação: soma das categorias deve ser igual ao total de clientes
+  final somaCategorias = semApolice + comApoliceVencida + comApoliceAtiva;
+
+  // 6. Média de apólices por cliente com apólice ativa
+  final apolicesPorCliente = comApoliceAtiva > 0
+      ? totalApolicesAtivas / comApoliceAtiva
+      : 0.0;
+
+  print('===== DIAGNÓSTICO DE CONTRATOS =====');
+  print('📌 Total de clientes: $totalClientes');
+  print('✅ Clientes com apólice ativa: $comApoliceAtiva');
+  print('⚠️ Clientes com apólice vencida: $comApoliceVencida');
+  print('❌ Clientes sem apólice: $semApolice');
+  print('🔍 Soma das categorias: $somaCategorias (deve ser $totalClientes)');
+  print('📄 Total de apólices ativas: $totalApolicesAtivas');
+  print('📊 Apólices por cliente ativo: ${apolicesPorCliente.toStringAsFixed(2)}');
+  print('====================================');
+
+  // ⚠️ Alerta se a soma não bater
+  if (somaCategorias != totalClientes) {
+    print('🚨 ALERTA: Soma das categorias não bate com total de clientes!');
+    print('   Diferença de ${totalClientes - somaCategorias} clientes não categorizados.');
+  }
+}
+
   // FUNÇÃO PARA BUSCAR ASSISTÊNCIAS EM ANDAMENTO
   Future<void> _fetchAssistencias() async {
     try {
@@ -90,6 +143,7 @@ class _DashboardContentState extends State<DashboardContent> {
               .toList();
         });
         //_verificarAlertas();
+        _diagnosticarContratos();
       }
     } catch (e) {
       print('Erro ao buscar assistências: $e');
@@ -130,6 +184,7 @@ class _DashboardContentState extends State<DashboardContent> {
           _clients = allClients;
           _isLoading = false;
         });
+          _diagnosticarContratos();
       }
     } catch (e) {
       debugPrint('Erro: $e');
@@ -278,7 +333,7 @@ class _DashboardContentState extends State<DashboardContent> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '🔥 O QUE VOCÊ PRECISA FAZER HOJE',
+            '🔥 TAREFAS PENDENTES COM DATA DE VENCIMENTO PRÓXIMA',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -410,20 +465,14 @@ class _DashboardContentState extends State<DashboardContent> {
   }
 
   // ── Taxa de Sinistralidade (Loss Ratio) ─────────────────────────────
-  // sinistros pagos (concluídos) ÷ prêmios totais da carteira × 100
   double get _lossRatio {
     final dataLimite = DateTime.now().subtract(Duration(days: _periodoDias));
-    final totalPago = _recentClaims
-        .where((c) => 
-          c.statusAtual == 'Concluído' &&
-          c.valorTotalSinistro > 0 &&
-          c.dataUltimaAtualizacao.isAfter(dataLimite)
-        )
+    final totalOcorrido = _recentClaims
+        .where((c) => c.dataAbertura.isAfter(dataLimite))
         .fold(0.0, (s, c) => s + c.valorTotalSinistro);
-    final totalPremios = _clients
-        .fold(0.0, (s, c) => s + c.valorTotalApolicesAtivas);  // ← MUDA
+    final totalPremios = _clients.fold(0.0, (s, c) => s + c.valorTotalApolicesAtivas);
     if (totalPremios == 0) return 0;
-    return (totalPago / totalPremios) * 100;
+    return (totalOcorrido / totalPremios) * 100;
   }
 
   // ── Receita total da carteira (soma de totalReceita dos clientes) ─────
@@ -445,6 +494,120 @@ class _DashboardContentState extends State<DashboardContent> {
             c.dataAbertura.isBefore(ultimos30))
         .length;
     return estasPeriodo - passadaPeriodo;
+  }
+
+  List<Claim> get _allActiveEvents {
+    return [..._recentClaims, ..._assistencias];
+  }
+
+  // --- INTEGRIDADE DE APÓLICES ---
+  double get _percentualIntegridadeApolices {
+    int totalApolices = 0;
+    int completas = 0;
+
+    for (var client in _clients) {
+      for (var apolice in client.apolices) {
+        totalApolices++;
+        final temValor = apolice.valorApolice > 0;
+        final temGatilho = apolice.valorGatilho > 0;
+        final temDataInicio = apolice.dataInicio != null;
+        final temDataFim = apolice.dataFim != null;
+        if (temValor && temGatilho && temDataInicio && temDataFim) {
+          completas++;
+        }
+      }
+    }
+    return totalApolices == 0 ? 0 : (completas / totalApolices) * 100;
+  }
+
+  // ── Clientes com apólice, mas sem contrato ativo (dataFim < hoje) ──
+  List<Client> get _clientesComApoliceVencida {
+    return _clients.where((c) {
+      // Cliente tem pelo menos uma apólice, mas nenhuma está ativa (dataFim > hoje)
+      return c.apolices.isNotEmpty &&
+          c.apolices.every((a) => a.dataFim.isBefore(DateTime.now()));
+    }).toList();
+  }
+
+  List<Map<String, dynamic>> get _apolicesPendentes {
+    final pendentes = <Map<String, dynamic>>[];
+    for (var client in _clients) {
+      for (var apolice in client.apolices) {
+        final camposFaltando = <String>[];
+        if (apolice.valorApolice <= 0) camposFaltando.add('Valor');
+        if (apolice.valorGatilho <= 0) camposFaltando.add('Gatilho');
+        if (apolice.dataInicio == null) camposFaltando.add('Data Início');
+        if (apolice.dataFim == null) camposFaltando.add('Data Fim');
+        if (camposFaltando.isNotEmpty) {
+          pendentes.add({
+            'cliente': client.nome,
+            'apolice': apolice.numeroApolice,
+            'faltando': camposFaltando.join(', '),
+          });
+        }
+      }
+    }
+    return pendentes;
+  }
+
+  // Retorna um mapa onde a chave é a descrição dos campos faltantes
+  // e o valor é a lista de apólices (com cliente e número)
+  Map<String, List<Map<String, dynamic>>> get _apolicesPendentesAgrupadas {
+    final agrupadas = <String, List<Map<String, dynamic>>>{};
+
+    for (var client in _clients) {
+      for (var apolice in client.apolices) {
+        final faltando = <String>[];
+        if (apolice.dataInicio == null || apolice.dataFim == null) {
+          faltando.add('Vigência');
+        }
+        if (apolice.valorApolice <= 0) {
+          faltando.add('Valor');
+        }
+        if (apolice.valorGatilho <= 0) {
+          faltando.add('Gatilho');
+        }
+        if (faltando.isEmpty) continue;
+
+        final chave = faltando.join(' + ');
+        agrupadas.putIfAbsent(chave, () => []);
+        agrupadas[chave]!.add({
+          'cliente': client.nome,
+          'clienteId': client.id,
+          'apolice': apolice.numeroApolice,
+          'detalhes': faltando.join(', '),
+          'client': client, // 👈 Guarda o objeto completo
+        });
+      }
+    }
+    return agrupadas;
+  }
+
+  DateTime _getSlaData(Claim evento) {
+    // Para assistências, prioriza slaAtendimento (agendamento ajustado)
+    if (evento.tipo == 'assistencia' && evento.slaAtendimento != null) {
+      return evento.slaAtendimento!;
+    }
+    // Para sinistros (ou fallback) usa slaPrevisto
+    return evento.slaPrevisto ?? DateTime.now();
+  }
+
+  List<Claim> get _criticalEvents {
+    return _allActiveEvents.where((e) {
+      final slaData = _getSlaData(e);
+      if (slaData == null || e.statusAtual == 'Concluído') return false;
+      final diasRestantes = slaData.difference(DateTime.now()).inDays;
+      return diasRestantes < 0;
+    }).toList();
+  }
+
+  List<Claim> get _attentionEvents {
+    return _allActiveEvents.where((e) {
+      final slaData = _getSlaData(e);
+      if (slaData == null || e.statusAtual == 'Concluído') return false;
+      final diasRestantes = slaData.difference(DateTime.now()).inDays;
+      return diasRestantes >= 0 && diasRestantes <= 3;
+    }).toList();
   }
 
   // Agrupar por ramo
@@ -553,6 +716,13 @@ class _DashboardContentState extends State<DashboardContent> {
     }).toList();
   }
 
+  // ── Clientes sem apólice ativa ───────────────────────────────
+  List<Client> get _clientesSemApolice {
+    return _clients.where((c) => c.apolices.isEmpty).toList();
+  }
+
+
+
   // CALCULO DE PRIORIDADE DE SINISTRO
   double calculatePriorityScore(Claim c) {
     final diasAberto = DateTime.now().difference(c.dataAbertura).inDays;
@@ -577,18 +747,133 @@ class _DashboardContentState extends State<DashboardContent> {
     return score;
   }
 
-  // GERAR PRIORIDADES
-  List<Claim> getTopPriorities(List<Claim> claims, {int limit = 5}) {
-    final sorted = [...claims];
+  // ── Card de clientes sem apólice ─────────────────────────────
+  Widget _buildClientesSemApoliceCard() {
+    final clientes = _clientesSemApolice;
+    if (clientes.isEmpty) {
+      return Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200, width: 0.5),
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green, size: 24),
+            const SizedBox(width: 12),
+            Text(
+              'Todos os clientes possuem apólice! 🎉',
+              style: TextStyle(fontSize: 14, color: Colors.green.shade700),
+            ),
+          ],
+        ),
+      );
+    }
 
-    sorted.sort((a, b) =>
-        calculatePriorityScore(b).compareTo(calculatePriorityScore(a)));
-
-    return sorted.take(limit).toList();
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200, width: 0.5),
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.person_off, color: Colors.red.shade700),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '⚠️ Clientes sem apólice ativa (${clientes.length})',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...clientes.map((c) {
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: Text(
+                c.nome,
+                style: const TextStyle(fontSize: 13),
+              ),
+              subtitle: Text(
+                'Cadastrado em ${DateFormat('dd/MM/yyyy').format(c.dataCadastro ?? DateTime.now())}',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+              onTap: () {
+                widget.onNavigate?.call(ClientDetailScreen(client: c));
+              },
+            );
+          }).toList(),
+        ],
+      ),
+    );
   }
 
+  Widget _buildClientesComApoliceVencidaCard() {
+    final clientes = _clientesComApoliceVencida;
+    if (clientes.isEmpty) return const SizedBox();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200, width: 0.5),
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.hourglass_empty, color: Colors.orange.shade700),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '⚠️ Clientes com apólice vencida (${clientes.length})',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...clientes.map((c) {
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: Text(c.nome, style: const TextStyle(fontSize: 13)),
+              subtitle: Text(
+                'Última apólice venceu em ${DateFormat('dd/MM/yyyy').format(c.apolices.last.dataFim)}',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+              onTap: () {
+                widget.onNavigate?.call(ClientDetailScreen(client: c));
+              },
+            );
+          }).toList(),
+        ],
+      ),
+    );
+  }
+
+  // GERAR PRIORIDADES
+  List<Claim> getTopPriorities(List<Claim> claims, {int limit = 5}) {
+      final sorted = [...claims];
+
+      sorted.sort((a, b) =>
+          calculatePriorityScore(b).compareTo(calculatePriorityScore(a)));
+
+      return sorted.take(limit).toList();
+    }
+
   Widget _buildTopPriorities() {
-    final priorities = getTopPriorities(_recentClaims);
+    final priorities = getTopPriorities(_allActiveEvents);
 
     return Container(
       decoration: BoxDecoration(
@@ -601,7 +886,7 @@ class _DashboardContentState extends State<DashboardContent> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '🔥 PRIORIDADES DO DIA',
+            '🔥 PRIORIDADES DO DIA (SINISTROS + ASSISTÊNCIAS)',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -611,23 +896,31 @@ class _DashboardContentState extends State<DashboardContent> {
           ),
           const SizedBox(height: 16),
 
-          ...priorities.map((c) {
-            final dias = DateTime.now().difference(c.dataUltimaAtualizacao).inDays;
-
-            return ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text('${c.numeroSinistro} • ${c.clientNome}'),
-              subtitle: Text(
-                'R\$ ${c.valorTotalSinistro.toStringAsFixed(0)} • $dias dias sem atualização',
-              ),
-              trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-              onTap: () {
-                widget.onNavigate?.call(
-                  ClaimDetailScreen(claim: c),
-                );
-              },
-            );
-          }),
+          if (priorities.isEmpty)
+            Text(
+              'Nenhum evento prioritário no momento 🎉',
+              style: TextStyle(color: Colors.grey.shade500),
+            )
+          else
+            ...priorities.map((c) {
+              final dias = DateTime.now().difference(c.dataUltimaAtualizacao).inDays;
+              final tipo = c.tipo == 'assistencia' ? '🛠️ ' : '📄 ';
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text('$tipo${c.numeroSinistro} • ${c.clientNome}'),
+                subtitle: Text(
+                  'R\$ ${c.valorTotalSinistro.toStringAsFixed(0)} • $dias dias sem atualização',
+                ),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+                onTap: () {
+                  if (c.tipo == 'assistencia') {
+                    widget.onNavigate?.call(AssistDetailScreen(assistId: c.id));
+                  } else {
+                    widget.onNavigate?.call(ClaimDetailScreen(claim: c));
+                  }
+                },
+              );
+            }),
         ],
       ),
     );
@@ -663,10 +956,6 @@ class _DashboardContentState extends State<DashboardContent> {
             _buildUrgencySemaphore(),
             const SizedBox(height: 16),
 
-            // ASSISTÊNCIAS
-            _buildAssistenciasTimer(),
-            const SizedBox(height: 16),
-
             _buildTopPriorities(),
             const SizedBox(height: 16),
 
@@ -677,6 +966,19 @@ class _DashboardContentState extends State<DashboardContent> {
             // AÇÕES RECOMENDADAS (dinâmico)
             _buildNextActions(),
             const SizedBox(height: 16),
+
+            // ── Apólices com dados pendentes ──
+            _buildApolicesPendentesCard(),
+            const SizedBox(height: 16),
+
+            _buildEventosPendentesCard(),
+            const SizedBox(height: 16),
+
+            // Clientes sem apólice
+            _buildClientesSemApoliceCard(),
+            const SizedBox(height: 16),
+
+            _buildClientesComApoliceVencidaCard(),
           ],
         ),
       ),
@@ -725,7 +1027,7 @@ class _DashboardContentState extends State<DashboardContent> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'OVERVIEW DO NEGÓCIO',
+              'VISÃO GERAL DO NEGÓCIO (ÚLTMOS 30 DIAS)',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
@@ -813,6 +1115,22 @@ class _DashboardContentState extends State<DashboardContent> {
                   showDot: true,
                 ),
                 _KpiCard(
+                  label: 'Integridade das Apólices',
+                  value: _percentualIntegridadeApolices.toStringAsFixed(1),
+                  unit: '%',
+                  subtext: _percentualIntegridadeApolices >= 90
+                      ? '✓ Dados consistentes'
+                      : _percentualIntegridadeApolices >= 70
+                          ? '⚠️ Faltam dados em algumas apólices'
+                          : '⚠️ Muitas apólices incompletas',
+                  subtextColor: _percentualIntegridadeApolices >= 90
+                      ? Colors.green
+                      : _percentualIntegridadeApolices >= 70
+                          ? Colors.orange
+                          : Colors.red,
+                  showDot: true,
+                ),
+                _KpiCard(
                   label: 'NPS (Satisfação Média)',
                   value: _npsMedia.toStringAsFixed(1),
                   unit: 'pts',
@@ -842,58 +1160,17 @@ class _DashboardContentState extends State<DashboardContent> {
     }
 
   // ─────────────────────────────────────────────────────────────────────
-  Widget _buildAssistenciasTimer() {
-    if (_assistencias.isEmpty) return const SizedBox();
-
-    // Ordena: vencidas primeiro, depois por menor tempo restante
-    final sorted = [..._assistencias]..sort((a, b) {
-      final slaA = a.slaAtendimento ?? a.slaPrevisto;
-      final slaB = b.slaAtendimento ?? b.slaPrevisto;
-      if (slaA == null && slaB == null) return 0;
-      if (slaA == null) return 1;
-      if (slaB == null) return -1;
-      return slaA.compareTo(slaB);
-    });
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.timer_outlined, size: 16, color: Colors.orange),
-              const SizedBox(width: 6),
-              Text('ATENÇÃO AOS PRAZOS',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                      color: Colors.grey.shade600, letterSpacing: 0.5)),
-              const Spacer(),
-              Text('${sorted.length} ativa${sorted.length == 1 ? '' : 's'}',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
-            ],
-          ),
-          const SizedBox(height: 16),
-          ...sorted.map((a) => _AssistTimerRow(
-            assist: a,
-            onTap: () => widget.onNavigate?.call(
-                AssistListScreen(initialStatusFilter: ['Aberto', 'Em Andamento']),
-            ),
-          )),
-        ],
-      ),
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
   Widget _buildRamoPerformance() {
-    final ramoMap = _claimsByRamo;
+    // 🔥 FILTRA APENAS SINISTROS NÃO CONCLUÍDOS POR RAMO
+    final abertosPorRamo = <String, List<Claim>>{};
+    for (final entry in _claimsByRamo.entries) {
+      final abertos = entry.value.where((c) => c.statusAtual != 'Concluído').toList();
+      if (abertos.isNotEmpty) {
+        abertosPorRamo[entry.key] = abertos;
+      }
+    }
 
-    // Métricas de assistência
+    // Métricas de assistência (mantidas)
     final totalAssist = _assistencias.length;
     final vencidas = _assistencias.where((a) {
       final sla = a.slaAtendimento ?? a.slaPrevisto;
@@ -906,7 +1183,6 @@ class _DashboardContentState extends State<DashboardContent> {
       return min >= 0 && min <= 15;
     }).length;
 
-    // Cor de alerta do card de assistência
     final alertColor = vencidas > 0
         ? Colors.red
         : emRisco > 0
@@ -924,7 +1200,7 @@ class _DashboardContentState extends State<DashboardContent> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'PERFORMANCE POR RAMO',
+            '📊 DEMANDA ATIVA POR RAMO (SINISTROS ABERTOS)',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -937,8 +1213,8 @@ class _DashboardContentState extends State<DashboardContent> {
             spacing: 12,
             runSpacing: 12,
             children: [
-              // Cards de ramo existentes
-              ...ramoMap.entries.map((entry) {
+              // Cards de ramo (apenas abertos)
+              ...abertosPorRamo.entries.map((entry) {
                 final ramo = entry.key;
                 final claims = entry.value;
                 final ticketMedio = claims.isEmpty
@@ -953,27 +1229,31 @@ class _DashboardContentState extends State<DashboardContent> {
                   count: claims.length,
                   ticketMedio: ticketMedio,
                   statusInfo: statusInfo,
-                  onTap: () => widget.onNavigate?.call(
-                    ClaimListScreen(initialRamoFilter: ramo),
-                  ),
+                  onTap: () {
+                    widget.onNavigate?.call(ClaimListScreen(
+                      initialRamoFilter: ramo,
+                    ));
+                  }
                 );
               }),
-
-              // Card de Assistências
+              // Card de Assistências (com navegação filtrada)
               GestureDetector(
-                onTap: () => widget.onNavigate?.call(const AssistListScreen()),
+               onTap: () {
+                  widget.onNavigate?.call(AssistListScreen(
+                  ));
+                },
                 child: Container(
                   width: 200,
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: alertColor.withOpacity(0.06),
-                    borderRadius: BorderRadius.circular(10),
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: alertColor.withOpacity(0.4), width: 1.5),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Cabeçalho: emoji | título | badge
                       Row(
                         children: [
                           const Text('🚗', style: TextStyle(fontSize: 12)),
@@ -981,45 +1261,26 @@ class _DashboardContentState extends State<DashboardContent> {
                           const Text('Assistências',
                               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                           const Spacer(),
-                          if (vencidas > 0 || emRisco > 0)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: alertColor, borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text(
-                                vencidas > 0 ? '⚠️ $vencidas' : '⏱️ $emRisco',
-                                style: const TextStyle(fontSize: 9, color: Colors.white,
-                                    fontWeight: FontWeight.bold),
-                              ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: alertColor,
+                              borderRadius: BorderRadius.circular(20),
                             ),
+                            child: Text(
+                              '$totalAssist',
+                              style: const TextStyle(fontSize: 9, color: Colors.white,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 8),
-
-                      // Métricas em 3 linhas
-                      _assistRow(
-                        cor: Colors.green,
-                        label: 'No prazo',
-                        valor: totalAssist - vencidas - emRisco,
-                      ),
+                      _assistRow(cor: Colors.green, label: 'No prazo', valor: totalAssist - vencidas - emRisco),
                       const SizedBox(height: 4),
-                      _assistRow(
-                        cor: Colors.orange,
-                        label: 'Em risco',
-                        valor: emRisco,
-                      ),
+                      _assistRow(cor: Colors.orange, label: 'Em risco', valor: emRisco),
                       const SizedBox(height: 4),
-                      _assistRow(
-                        cor: Colors.red,
-                        label: 'Vencidas',
-                        valor: vencidas,
-                      ),
-/*
-                      const SizedBox(height: 10),
-                      Text('Ver prazos ↓',
-                          style: TextStyle(fontSize: 10, color: alertColor.withOpacity(0.7))),
-*/
+                      _assistRow(cor: Colors.red, label: 'Vencidas', valor: vencidas),
                     ],
                   ),
                 ),
@@ -1031,8 +1292,23 @@ class _DashboardContentState extends State<DashboardContent> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────
   Widget _buildUrgencySemaphore() {
+    final critical = _criticalEvents.where((e) => _getSlaData(e) != null).toList()
+    ..sort((a, b) {
+      final diasA = _getSlaData(a)!.difference(DateTime.now()).inDays;
+      final diasB = _getSlaData(b)!.difference(DateTime.now()).inDays;
+      return diasA.compareTo(diasB);
+    });
+
+    final attention = _attentionEvents.where((e) => _getSlaData(e) != null).toList()
+      ..sort((a, b) {
+        final diasA = _getSlaData(a)!.difference(DateTime.now()).inDays;
+        final diasB = _getSlaData(b)!.difference(DateTime.now()).inDays;
+        return diasA.compareTo(diasB);
+      });
+
+    final hasItems = critical.isNotEmpty || attention.isNotEmpty;
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -1044,7 +1320,7 @@ class _DashboardContentState extends State<DashboardContent> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'O QUE PRECISA DE AÇÃO',
+            '⚠️ PRAZOS CRÍTICOS (SINISTROS + ASSISTÊNCIAS)',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -1053,20 +1329,190 @@ class _DashboardContentState extends State<DashboardContent> {
             ),
           ),
           const SizedBox(height: 16),
-          _UrgencySection(
-            color: Colors.red,
-            icon: '⚠️',
-            title: 'CRÍTICO: ${_criticalClaims.length} sinistro(s) vencidos',
-            claims: _criticalClaims,
-          ),
-          const SizedBox(height: 12),
-          _UrgencySection(
-            color: Colors.orange,
-            icon: '🔔',
-            title: 'ATENÇÃO: ${_attentionClaims.length} sinistro(s) em risco',
-            claims: _attentionClaims,
-          ),
+
+          if (!hasItems) ...[
+            Text(
+              'Nenhum evento com prazo crítico no momento 🎉',
+              style: TextStyle(color: Colors.green.shade600),
+            ),
+          ] else ...[
+            // 🔴 CRÍTICOS
+            if (critical.isNotEmpty) ...[
+              Text(
+                '🔴 CRÍTICO (vencidos)',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.red.shade700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ...critical.map((e) => _buildEventTileWithTimer(e, isCritical: true)),
+              const SizedBox(height: 16),
+            ],
+
+            // 🟠 ATENÇÃO
+            if (attention.isNotEmpty) ...[
+              Text(
+                '🟠 ATENÇÃO (vencem em até 3 dias)',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.orange.shade700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ...attention.map((e) => _buildEventTileWithTimer(e, isCritical: false)),
+            ],
+          ],
         ],
+      ),
+    );
+  }
+
+  // ✅ Método auxiliar para construir cada tile
+  Widget _buildEventTileWithTimer(Claim event, {required bool isCritical}) {
+    final slaData = _getSlaData(event);
+    final agora = DateTime.now();
+    final diff = slaData != null ? slaData.difference(agora) : null;
+    final vencido = diff != null && diff.isNegative;
+    final diasRestantes = diff != null ? diff.inDays.abs() : 0;
+    final horasRestantes = diff != null ? diff.inHours.abs() : 0;
+    final minutosRestantes = diff != null ? diff.inMinutes.abs() % 60 : 0;
+
+    Color timerColor;
+    String timerText;
+    bool showClock = true;
+
+    if (slaData == null) {
+      timerColor = Colors.grey;
+      timerText = 'Sem prazo';
+      showClock = false;
+    } else if (vencido) {
+      timerColor = Colors.red;
+      if (diasRestantes >= 1) {
+        timerText = '${diasRestantes}d atrasado';
+        showClock = false;
+      } else {
+        timerText = '${horasRestantes.toString().padLeft(2, '0')}:${minutosRestantes.toString().padLeft(2, '0')}';
+        showClock = true;
+      }
+    } else {
+      timerColor = Colors.green;
+      if (diasRestantes >= 1) {
+        timerText = '${diasRestantes}d restante';
+        showClock = false;
+      } else if (diff!.inMinutes <= 15) {
+        timerColor = Colors.orange;
+        timerText = '${horasRestantes.toString().padLeft(2, '0')}:${minutosRestantes.toString().padLeft(2, '0')}';
+        showClock = true;
+      } else {
+        timerColor = Colors.green;
+        timerText = '${horasRestantes.toString().padLeft(2, '0')}:${minutosRestantes.toString().padLeft(2, '0')}';
+        showClock = true;
+      }
+    }
+
+    final isAssistencia = event.tipo == 'assistencia';
+    final tipoLabel = isAssistencia ? '🛠️ Assistência' : '📄 Sinistro';
+
+    return GestureDetector(
+      onTap: () {
+        if (isAssistencia) {
+          widget.onNavigate?.call(AssistDetailScreen(assistId: event.id));
+        } else {
+          widget.onNavigate?.call(ClaimDetailScreen(claim: event));
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: isCritical ? Colors.red.shade50 : Colors.orange.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border(left: BorderSide(color: timerColor, width: 3)),
+        ),
+        child: Row(
+          children: [
+            // Relógio
+            Container(
+              width: 70,
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              decoration: BoxDecoration(
+                color: timerColor.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Column(
+                children: [
+                  if (slaData == null)
+                    Text(
+                      timerText,
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: timerColor),
+                    )
+                  else
+                    Text(
+                      showClock
+                          ? timerText
+                          : timerText.split(' ')[0],
+                      style: TextStyle(
+                        fontSize: showClock ? 18 : 16,
+                        fontWeight: FontWeight.bold,
+                        color: timerColor,
+                        fontFeatures: showClock
+                            ? const [FontFeature.tabularFigures()]
+                            : null,
+                      ),
+                    ),
+                  if (slaData != null && !showClock)
+                    Text(
+                      timerText.contains('atrasado') ? 'ATRASADO' : 'restante',
+                      style: TextStyle(
+                        fontSize: 8,
+                        color: timerColor,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.3,
+                      ),
+                    )
+                  else if (slaData != null && showClock)
+                    Text(
+                      vencido ? 'ATRASADO' : 'restante',
+                      style: TextStyle(
+                        fontSize: 8,
+                        color: timerColor,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${event.numeroSinistro} • ${event.clientNome}',
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    '$tipoLabel • ${event.statusAtual}',
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                  ),
+                  if (event.localOcorrencia.isNotEmpty)
+                    Text(
+                      event.localOcorrencia,
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                ],
+              ),
+            ),
+            const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.grey),
+          ],
+        ),
       ),
     );
   }
@@ -1074,10 +1520,9 @@ class _DashboardContentState extends State<DashboardContent> {
   // ─────────────────────────────────────────────────────────────────────
   // Ações recomendadas: geradas dinamicamente a partir dos dados reais
   Widget _buildNextActions() {
-    // Monta lista de ações reais baseadas no estado atual
     final acoes = <Map<String, dynamic>>[];
 
-    // Aprovações paradas há mais de 3 dias
+    // 1. Aprovações paradas > 3 dias (apenas sinistros, pois assistências não têm esse status)
     final aprovacoes = _recentClaims
         .where((c) =>
             c.statusAtual == 'Aguardando Aprovação' &&
@@ -1095,7 +1540,7 @@ class _DashboardContentState extends State<DashboardContent> {
       });
     }
 
-    // Reparos prolongados > 7 dias
+    // 2. Reparos prolongados > 7 dias (apenas sinistros com veículos)
     final reparos = _recentClaims
         .where((c) =>
             c.statusAtual == 'Reparo em Andamento' &&
@@ -1113,15 +1558,27 @@ class _DashboardContentState extends State<DashboardContent> {
       });
     }
 
-    // Contratos com apólices vencendo em 7 dias
+    // 3. Assistências com SLA vencido ou em risco (adicionar)
+    final assistenciasCriticas = _assistencias
+        .where((a) =>
+            a.statusAtual != 'Concluído' &&
+            a.slaPrevisto != null &&
+            a.slaPrevisto!.difference(DateTime.now()).inDays < 1)
+        .toList();
+    if (assistenciasCriticas.isNotEmpty) {
+      acoes.add({
+        'icon': '🚨',
+        'title': '${assistenciasCriticas.length} assistência(s) com SLA vencido',
+        'claim': assistenciasCriticas.first,
+      });
+    }
+
+    // 4. Contratos com apólices vencendo em 7 dias (mantido)
     final now = DateTime.now();
-    final setenDias = now.add(const Duration(days: 7));
+    final seteDias = now.add(const Duration(days: 7));
     final vencendo = _clients
-        .where((c) {
-          return c.apolices.any((a) =>
-            a.dataFim.isAfter(now) && a.dataFim.isBefore(setenDias)
-          );
-        })
+        .where((c) => c.apolices.any((a) =>
+            a.dataFim.isAfter(now) && a.dataFim.isBefore(seteDias)))
         .toList();
     if (vencendo.isNotEmpty) {
       acoes.add({
@@ -1131,21 +1588,22 @@ class _DashboardContentState extends State<DashboardContent> {
       });
     }
 
-    // Top prioridade por score (se não vier das categorias acima)
-    final topPriority = getTopPriorities(_recentClaims, limit: 1);
-    if (topPriority.isNotEmpty && acoes.isEmpty) {
-      final c = topPriority.first;
-      final dias = DateTime.now()
-          .difference(c.dataUltimaAtualizacao)
-          .inDays;
-      acoes.add({
-        'icon': '🔥',
-        'title':
-            '${c.numeroSinistro} · ${c.clientNome} — $dias dias sem atualização',
-        'claim': c,
-      });
+    // 5. Top prioridade por score (se não vier das categorias acima)
+    if (acoes.isEmpty) {
+      final topPriority = getTopPriorities(_allActiveEvents, limit: 1);
+      if (topPriority.isNotEmpty) {
+        final c = topPriority.first;
+        final dias = DateTime.now().difference(c.dataUltimaAtualizacao).inDays;
+        acoes.add({
+          'icon': '🔥',
+          'title':
+              '${c.numeroSinistro} · ${c.clientNome} — $dias dias sem atualização',
+          'claim': c,
+        });
+      }
     }
 
+    // Exibe as ações (mesmo layout)
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -1157,7 +1615,7 @@ class _DashboardContentState extends State<DashboardContent> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'AÇÕES RECOMENDADAS AGORA',
+            'AÇÕES GERENCIAIS RECOMENDADAS',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -1181,8 +1639,11 @@ class _DashboardContentState extends State<DashboardContent> {
                   title: a['title'] as String,
                   onTap: () {
                     if (claim != null) {
-                      widget.onNavigate?.call(
-                          ClaimDetailScreen(claim: claim));
+                      if (claim.tipo == 'assistencia') {
+                        widget.onNavigate?.call(AssistDetailScreen(assistId: claim.id));
+                      } else {
+                        widget.onNavigate?.call(ClaimDetailScreen(claim: claim));
+                      }
                     }
                   },
                 ),
@@ -1205,6 +1666,287 @@ class _DashboardContentState extends State<DashboardContent> {
         Text(valor.toString(),
             style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: cor)),
       ],
+    );
+  }
+
+  // --- APÓLICES PENDENTES DE INFORMAÇÕES ---
+  Widget _buildApolicesPendentesCard() {
+    final agrupadas = _apolicesPendentesAgrupadas;
+    final totalPendentes = agrupadas.values.fold(0, (sum, lista) => sum + lista.length);
+
+    if (totalPendentes == 0) {
+      return Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200, width: 0.5),
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green, size: 24),
+            const SizedBox(width: 12),
+            Text(
+              'Todas as apólices estão completas! 🎉',
+              style: TextStyle(fontSize: 14, color: Colors.green.shade700),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200, width: 0.5),
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.warning_amber, color: Colors.orange.shade700),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '📋 Apólices com dados pendentes ($totalPendentes)',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // 🔥 LISTA DIRETA (SEM ACORDEÃO)
+          ...agrupadas.entries.map((entry) {
+            final chave = entry.key;
+            final lista = entry.value;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Cabeçalho do grupo
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    '❌ $chave (${lista.length})',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.orange.shade700,
+                    ),
+                  ),
+                ),
+                // Lista de itens do grupo
+                ...lista.map((item) {
+                  final client = item['client'] as Client;
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: Text(
+                      item['cliente'] as String,
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                    subtitle: Text(
+                      'Apólice: ${item['apolice']}',
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    ),
+                    trailing: Text(
+                      item['detalhes'] as String,
+                      style: TextStyle(fontSize: 11, color: Colors.orange.shade700),
+                    ),
+                    onTap: () {
+                      // 🆕 Navega para o detalhe do cliente
+                      widget.onNavigate?.call(ClientDetailScreen(client: client));
+                    },
+                  );
+                }).toList(),
+                const SizedBox(height: 8),
+              ],
+            );
+          }).toList(),
+        ],
+      ),
+    );
+  }
+
+  // --- SINISTROS E ASSISTÊNCIAS PENDENTES DE INFORMAÇÕES ---
+  Widget _buildEventosPendentesCard() {
+    // Sinistros sem seguradora
+    final sinistrosSemSeguradora = _recentClaims
+        .where((s) => s.seguradora == null || s.seguradora!.isEmpty)
+        .toList();
+
+    // Assistências sem seguradora
+    final assistenciasSemSeguradora = _assistencias
+        .where((a) => a.seguradora == null || a.seguradora!.isEmpty)
+        .toList();
+
+    // Sinistros com valor zero (pode ser erro)
+    final sinistrosValorZero = _recentClaims
+        .where((s) => s.valorTotalSinistro == 0 && s.statusAtual != 'Aberto')
+        .toList();
+
+    final totalPendentes = sinistrosSemSeguradora.length + 
+                          assistenciasSemSeguradora.length + 
+                          sinistrosValorZero.length;
+
+    if (totalPendentes == 0) {
+      return Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200, width: 0.5),
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green, size: 24),
+            const SizedBox(width: 12),
+            Text(
+              'Todos os sinistros/assistências estão completos! 🎉',
+              style: TextStyle(fontSize: 14, color: Colors.green.shade700),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200, width: 0.5),
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.warning_amber, color: Colors.orange.shade700),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '⚠️ Sinistros/Assistências com dados pendentes ($totalPendentes)',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Sinistros sem seguradora
+          if (sinistrosSemSeguradora.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text(
+                '❌ Sinistros sem Seguradora (${sinistrosSemSeguradora.length})',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.orange.shade700,
+                ),
+              ),
+            ),
+            ...sinistrosSemSeguradora.map((s) {
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text(
+                  s.numeroSinistro,
+                  style: const TextStyle(fontSize: 13),
+                ),
+                subtitle: Text(
+                  '${s.ramoSinistro} • ${s.statusAtual}',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (ctx) => ClaimDetailScreen(claim: s),
+                    ),
+                  );
+                },
+              );
+            }).toList(),
+            const SizedBox(height: 8),
+          ],
+
+          // Assistências sem seguradora
+          if (assistenciasSemSeguradora.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text(
+                '❌ Assistências sem Seguradora (${assistenciasSemSeguradora.length})',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.orange.shade700,
+                ),
+              ),
+            ),
+            ...assistenciasSemSeguradora.map((a) {
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text(
+                  a.numeroSinistro,
+                  style: const TextStyle(fontSize: 13),
+                ),
+                subtitle: Text(
+                  '${a.tipoAssistencia ?? 'Sem tipo'} • ${a.statusAtual}',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (ctx) => ClaimDetailScreen(claim: a),
+                    ),
+                  );
+                },
+              );
+            }).toList(),
+            const SizedBox(height: 8),
+          ],
+
+          // Sinistros com valor zero
+          if (sinistrosValorZero.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text(
+                '⚠️ Sinistros Concluídos com Valor Zero (${sinistrosValorZero.length})',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.orange.shade700,
+                ),
+              ),
+            ),
+            ...sinistrosValorZero.map((s) {
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text(
+                  s.numeroSinistro,
+                  style: const TextStyle(fontSize: 13),
+                ),
+                subtitle: Text(
+                  s.ramoSinistro,
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (ctx) => ClaimDetailScreen(claim: s),
+                    ),
+                  );
+                },
+              );
+            }).toList(),
+          ],
+        ],
+      ),
     );
   }
 
@@ -1295,14 +2037,22 @@ class _RamoCard extends StatelessWidget {
 
   String get _emoji {
     switch (ramo) {
-      case 'Frota':
+      case 'Veículo Individual':
         return '🚗';
+      case 'Frota':
+        return '🚛';
+      case 'Civil Ônibus (RCO)':
+        return '🚌';
       case 'Transporte':
         return '📦';
+      case 'Máquinas':
+        return '⚙️';
       case 'Residencial':
         return '🏠';
       case 'Vidas':
         return '👤';
+      case 'Empresarial':
+        return '🏢';
       default:
         return '📋';
     }
@@ -1546,9 +2296,9 @@ class _AssistTimerRowState extends State<_AssistTimerRow> {
     final agora = DateTime.now();
     final diff = sla != null ? sla.difference(agora) : null;
     final vencido = diff != null && diff.isNegative;
-    final minutos = diff != null ? diff.inMinutes.abs() : null;
-    final horas = minutos != null ? minutos ~/ 60 : null;
-    final mins = minutos != null ? minutos % 60 : null;
+    final diasRestantes = diff != null ? diff.inDays.abs() : null;
+    final horasRestantes = diff != null ? diff.inHours.abs() : null;
+    final minutosRestantes = diff != null ? diff.inMinutes.abs() % 60 : null;
 
     // Cor baseada no tempo restante
     Color cor;
@@ -1567,6 +2317,27 @@ class _AssistTimerRowState extends State<_AssistTimerRow> {
             orElse: () => TipoAssistencia.outro)
         .label;
 
+    // 🔥 DECIDE O QUE EXIBIR
+    String tempoTexto;
+    bool mostrarRelogio = true;
+
+    if (diff == null) {
+      tempoTexto = '--:--';
+      mostrarRelogio = false;
+    } else if (diasRestantes! >= 1) {
+      // 🔥 Mostra em dias
+      tempoTexto = vencido
+          ? '${diasRestantes.abs()}d atrasado'
+          : '${diasRestantes}d restante';
+      mostrarRelogio = false;
+    } else {
+      // Menos de 24h: mantém o relógio digital
+      final horas = horasRestantes!;
+      final minutos = minutosRestantes!;
+      tempoTexto = '${horas.toString().padLeft(2, '0')}:${minutos.toString().padLeft(2, '0')}';
+      mostrarRelogio = true;
+    }
+
     return InkWell(
       onTap: widget.onTap,
       borderRadius: BorderRadius.circular(8),
@@ -1580,7 +2351,7 @@ class _AssistTimerRowState extends State<_AssistTimerRow> {
         ),
         child: Row(
           children: [
-            // Mini-relógio digital
+            // ⏱️ Indicador de tempo (relógio ou texto em dias)
             Container(
               width: 70,
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -1591,28 +2362,45 @@ class _AssistTimerRowState extends State<_AssistTimerRow> {
               child: Column(
                 children: [
                   Text(
-                    diff == null
-                        ? '--:--'
-                        : '${horas!.toString().padLeft(2, '0')}:${mins!.toString().padLeft(2, '0')}',
+                    mostrarRelogio
+                        ? tempoTexto
+                        : tempoTexto.split(' ')[0], // só o número
                     style: TextStyle(
-                      fontSize: 18,
+                      fontSize: mostrarRelogio ? 18 : 16,
                       fontWeight: FontWeight.bold,
                       color: cor,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                      fontFeatures: mostrarRelogio
+                          ? const [FontFeature.tabularFigures()]
+                          : null,
                     ),
                   ),
-                  Text(
-                    vencido ? 'ATRASADO' : 'restante',
-                    style: TextStyle(fontSize: 8, color: cor,
-                        fontWeight: FontWeight.w600, letterSpacing: 0.3),
-                  ),
+                  if (!mostrarRelogio)
+                    Text(
+                      tempoTexto.contains('atrasado') ? 'ATRASADO' : 'restante',
+                      style: TextStyle(
+                        fontSize: 8,
+                        color: cor,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.3,
+                      ),
+                    )
+                  else
+                    Text(
+                      vencido ? 'ATRASADO' : 'restante',
+                      style: TextStyle(
+                        fontSize: 8,
+                        color: cor,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
                 ],
               ),
             ),
 
             const SizedBox(width: 12),
 
-            // Info
+            // Info do atendimento
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

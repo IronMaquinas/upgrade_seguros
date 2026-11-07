@@ -1,9 +1,8 @@
 // lib/screens/assist_detail_screen.dart
-// ignore_for_file: use_build_context_synchronously
 
 import 'dart:io';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_google_places_sdk/flutter_google_places_sdk.dart';
@@ -12,6 +11,7 @@ import 'package:intl/intl.dart';
 import 'package:upgrade_seguros/models/config_model.dart';
 import 'package:upgrade_seguros/services/config_service.dart';
 import 'package:upgrade_seguros/services/place_search_delegate.dart';
+import 'package:upgrade_seguros/utils/formatters.dart';
 import 'package:upgrade_seguros/widgets/nps_send_widget.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import '../models/claim_model.dart';
@@ -26,6 +26,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path/path.dart' as p;
 import '../services/image_services.dart';
+import 'package:upgrade_seguros/widgets/selectable_text_helper.dart';
 
 class AssistDetailScreen extends StatefulWidget {
   final String assistId;
@@ -64,6 +65,9 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
   late TextEditingController _enderecoTerceiroCtrl;
   late TextEditingController _nomeContatoOficinaCtrl;
   late TextEditingController _telefoneContatoOficinaCtrl;
+  late TextEditingController _nomeOficinaCtrl;
+
+  String _nomeUsuarioLogado = 'Desconhecido';
 
   // Anexos
   final Map<String, List<XFile>> _novosAnexos = {
@@ -96,6 +100,8 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
     _nomeContatoOficinaCtrl = TextEditingController();
     _telefoneContatoOficinaCtrl = TextEditingController();
     _authService.isAdmin().then((v) => setState(() => _isAdmin = v));
+    _nomeOficinaCtrl = TextEditingController();
+    _loadNomeUsuario();
     _loadConfig();
   }
 
@@ -106,15 +112,40 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
     _enderecoTerceiroCtrl.dispose();
     _nomeContatoOficinaCtrl.dispose();
     _telefoneContatoOficinaCtrl.dispose();
+    _nomeOficinaCtrl.dispose();
     super.dispose();
   }
 
-    Future<void> _loadConfig() async {
-      final config = await ConfigService().getConfig();
-      setState(() {
-        _config = config;
-      });
+  Future<void> _loadConfig() async {
+    final config = await ConfigService().getConfig();
+    setState(() {
+      _config = config;
+    });
+  }
+
+  Future<void> _loadNomeUsuario() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        if (doc.exists) {
+          final nome = doc.data()?['nome'] as String?;
+          if (nome != null && nome.isNotEmpty) {
+            setState(() => _nomeUsuarioLogado = nome);
+            return;
+          }
+        }
+        setState(() => _nomeUsuarioLogado = user.displayName ?? user.email ?? 'Desconhecido');
+      } else {
+        setState(() => _nomeUsuarioLogado = 'Desconhecido');
+      }
+    } catch (e) {
+      setState(() => _nomeUsuarioLogado = 'Desconhecido');
     }
+  }
 
   Future<void> _loadAssist() async {
     try {
@@ -132,6 +163,7 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
           _telefoneContatoOficinaCtrl.text = _assist!.telefoneContatoOficina ?? '';
           _statusCtrl.text = assist?.statusAtual ?? '';
           _anotacoesCtrl.text = assist?.anotacoes.toString() ?? '';
+          _nomeOficinaCtrl.text = _assist!.nomeOficina ?? '';
           _isLoading = false;
         });
       }
@@ -325,6 +357,20 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
       }
       return place.address ?? place.name ?? '';
     }
+    return null;
+  }
+
+  DateTime? _parseHistoricoData(dynamic value) {
+    if (value == null) return null;
+    if (value is Timestamp) return value.toDate();
+    if (value is String) {
+      try {
+        return DateTime.parse(value);
+      } catch (_) {
+        return null;
+      }
+    }
+    if (value is DateTime) return value;
     return null;
   }
 
@@ -767,22 +813,59 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
       _assist!.statusAtual = _statusCtrl.text;
       _assist!.dataUltimaAtualizacao = DateTime.now();
 
+      if (_statusCtrl.text == 'Concluído') {
+        _assist!.dataConclusao = Timestamp.now();
+      }
+
       // Adiciona ao histórico
       _assist!.historicoStatus = [
         ..._assist!.historicoStatus,
         {
           'status': _statusCtrl.text,
           'data': DateTime.now().toIso8601String(),
+          'registrado_por': _nomeUsuarioLogado,
         },
       ];
 
       // Campos editáveis de Serviços e Reparos
       _assist!.enderecoTerceiro = _enderecoTerceiroCtrl.text;
-            _assist!.nomeContatoOficina = _nomeContatoOficinaCtrl.text.isNotEmpty
+      _assist!.nomeContatoOficina = _nomeContatoOficinaCtrl.text.isNotEmpty
           ? _nomeContatoOficinaCtrl.text : null;
       _assist!.telefoneContatoOficina = _telefoneContatoOficinaCtrl.text.isNotEmpty
           ? _telefoneContatoOficinaCtrl.text : null;
 
+      // 🆕 FAZER UPLOAD DOS NOVOS ANEXOS PRIMEIRO
+      if (_novosAnexos.values.any((list) => list.isNotEmpty)) {
+        setState(() => _isUploadingAnexos = true);
+        
+        final anexosUrls = await _uploadAnexos(_assist!.numeroSinistro);
+        
+        // 🆕 JUNTAR URLs antigas com URLs novas
+        if (anexosUrls.containsKey('Fotos da Ocorrência')) {
+          _assist!.fotosUrls = [
+            ...?_assist!.fotosUrls,
+            ...anexosUrls['Fotos da Ocorrência']!,
+          ];
+        }
+        
+        if (anexosUrls.containsKey('Documentos')) {
+          _assist!.arquivosLaudosUrls = [
+            ...?_assist!.arquivosLaudosUrls,
+            ...anexosUrls['Documentos']!,
+          ];
+        }
+        
+        // 🆕 LIMPAR OS NOVOS ANEXOS APÓS UPLOAD
+        setState(() {
+          _novosAnexos.clear();
+          _novosAnexos['Fotos da Ocorrência'] = [];
+          _novosAnexos['Documentos'] = [];
+          _platformFiles.clear();
+          _isUploadingAnexos = false;
+        });
+      }
+
+      // 🆕 AGORA SIM SALVA COM AS URLs
       await _firestoreService.updateClaim(_assist!);
 
       if (notificarWhatsApp && mounted) {
@@ -927,6 +1010,21 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
     return labels.join(', ');
   }
 
+  // --- Método para Salvar Alterações de Agendamento ---
+  Future<void> _salvarAlteracoes() async {
+    if (_assist == null) return;
+    
+    try {
+      await _firestoreService.updateClaim(_assist!);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Agendamento atualizado!'))
+      );
+    } catch (e) {
+      print('Erro ao salvar: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -944,8 +1042,9 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
     }
 
     return Scaffold(
+      backgroundColor: const Color(0xFFF4F6F9),
       appBar: AppBar(
-        title: Text(_assist!.numeroSinistro),
+        title: Text(_assist!.clientNome),
         backgroundColor: Colors.orange.shade50,
         foregroundColor: const Color(0xFF1A1A2E),
         elevation: 1,
@@ -995,7 +1094,7 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1081,7 +1180,7 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                 ? Card(
                     elevation: 2,
                     color: _assist!.statusAtual == 'Concluído'
-                        ? Colors.green.shade50
+                        ? const Color(0xFFEDE9FE)
                         : Colors.grey.shade100,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
@@ -1092,7 +1191,7 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                                 ? Icons.check_circle
                                 : Icons.cancel_outlined,
                             color: _assist!.statusAtual == 'Concluído'
-                                ? Colors.green
+                                ? const Color(0xFF6366F1)
                                 : Colors.grey,
                             size: 32,
                           ),
@@ -1108,7 +1207,7 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                                   fontSize: 15,
                                   fontWeight: FontWeight.bold,
                                   color: _assist!.statusAtual == 'Concluído'
-                                      ? Colors.green.shade700
+                                      ? const Color(0xFF6366F1)
                                       : Colors.grey.shade700,
                                 ),
                               ),
@@ -1129,11 +1228,10 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                           Padding(
                             padding: const EdgeInsets.all(24),
                             child: AssistSlaTimerWidget(
-                              dataAbertura: _assist!.slaAtendimento != null
-                                  ? DateTime.now().subtract(Duration(minutes: _assist!.tempoSlaMinutos ?? 30))
-                                  : _assist!.dataAbertura,
-                              slaPrevisto: _assist!.slaAtendimento ?? _assist!.slaPrevisto,
-                              size: 200,
+                                dataAbertura: _assist!.dataAbertura,
+                                slaPrevisto: _assist!.slaAtendimento ?? _assist!.slaPrevisto,
+                                dataAgendamento: _assist!.dataAgendamento,
+                                size: 200,
                               showDetails: true,
                               onSlaWarning: () {
                                 ScaffoldMessenger.of(context).showSnackBar(
@@ -1196,61 +1294,44 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                     ),
                     Expanded(
                       flex: 2,
-                      child: _buildInfoRow('CPF/CNPJ', _assist!.clientCnpjCpf),
+                      child: _buildInfoRow('CPF/CNPJ', BRFormatters.formatarCpfOuCnpj(_assist!.clientCnpjCpf)),
                     ),
                     Expanded(
                       flex: 2,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Telefone',
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 12,
-                                  color: Colors.grey)),
-                          const SizedBox(height: 2),
                           Row(
                             children: [
                               Expanded(
-                                child: Text(
+                                child: _buildInfoRow(
+                                  'Telefone',
                                   _assist!.telefoneCliente?.isNotEmpty == true
-                                      ? _assist!.telefoneCliente!
+                                      ? BRFormatters.formatarTelefone(_assist!.telefoneCliente!)
                                       : '—',
-                                  style: const TextStyle(fontSize: 13),
                                 ),
                               ),
                               if (_assist!.telefoneCliente?.isNotEmpty == true) ...[
                                 InkWell(
                                   borderRadius: BorderRadius.circular(20),
                                   onTap: () {
-                                    final tel = _assist!.telefoneCliente!
-                                        .replaceAll(RegExp(r'\D'), '');
-                                    if (tel.isNotEmpty) {
-                                      launchUrlString('tel:$tel');
-                                    }
+                                    final tel = _assist!.telefoneCliente!.replaceAll(RegExp(r'\D'), '');
+                                    if (tel.isNotEmpty) launchUrlString('tel:$tel');
                                   },
                                   child: Padding(
                                     padding: const EdgeInsets.all(4),
-                                    child: Icon(Icons.call,
-                                        size: 18, color: Colors.green.shade600),
+                                    child: Icon(Icons.call, size: 18, color: Colors.green.shade600),
                                   ),
                                 ),
                                 InkWell(
                                   borderRadius: BorderRadius.circular(20),
                                   onTap: () {
-                                    final tel = _assist!.telefoneCliente!
-                                        .replaceAll(RegExp(r'\D'), '');
-                                    if (tel.isNotEmpty) {
-                                      launchUrlString(
-                                          'https://wa.me/55$tel',
-                                          mode: LaunchMode.externalApplication);
-                                    }
+                                    final tel = _assist!.telefoneCliente!.replaceAll(RegExp(r'\D'), '');
+                                    if (tel.isNotEmpty) launchUrlString('https://wa.me/55$tel', mode: LaunchMode.externalApplication);
                                   },
                                   child: Padding(
                                     padding: const EdgeInsets.all(4),
-                                    child: Icon(Icons.message,
-                                        size: 18,
-                                        color: const Color(0xFF25D366)),
+                                    child: Icon(Icons.message, size: 18, color: const Color(0xFF25D366)),
                                   ),
                                 ),
                               ],
@@ -1291,6 +1372,14 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                             Padding(
                               padding: const EdgeInsets.only(top: 2),
                               child: _buildInfoRow('Peças', _getTipoVidroLabel(_assist!.tipoOcorrencia)),
+                            ),
+                          if (_assist!.tipoOcorrencia == 'outro')
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: _buildInfoRow(
+                                'Descrição',
+                                _assist!.tipoOcorrenciaOutro ?? '—',
+                              ),
                             ),
                         ],
                       ),
@@ -1415,58 +1504,59 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (_assist!.nomeContato?.isNotEmpty ?? false)
-                          Expanded(
-                            flex: 3,
-                            child: _buildIconRow(Icons.person_outlined, Colors.grey.shade600,
-                                'Contato no local', _assist!.nomeContato!),
+                        // ─── CONTATO NO LOCAL ───
+                        Expanded(
+                          flex: 2,
+                          child: _buildInfoRow(
+                            'Contato no local',
+                            _assist!.nomeContato?.isNotEmpty ?? false
+                                ? _assist!.nomeContato!
+                                : '—',
                           ),
-                        if (_assist!.telefoneContatoLocal?.isNotEmpty ?? false)
-                          Expanded(
-                            flex: 2,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('Telefone no local',
-                                    style: TextStyle(fontSize: 11, color: Colors.grey,
-                                        fontWeight: FontWeight.w600)),
-                                const SizedBox(height: 2),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(_assist!.telefoneContatoLocal!,
-                                          style: const TextStyle(fontSize: 13)),
-                                    ),
-                                    InkWell(
-                                      onTap: () {
-                                        final tel = _assist!.telefoneContatoLocal!
-                                            .replaceAll(RegExp(r'\D'), '');
-                                        if (tel.isNotEmpty) launchUrlString('tel:$tel');
-                                      },
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(4),
-                                        child: Icon(Icons.call, size: 18, color: Colors.green.shade600),
-                                      ),
-                                    ),
-                                    InkWell(
-                                      onTap: () {
-                                        final tel = _assist!.telefoneContatoLocal!
-                                            .replaceAll(RegExp(r'\D'), '');
-                                        if (tel.isNotEmpty) launchUrlString(
-                                            'https://wa.me/55$tel',
-                                            mode: LaunchMode.externalApplication);
-                                      },
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(4),
-                                        child: Icon(Icons.message, size: 18,
-                                            color: const Color(0xFF25D366)),
-                                      ),
-                                    ),
-                                  ],
+                        ),
+                        
+                        // ─── TELEFONE NO LOCAL (COM ÍCONES) ───
+                        Expanded(
+                          flex: 2,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: _buildInfoRow(
+                                  'Telefone no local',
+                                  _assist!.telefoneContatoLocal?.isNotEmpty ?? false
+                                      ? BRFormatters.formatarTelefone(_assist!.telefoneContatoLocal!)
+                                      : '—',
+                                ),
+                              ),
+                              if (_assist!.telefoneContatoLocal?.isNotEmpty ?? false) ...[
+                                InkWell(
+                                  borderRadius: BorderRadius.circular(20),
+                                  onTap: () {
+                                    final tel = _assist!.telefoneContatoLocal!.replaceAll(RegExp(r'\D'), '');
+                                    if (tel.isNotEmpty) launchUrlString('tel:$tel');
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(4),
+                                    child: Icon(Icons.call, size: 18, color: Colors.green.shade600),
+                                  ),
+                                ),
+                                InkWell(
+                                  borderRadius: BorderRadius.circular(20),
+                                  onTap: () {
+                                    final tel = _assist!.telefoneContatoLocal!.replaceAll(RegExp(r'\D'), '');
+                                    if (tel.isNotEmpty) {
+                                      launchUrlString('https://wa.me/55$tel', mode: LaunchMode.externalApplication);
+                                    }
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(4),
+                                    child: Icon(Icons.message, size: 18, color: const Color(0xFF25D366)),
+                                  ),
                                 ),
                               ],
-                            ),
+                            ],
                           ),
+                        ),
                       ],
                     ),
                   ],
@@ -1482,6 +1572,82 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
               title: 'Serviços e Reparos',
               children: [
                 if (_isEditing) ...[
+                    // ✅ NOME DA OFICINA (NOVO!)
+                  Autocomplete<String>(
+                    optionsBuilder: (textEditingValue) {
+                      if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
+                      // ✨ Filtrar oficinas cadastradas (substitua com sua lógica real)
+                      final oficinasDisponiveis = ['CARGLASS', 'OFICINA SILVA', 'MECANICA XYZ'];
+                      return oficinasDisponiveis.where((o) =>
+                          o.toLowerCase().contains(textEditingValue.text.toLowerCase()));
+                    },
+                    onSelected: (selection) {
+                      setState(() => _nomeOficinaCtrl.text = selection.toUpperCase());
+                    },
+                    fieldViewBuilder: (ctx, autoCtrl, focusNode, onSubmitted) {
+                      autoCtrl.text = _nomeOficinaCtrl.text;
+                      return TextField(
+                        controller: autoCtrl,
+                        focusNode: focusNode,
+                        inputFormatters: [
+                          UpperCaseTextFormatter(), // ✨ FORÇA CAIXA ALTA
+                        ],
+                        decoration: InputDecoration(
+                          labelText: 'Nome da Oficina',
+                          prefixIcon: const Icon(Icons.build_outlined),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          hintText: 'Digite ou selecione',
+                          suffixIcon: _nomeOficinaCtrl.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, size: 18),
+                                  onPressed: () {
+                                    autoCtrl.clear();
+                                    setState(() => _nomeOficinaCtrl.clear());
+                                  },
+                                )
+                              : null,
+                        ),
+                        // ✨ IMPORTANTE: Use listener, NÃO onChanged!
+                      );
+                    },
+                    optionsViewBuilder: (context, onSelected, options) {
+                      return Align(
+                        alignment: Alignment.topLeft,
+                        child: Material(
+                          elevation: 4.0,
+                          child: Container(
+                            color: Colors.white,
+                            constraints: const BoxConstraints(maxHeight: 200),
+                            child: ListView.builder(
+                              padding: EdgeInsets.zero,
+                              shrinkWrap: true,
+                              itemCount: options.length,
+                              itemBuilder: (context, index) {
+                                final String option = options.elementAt(index);
+                                return InkWell(
+                                  onTap: () => onSelected(option.toUpperCase()),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                    child: Text(
+                                      option.toUpperCase(),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
                   TextField(
                     controller: _enderecoTerceiroCtrl,
                     readOnly: true,
@@ -1490,7 +1656,7 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                       if (result != null) setState(() => _enderecoTerceiroCtrl.text = result);
                     },
                     decoration: InputDecoration(
-                      labelText: 'Oficina / Local do serviço',
+                      labelText: 'Endereço local do serviço',
                       prefixIcon: const Icon(Icons.build_outlined),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                       suffixIcon: const Icon(Icons.location_on_outlined),
@@ -1522,67 +1688,187 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                           ),
                           keyboardType: TextInputType.phone,
+                          inputFormatters: [BRFormatters.telefoneFormatter],  // ← Adicione
                         ),
                       ),
                     ],
                   ),
                 ] else ...[
-                // Agendamento
-                if (_assist!.dataAgendamento != null) ...[
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildIconRow(
-                          Icons.calendar_today_outlined,
-                          Colors.orange,
-                          'Agendamento',
-                          '${DateFormat('dd/MM/yyyy').format(_assist!.dataAgendamento!)}'
-                          '${_assist!.horaAgendamento != null ? ' às ${_assist!.horaAgendamento}' : ''}',
-                        ),
-                      ),
-                      // Contador de reagendamentos
-                      if (_assist!.totalReagendamentos > 0)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _assist!.totalReagendamentos >= 2
-                                ? Colors.red.shade50 : Colors.orange.shade50,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: _assist!.totalReagendamentos >= 2
-                                  ? Colors.red.shade300 : Colors.orange.shade300,
+                // ─── AGENDAMENTO (SEMPRE VISÍVEL) ───────────────────
+                _buildSection(
+                icon: Icons.calendar_today_outlined,
+                color: Colors.orange,
+                title: 'Agendamento',
+                children: [
+                    // 1. Data & Hora do Agendamento
+                    Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: _assist!.statusAtual != 'Concluído' && 
+                                  _assist!.statusAtual != 'Cancelado'
+                                ? () async {
+                                    final picked = await showDatePicker(
+                                      context: context,
+                                      initialDate: _assist!.dataAgendamento ?? 
+                                                  DateTime.now().add(const Duration(days: 1)),
+                                      firstDate: DateTime.now(),
+                                      lastDate: DateTime(2100),
+                                    );
+                                    if (picked != null) {
+                                      setState(() => _assist!.dataAgendamento = picked);
+                                      // Salvar no Firestore
+                                      await _salvarAlteracoes();
+                                    }
+                                  }
+                                : null,
+                            child: InputDecorator(
+                              decoration: InputDecoration(
+                                labelText: 'Data do agendamento',
+                                prefixIcon: const Icon(Icons.calendar_today_outlined),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              child: Text(
+                                _assist!.dataAgendamento != null
+                                    ? DateFormat('dd/MM/yyyy').format(_assist!.dataAgendamento!)
+                                    : 'Selecionar',
+                                style: TextStyle(
+                                  color: _assist!.dataAgendamento != null ? null : Colors.grey.shade500,
+                                ),
+                              ),
                             ),
                           ),
-                          child: Text(
-                            '${_assist!.totalReagendamentos}º reagend.',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: _assist!.totalReagendamentos >= 2
-                                  ? Colors.red.shade700 : Colors.orange.shade700,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: InkWell(
+                            onTap: _assist!.statusAtual != 'Concluído' && 
+                                  _assist!.statusAtual != 'Cancelado'
+                                ? () async {
+                                    final picked = await showTimePicker(
+                                      context: context,
+                                      initialTime: TimeOfDay.now(),
+                                    );
+                                    if (picked != null) {
+                                      setState(() {
+                                        _assist!.horaAgendamento = 
+                                            '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+                                      });
+                                      // Salvar no Firestore
+                                      await _salvarAlteracoes();
+                                    }
+                                  }
+                                : null,
+                            child: InputDecorator(
+                              decoration: InputDecoration(
+                                labelText: 'Hora do agendamento',
+                                prefixIcon: const Icon(Icons.access_time_outlined),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              child: Text(
+                                _assist!.horaAgendamento != null
+                                    ? _assist!.horaAgendamento!
+                                    : 'Selecionar',
+                                style: TextStyle(
+                                  color: _assist!.horaAgendamento != null ? null : Colors.grey.shade500,
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      const SizedBox(width: 8),
-                      // Botão Reagendar
-                      if (_assist!.statusAtual != 'Concluído' &&
-                          _assist!.statusAtual != 'Cancelado')
-                        OutlinedButton.icon(
-                          onPressed: _reagendar,
-                          icon: const Icon(Icons.event_repeat, size: 14, color: Colors.orange),
-                          label: const Text('Reagendar',
-                              style: TextStyle(fontSize: 12, color: Colors.orange)),
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Colors.orange),
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            minimumSize: Size.zero,
-                          ),
-                        ),
-                    ],
-                  ),
-                  if (_assist!.enderecoTerceiro.isNotEmpty) const Divider(height: 16),
-                ],
+                      ],
+                    ),
 
+                    // 2. Exibição + Reagendamento
+                    if (_assist!.dataAgendamento != null) ...[
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildIconRow(
+                              Icons.calendar_today_outlined,
+                              Colors.orange,
+                              'Data/Hora',
+                              '${DateFormat('dd/MM/yyyy').format(_assist!.dataAgendamento!)}'
+                              '${_assist!.horaAgendamento != null ? ' às ${_assist!.horaAgendamento}' : ''}',
+                            ),
+                          ),
+                          // Contador de reagendamentos
+                          if (_assist!.totalReagendamentos > 0)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: _assist!.totalReagendamentos >= 2
+                                    ? Colors.red.shade50 : Colors.orange.shade50,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: _assist!.totalReagendamentos >= 2
+                                      ? Colors.red.shade300 : Colors.orange.shade300,
+                                ),
+                              ),
+                              child: Text(
+                                '${_assist!.totalReagendamentos}º reagend.',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: _assist!.totalReagendamentos >= 2
+                                      ? Colors.red.shade700 : Colors.orange.shade700,
+                                ),
+                              ),
+                            ),
+                          const SizedBox(width: 8),
+                          // Botão Reagendar
+                          if (_assist!.statusAtual != 'Concluído' &&
+                              _assist!.statusAtual != 'Cancelado')
+                            OutlinedButton.icon(
+                              onPressed: _reagendar,
+                              icon: const Icon(Icons.event_repeat, size: 14, color: Colors.orange),
+                              label: const Text('Reagendar',
+                                  style: TextStyle(fontSize: 12, color: Colors.orange)),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Colors.orange),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                minimumSize: Size.zero,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 16),
+                // ✅ EXIBIR NOME DA OFICINA (quando não está editando)
+                if (_assist!.nomeOficina != null && _assist!.nomeOficina!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.build_outlined, size: 20, color: Colors.orange),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Oficina',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                              Text(
+                                _assist!.nomeOficina!,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 // Oficina
                 if (_assist!.enderecoTerceiro.isNotEmpty)
                   _buildIconRow(Icons.build_outlined, Colors.orange,
@@ -1659,7 +1945,7 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                 color: const Color(0xFFD32F2F),
                 title: 'Relato do Cliente',
                 children: [
-                  Text(_assist!.relatoEvento,
+                  SelectableText(_assist!.relatoEvento,
                       style: const TextStyle(fontSize: 14, height: 1.5)),
                 ],
               ),
@@ -1678,7 +1964,7 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
               ),
               children: [
                 if (_assist!.anotacoes.isEmpty)
-                  Text('Nenhuma anotação.', 
+                  SelectableText('Nenhuma anotação.', 
                       style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
                 ..._assist!.anotacoes.map((a) {
                   final autor = a['autor'] as String? ?? '';
@@ -1695,16 +1981,16 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                           children: [
                             Icon(Icons.person_outline, size: 14, color: Colors.grey.shade500),
                             const SizedBox(width: 4),
-                            Text(autor, style: TextStyle(fontSize: 11,
+                            SelectableText(autor, style: TextStyle(fontSize: 11,
                                 color: Colors.grey.shade600, fontWeight: FontWeight.w600)),
                             const Spacer(),
                             if (dataObj != null)
-                              Text(DateFormat('dd/MM/yyyy HH:mm').format(dataObj),
+                              SelectableText(DateFormat('dd/MM/yyyy HH:mm').format(dataObj),
                                   style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
                           ],
                         ),
                         const SizedBox(height: 4),
-                        Text(conteudo, style: const TextStyle(fontSize: 13, height: 1.4)),
+                        SelectableText(conteudo, style: const TextStyle(fontSize: 13, height: 1.4)),
                       ],
                     ),
                   );
@@ -1911,12 +2197,12 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: _assist!.historicoStatus.length,
-                    separatorBuilder: (_, __) =>
-                        Divider(color: Colors.grey.shade300),
+                    separatorBuilder: (_, __) => Divider(color: Colors.grey.shade300),
                     itemBuilder: (_, idx) {
                       final evento = _assist!.historicoStatus[idx];
                       final status = evento['status'] as String?;
-                      final data = evento['data'] as String?;
+                      final data = _parseHistoricoData(evento['data']);
+                      final registradoPor = evento['registrado_por'] as String?;
 
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1944,15 +2230,25 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                                   ),
                                   Text(
                                     data != null
-                                        ? DateFormat('dd/MM/yyyy HH:mm')
-                                            .format(
-                                                DateTime.parse(data))
+                                        ? DateFormat('dd/MM/yyyy HH:mm').format(data)
                                         : '--',
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: Colors.grey.shade600,
                                     ),
                                   ),
+                                  if (registradoPor != null && registradoPor.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: Text(
+                                        'Registrado por: $registradoPor',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.grey.shade500,
+                                          fontStyle: FontStyle.italic,
+                                        ),
+                                      ),
+                                    ),
                                 ],
                               ),
                             ),
@@ -2045,13 +2341,13 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                   style: const TextStyle(
                       fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600)),
               const SizedBox(height: 2),
-              Text(value, style: const TextStyle(fontSize: 13)),
+              SelectableText(value, style: const TextStyle(fontSize: 13)),
             ],
           ),
         ),
       ],
     );
-  }
+}
 
   Widget _buildSection({
     required String title,
@@ -2060,70 +2356,76 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
     Color? color,
     Widget? trailing,
   }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
+    return Card(
+      elevation: 2,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (icon != null) ...[
-              Icon(icon, size: 16, color: color ?? const Color(0xFF1A1A2E)),
-              const SizedBox(width: 6),
-            ],
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: color ?? const Color(0xFF1A1A2E),
-              ),
+            Row(
+              children: [
+                if (icon != null) ...[
+                  Icon(
+                    icon, 
+                    size: 20,
+                    color: color ?? const Color(0xFF1A1A2E)
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: color ?? const Color(0xFF1A1A2E),
+                  ),
+                ),
+                if (trailing != null) ...[
+                  const Spacer(),
+                  trailing,
+                ],
+              ],
             ),
-            if (trailing != null) ...[
-              const Spacer(),
-              trailing,
-            ],
+            const Divider(height: 20),
+            ...children,
           ],
         ),
-        const SizedBox(height: 8),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: children,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 80,
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 12,
-                color: Colors.grey,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 13),
-            ),
-          ),
-        ],
       ),
     );
   }
+
+Widget _buildInfoRow(String label, String value) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 80,
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+              color: Colors.grey,
+            ),
+          ),
+        ),
+        Expanded(
+          child: SelectableText(
+            value,
+            style: const TextStyle(fontSize: 13),
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
   Color _getStatusColor(String status) {
     switch (status) {
@@ -2514,6 +2816,19 @@ class _AssistDocChip extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    return newValue.copyWith(
+      text: newValue.text.toUpperCase(),
+      selection: newValue.selection,
     );
   }
 }

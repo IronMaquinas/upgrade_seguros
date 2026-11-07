@@ -78,6 +78,10 @@ exports.uploadFile = functions.https.onRequest(async (request, response) => {
   });
 });
 
+// Importar as funções de notificação
+const { verificarAssistenciasAtradasTelegram } = require("./notificacoes-telegram");
+exports.verificarAssistenciasAtradasTelegram = verificarAssistenciasAtradasTelegram;
+
 // ✅ ✅ ✅ ADICIONE ESTA NOVA FUNÇÃO
 exports.deleteFiles = functions.https.onRequest(async (request, response) => {
   cors(request, response, async () => {

@@ -2,6 +2,7 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:upgrade_seguros/services/notification_service.dart';
 import 'package:upgrade_seguros/services/sla_monitor_service.dart';
@@ -97,6 +98,17 @@ Future<void> main() async {
         navigatorKey: navigatorKey,  // 🔥 3. Use a mesma chave
         title: 'Upgrade Corretora',
         debugShowCheckedModeBanner: false,
+        // ✨ LOCALIZAÇÕES PARA PORTUGUÊS
+        locale: const Locale('pt', 'BR'),
+        supportedLocales: const [
+          Locale('pt', 'BR'),
+          Locale('en', 'US'),
+        ],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
         theme: ThemeData(
           primarySwatch: Colors.blue,
           visualDensity: VisualDensity.adaptivePlatformDensity,

@@ -1,4 +1,7 @@
+// lib/models/claim_model.dart
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:upgrade_seguros/models/business_model.dart';
 import 'package:upgrade_seguros/models/house_model.dart';
 import 'package:upgrade_seguros/models/life_model.dart';
 import 'package:upgrade_seguros/models/machinery_model.dart';
@@ -6,6 +9,8 @@ import 'package:upgrade_seguros/models/third_party_model.dart';
 import 'package:upgrade_seguros/models/transport_model.dart';
 import 'package:upgrade_seguros/models/vehicle_model.dart';
 import 'package:upgrade_seguros/models/workshop_model.dart';
+import 'package:upgrade_seguros/models/bodily_injury_model.dart';
+import 'package:upgrade_seguros/models/material_damage_model.dart';
 
 // Enum para tipos de atendimento
 enum TipoAtendimento {
@@ -53,8 +58,10 @@ class Claim {
   String idCliente;
   String numeroSinistro;
   String tipoOcorrencia;
+  String? tipoOcorrenciaOutro;
   String ramoSinistro;
   DateTime dataOcorrencia;
+  String? horaOcorrencia;
   DateTime dataAviso;
   String localOcorrencia;
   String relatoEvento;
@@ -70,24 +77,26 @@ class Claim {
   List<Map<String, dynamic>> historicoStatus;
   List<Map<String, dynamic>> anotacoes;
   List<ThirdParty> terceiros;
+  List<BodilyInjury> danoscorporais;
+  List<MaterialDamage> danosmateriais;
   Vehicle? veiculoSelecionado;
   Transport? transporte;
-  Machinery? maquinaria;  // 🆕 Novo campo para Máquinas
+  Machinery? maquinaria;
   double valorTotalSinistro;
   String clientNome;
   String clientCnpjCpf;
   String numeroSeguradora;
   String seguradora;
   String status;
-  final House? house;
-  final Life? life;
-  final Workshop? workshop;
+  House? house;
+  Life? life;
+  Workshop? workshop;
   List<Workshop> oficinas;
   String enderecoTerceiro;
   String? localDestino;         // destino do bem segurado (ex: oficina) — só assistência
-  String? nomeContato;
+  String? nomeContato;          // Nome do contato no local da ocorrência
   String? telefoneCliente;      // telefone do cliente copiado no momento da abertura
-  String? telefoneContatoLocal;
+  String? telefoneContatoLocal; // telefone de contato no local da ocorrência
   String? protocoloSeguradora;
   double valorFranquia;
   DateTime? dataAgendamento;   // data do agendamento da assistência
@@ -103,11 +112,20 @@ class Claim {
   int? tempoSlaMinutos; // Tempo configurado para este tipo de assistência
   String? nomeContatoOficina;
   String? telefoneContatoOficina;
+  String? nomeOficina;        // ✨ NOME DA OFICINA
+  String? enderecoOficina;    // ✨ ENDEREÇO DA OFICINA
   bool npsAvaliada;
   double? npsSatisfacao;
   String? npsCategoria;
   int totalReagendamentos;
   Timestamp? dataConclusao;
+  Business? business;
+  String? nomeContatoSinistro;
+  String? telefoneContatoSinistro;
+  String? responsavelEmail;
+  DateTime? dataRecebimentoComunicado;
+  String? horaRecebimentoComunicado;
+  String? apoliceId;
 
   Claim({
     this.id = '',
@@ -115,8 +133,10 @@ class Claim {
     required this.idCliente,
     required this.numeroSinistro,
     required this.tipoOcorrencia,
+    this.tipoOcorrenciaOutro,
     required this.ramoSinistro,
     required this.dataOcorrencia,
+    this.horaOcorrencia,
     required this.dataAviso,
     required this.localOcorrencia,
     required this.relatoEvento,
@@ -131,6 +151,8 @@ class Claim {
     this.historicoStatus = const [],
     this.anotacoes = const [],
     this.terceiros = const [],
+    this.danoscorporais = const [],
+    this.danosmateriais = const [],
     this.veiculoSelecionado,
     this.transporte,
     this.workshop,
@@ -163,11 +185,20 @@ class Claim {
     this.tempoSlaMinutos,
     this.nomeContatoOficina,
     this.telefoneContatoOficina,
+    this.nomeOficina,
+    this.enderecoOficina,
     this.totalReagendamentos = 0,
     this.npsAvaliada = false,
     this.npsSatisfacao,
     this.npsCategoria,
     this.dataConclusao,
+    this.business,
+    this.nomeContatoSinistro,
+    this.telefoneContatoSinistro,
+    this.responsavelEmail,
+    this.dataRecebimentoComunicado,
+    this.horaRecebimentoComunicado,
+    this.apoliceId,
   });
 
   // Helper para verificar se é sinistro
@@ -206,8 +237,10 @@ class Claim {
       'responsavel_id': responsavelId,
       'numero_sinistro': numeroSinistro,
       'tipo_ocorrencia': tipoOcorrencia,
+      if (tipoOcorrenciaOutro != null) 'tipo_ocorrencia_outro': tipoOcorrenciaOutro,
       'ramo_sinistro': ramoSinistro,
       'data_ocorrencia': Timestamp.fromDate(dataOcorrencia),
+      if (horaOcorrencia != null) 'hora_ocorrencia': horaOcorrencia,
       'data_aviso': Timestamp.fromDate(dataAviso),
       'local_ocorrencia': localOcorrencia,
       'relatoEvento': relatoEvento,
@@ -223,6 +256,8 @@ class Claim {
       'historico_status': historicoStatus,
       'anotacoes': anotacoes,
       'terceiros': terceiros.map((tp) => tp.toMap()).toList(),
+      'danos_corporais': danoscorporais.map((d) => d.toMap()).toList(),
+      'danos_materiais': danosmateriais.map((d) => d.toMap()).toList(),
       'veiculo_selecionado': veiculoSelecionado?.toMap(),
       'transporte': transporte?.toMap(),
       'workshop': workshop?.toMap(),
@@ -232,6 +267,8 @@ class Claim {
       'client_cnpj_cpf': clientCnpjCpf,
       'numero_seguradora': numeroSeguradora,
       'seguradora': seguradora,
+      'nomeContatoSinistro': nomeContatoSinistro,
+      'telefoneContatoSinistro': telefoneContatoSinistro,
       if (telefoneContatoLocal != null) 'telefone_contato_local': telefoneContatoLocal,
       'status': status,
       'oficinas': oficinas.map((o) => o.toMap()).toList(),
@@ -255,11 +292,18 @@ class Claim {
       if (tempoSlaMinutos != null) 'tempo_sla_minutos': tempoSlaMinutos,
       if (nomeContatoOficina != null) 'nome_contato_oficina': nomeContatoOficina,
       if (telefoneContatoOficina != null) 'telefone_contato_oficina': telefoneContatoOficina,
+      if (nomeOficina != null) 'nome_oficina': nomeOficina,
+      if (enderecoOficina != null) 'endereco_oficina': enderecoOficina,
       'total_reagendamentos': totalReagendamentos,
       'nps_avaliada': npsAvaliada,
       if (npsSatisfacao != null) 'nps_satisfacao': npsSatisfacao,
       if (npsCategoria != null) 'nps_categoria': npsCategoria,
       'dataConclusao': dataConclusao,
+      'business': business?.toMap(),
+      if (responsavelEmail != null) 'responsavel_email': responsavelEmail,
+      if (dataRecebimentoComunicado != null) 'data_recebimento_comunicado': Timestamp.fromDate(dataRecebimentoComunicado!),
+      if (horaRecebimentoComunicado != null && horaRecebimentoComunicado!.isNotEmpty) 'hora_recebimento_comunicado': horaRecebimentoComunicado,
+      if (apoliceId != null) 'apolice_id': apoliceId,
     };
   }
 
@@ -270,8 +314,10 @@ class Claim {
       idCliente: map['id_cliente'] ?? '',
       numeroSinistro: map['numero_sinistro'] ?? '',
       tipoOcorrencia: map['tipo_ocorrencia'] ?? '',
+      tipoOcorrenciaOutro: map['tipo_ocorrencia_outro'],
       ramoSinistro: map['ramo_sinistro'] ?? '',
       dataOcorrencia: (map['data_ocorrencia'] as Timestamp).toDate(),
+      horaOcorrencia: map['hora_ocorrencia'] as String?,
       dataAviso: map['data_aviso'] != null
           ? (map['data_aviso'] as Timestamp).toDate()
           : (map['data_ocorrencia'] as Timestamp).toDate(),
@@ -298,6 +344,12 @@ class Claim {
       terceiros: (map['terceiros'] as List<dynamic>?)
               ?.map((tp) => ThirdParty.fromMap(tp as Map<String, dynamic>))
               .toList() ?? [],
+      danoscorporais: (map['danos_corporais'] as List<dynamic>?)
+              ?.map((d) => BodilyInjury.fromMap(d as Map<String, dynamic>))
+              .toList() ?? [],
+      danosmateriais: (map['danos_materiais'] as List<dynamic>?)
+              ?.map((d) => MaterialDamage.fromMap(d as Map<String, dynamic>))
+              .toList() ?? [],       
       veiculoSelecionado: map['veiculo_selecionado'] != null
           ? Vehicle.fromMap(Map<String, dynamic>.from(map['veiculo_selecionado']))
           : null,
@@ -345,11 +397,24 @@ class Claim {
       tempoSlaMinutos: map['tempo_sla_minutos'],
       nomeContatoOficina: map['nome_contato_oficina'],
       telefoneContatoOficina: map['telefone_contato_oficina'],
+      nomeOficina: map['nome_oficina'],
+      enderecoOficina: map['endereco_oficina'],
       totalReagendamentos: (map['total_reagendamentos'] ?? 0).toInt(),
       npsAvaliada: map['nps_avaliada'] ?? false,
       npsSatisfacao: (map['nps_satisfacao'] as num?)?.toDouble(),
       npsCategoria: map['nps_categoria'],
       dataConclusao: map['dataConclusao'] as Timestamp?,
+            business: map['business'] != null 
+          ? Business.fromMap(map['business']) 
+          : null,
+      nomeContatoSinistro: map['nomeContatoSinistro'] as String?,
+      telefoneContatoSinistro: map['telefoneContatoSinistro'] as String?,
+      responsavelEmail: map['responsavel_email'] as String?,
+      apoliceId: map['apolice_id'] as String?,
+      dataRecebimentoComunicado: map['data_recebimento_comunicado'] != null
+        ? (map['data_recebimento_comunicado'] as Timestamp).toDate()
+        : null,
+      horaRecebimentoComunicado: map['hora_recebimento_comunicado'] as String?,
     );
   }
 

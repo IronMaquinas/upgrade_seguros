@@ -1,14 +1,27 @@
 // lib/models/config_model.dart
+
 class AppConfig {
   String id; // sempre 'config'
+
+  // SLAs existentes
   int slaSinistrosDias;
   bool enableNpsSurvey;
-  Map<String, int> slaAsistenciasPorTipo; // {'Veicular': 30, 'Residencial': 60}
-  Map<String, int> slaSinistrosPorRamo; // {'Frota': 7, 'Veículo': 10, ...}
+  Map<String, int> slaAsistenciasPorTipo;
+  Map<String, int> slaSinistrosPorRamo;
 
+  // 🔥 NOVOS CAMPOS DE NOTIFICAÇÃO
+  bool notificacoesAtivas;                  // true/false – liga/desliga global
+  String notificacaoHorarioInicio;          // "22:00"
+  String notificacaoHorarioFim;             // "08:00"
+  int notificacaoIntervaloMinutos;          // 30 – reenvio a cada X minutos
+  int notificacaoAtrasoMinimo;              // 30 – atraso mínimo para disparar
+  List<String> notificacaoTelegramChatIds;  // lista de chat_ids
+
+  // Construtor principal
   AppConfig({
     required this.id,
     this.slaSinistrosDias = 10,
+    this.enableNpsSurvey = true,
     this.slaAsistenciasPorTipo = const {'Veicular': 30, 'Residencial': 60},
     this.slaSinistrosPorRamo = const {
       'Veículo Individual': 10,
@@ -18,7 +31,13 @@ class AppConfig {
       'Residencial': 10,
       'Vida': 10,
     },
-    this.enableNpsSurvey = true,
+    // Novos campos com valores padrão
+    this.notificacoesAtivas = true,
+    this.notificacaoHorarioInicio = "22:00",
+    this.notificacaoHorarioFim = "08:00",
+    this.notificacaoIntervaloMinutos = 30,
+    this.notificacaoAtrasoMinimo = 30,
+    this.notificacaoTelegramChatIds = const [],
   });
 
   Map<String, dynamic> toMap() {
@@ -28,6 +47,13 @@ class AppConfig {
       'slaAsistenciasPorTipo': slaAsistenciasPorTipo,
       'slaSinistrosPorRamo': slaSinistrosPorRamo,
       'enableNpsSurvey': enableNpsSurvey,
+      // Novos campos
+      'notificacoesAtivas': notificacoesAtivas,
+      'notificacaoHorarioInicio': notificacaoHorarioInicio,
+      'notificacaoHorarioFim': notificacaoHorarioFim,
+      'notificacaoIntervaloMinutos': notificacaoIntervaloMinutos,
+      'notificacaoAtrasoMinimo': notificacaoAtrasoMinimo,
+      'notificacaoTelegramChatIds': notificacaoTelegramChatIds,
     };
   }
 
@@ -49,6 +75,15 @@ class AppConfig {
         },
       ),
       enableNpsSurvey: map['enableNpsSurvey'] ?? true,
+      // Novos campos com fallback
+      notificacoesAtivas: map['notificacoesAtivas'] ?? true,
+      notificacaoHorarioInicio: map['notificacaoHorarioInicio'] ?? "22:00",
+      notificacaoHorarioFim: map['notificacaoHorarioFim'] ?? "08:00",
+      notificacaoIntervaloMinutos: map['notificacaoIntervaloMinutos'] ?? 30,
+      notificacaoAtrasoMinimo: map['notificacaoAtrasoMinimo'] ?? 30,
+      notificacaoTelegramChatIds: List<String>.from(
+        map['notificacaoTelegramChatIds'] ?? [],
+      ),
     );
   }
 }

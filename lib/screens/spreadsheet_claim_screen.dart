@@ -1,17 +1,4 @@
 // lib/screens/spreadsheet_claim_screen.dart
-//
-// TELA DE ENTRADA RÁPIDA — ESTILO PLANILHA
-// ─────────────────────────────────────────
-// Design: entrada fluída em 4 grupos hierárquicos (Apólice → Veículos →
-// Terceiros → Acompanhamento). Navegação por Tab/Enter como no Excel.
-// Autosave automático: o sinistro é salvo ao avançar de grupo ou ao sair.
-// Sem botões "Salvar X antes de continuar". Pensado para uso no computador.
-//
-// Como integrar:
-//   Adicione um terceiro FAB no dashboard/lista, ou substitua o QuickClaimScreen
-//   quando o usuário estiver no desktop (kIsWeb && largura > 900).
-//
-// ignore_for_file: use_build_context_synchronously
 
 import 'dart:async';
 import 'dart:io';
@@ -26,12 +13,15 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
+import 'package:upgrade_seguros/dialogs/apolice_selection_dialog.dart';
+import 'package:upgrade_seguros/models/business_model.dart';
 import 'package:upgrade_seguros/models/config_model.dart';
 import 'package:upgrade_seguros/models/third_party_model.dart';
 import 'package:upgrade_seguros/models/transport_model.dart';
 import 'package:upgrade_seguros/models/vehicle_model.dart';
 import 'package:upgrade_seguros/services/config_service.dart';
 import 'package:upgrade_seguros/utils/formatters.dart';
+import 'package:uuid/uuid.dart';
 import '../models/claim_model.dart';
 import '../models/client_model.dart';
 import '../models/apolice_model.dart';
@@ -47,6 +37,8 @@ import 'package:flutter_google_places_sdk/flutter_google_places_sdk.dart' hide L
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:upgrade_seguros/services/place_search_delegate.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
+import 'package:upgrade_seguros/models/bodily_injury_model.dart';
+import 'package:upgrade_seguros/models/material_damage_model.dart';
 
  enum RelatoStep {
     situacao,
@@ -170,6 +162,12 @@ class _TerceirosListWidgetState extends State<_TerceirosListWidget> {
         'ano': TextEditingController(text: widget.terceiros[i]['ano'] ?? ''),
         'anoModelo': TextEditingController(text: widget.terceiros[i]['anoModelo'] ?? ''),
         'cor': TextEditingController(text: widget.terceiros[i]['cor'] ?? ''),
+        
+        // ✨ NOVOS CAMPOS
+        'nomeContatoTerceiro': TextEditingController(text: widget.terceiros[i]['nomeContatoTerceiro'] ?? ''),
+        'telefoneContatoTerceiro': TextEditingController(text: widget.terceiros[i]['telefoneContatoTerceiro'] ?? ''),
+        'registroSeguradoraTerceiro': TextEditingController(text: widget.terceiros[i]['registroSeguradoraTerceiro'] ?? ''),
+        
         'relato': TextEditingController(text: widget.terceiros[i]['relato'] ?? ''),
       };
       
@@ -177,6 +175,7 @@ class _TerceirosListWidgetState extends State<_TerceirosListWidget> {
       _formatters[i] = {
         'cpf': _cpfCnpjFormatter,
         'contato': _telefoneFormatter,
+        'telefoneContatoTerceiro': _telefoneFormatter,
       };
     }
   }
@@ -277,13 +276,10 @@ class _TerceirosListWidgetState extends State<_TerceirosListWidget> {
   @override
   void didUpdateWidget(_TerceirosListWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Se o número de terceiros mudou, recria todos
     if (widget.terceiros.length != oldWidget.terceiros.length) {
       _initializeControllers();
       return;
     }
-    // Se o tamanho é o mesmo, recria todos os controllers para garantir sincronia
-    // Isso resolve o problema de mutação direta dos maps
     _initializeControllers();
   }
 
@@ -362,19 +358,26 @@ class _TerceirosListWidgetState extends State<_TerceirosListWidget> {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    
                     // Campos de texto do terceiro
-                    _buildTerceiroField(
-                      label: 'Nome',
-                      controller: ctrls['nome'],
-                      onChanged: (val) => widget.onEditField(index, 'nome', val),
-                    ),
-                    const SizedBox(height: 8),
-                    _buildTerceiroField(
-                      label: 'CPF',
-                      controller: ctrls['cpf'],
-                      inputFormatters: [_cpfCnpjFormatter],  // 🆕 ADICIONE ISSO
-                      onChanged: (val) => widget.onEditField(index, 'cpf', val),
+                    Row(
+                      children: [
+                        Expanded (
+                        child: _buildTerceiroField(
+                          label: 'Nome',
+                          controller: ctrls['nome'],
+                          onChanged: (val) => widget.onEditField(index, 'nome', val),
+                        ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded (
+                        child: _buildTerceiroField(
+                          label: 'CPF',
+                          controller: ctrls['cpf'],
+                          inputFormatters: [BRFormatters.cpfCnpjFormatter],
+                          onChanged: (val) => widget.onEditField(index, 'cpf', val),
+                        ),
+                        )
+                      ]
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -383,7 +386,7 @@ class _TerceirosListWidgetState extends State<_TerceirosListWidget> {
                           child: _buildTerceiroField(
                             label: 'Telefone',
                             controller: ctrls['contatoSegurado'],
-                            inputFormatters: [_telefoneFormatter],  // 🆕 ADICIONE ISSO
+                            inputFormatters: [_telefoneFormatter],
                             onChanged: (val) => widget.onEditField(index, 'contato', val),
                           ),
                         ),
@@ -472,11 +475,11 @@ class _TerceirosListWidgetState extends State<_TerceirosListWidget> {
                           child: _buildTerceiroField(
                             label: 'Ano Fabr.',
                             controller: ctrls['ano'],
-                            keyboardType: TextInputType.number, // 👈 ADICIONA
+                            keyboardType: TextInputType.number,
                             inputFormatters: [
                               FilteringTextInputFormatter.digitsOnly,
                               LengthLimitingTextInputFormatter(4),
-                            ], // 👈 ADICIONA
+                            ],
                             onChanged: (val) => widget.onEditField(index, 'ano', val),
                           ),
                         ),
@@ -485,14 +488,44 @@ class _TerceirosListWidgetState extends State<_TerceirosListWidget> {
                           child: _buildTerceiroField(
                             label: 'Ano Modelo',
                             controller: ctrls['anoModelo'],
-                            keyboardType: TextInputType.number, // 👈 ADICIONA
+                            keyboardType: TextInputType.number,
                             inputFormatters: [
                               FilteringTextInputFormatter.digitsOnly,
                               LengthLimitingTextInputFormatter(4),
-                            ], // 👈 ADICIONA
+                            ],
                             onChanged: (val) => widget.onEditField(index, 'anoModelo', val),
                           ),
                         ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    // ✨ CONTATO DO TERCEIRO
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildTerceiroField(
+                            label: 'Nome de Contato do Terceiro',
+                            controller: ctrls['nomeContatoTerceiro'],
+                            onChanged: (val) => widget.onEditField(index, 'nomeContatoTerceiro', val),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildTerceiroField(
+                            label: 'Telefone de Contato do Terceiro',
+                            controller: ctrls['telefoneContatoTerceiro'],
+                            inputFormatters: [_telefoneFormatter],
+                            onChanged: (val) => widget.onEditField(index, 'telefoneContatoTerceiro', val),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                          Expanded(
+                            child: _buildTerceiroField(
+                              label: 'Nº de Registro do Sinistro do Terceiro',
+                              controller: ctrls['registroSeguradoraTerceiro'],
+                              onChanged: (val) => widget.onEditField(index, 'registroSeguradoraTerceiro', val),
+                            ),
+                          ),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -855,6 +888,8 @@ class _Field {
   final bool isAutocomplete;
   final List<String>? autocompleteOptions;
   final VoidCallback? onTap;
+  final bool isTime;
+  final bool isCheckbox; 
 
   const _Field({
     required this.id,
@@ -870,10 +905,12 @@ class _Field {
     this.flex = 1,
     this.inputFormatters,
     this.suffixBuilder,
-    this.isReadOnly = false,  // 🆕 Default false
+    this.isReadOnly = false,
     this.isAutocomplete = false,
     this.autocompleteOptions,
     this.onTap,
+    this.isTime = false,
+    this.isCheckbox = false,
   });
 }
 
@@ -883,7 +920,7 @@ class _Group {
   final String title;
   final IconData icon;
   final Color color;
-  final List<List<_Field>> rows; // cada lista interna = uma linha horizontal
+  final List<List<_Field>> rows;
 
   const _Group({
     required this.id,
@@ -910,7 +947,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
   final _firestoreService = FirestoreService();
   final _authService = AuthService();
   final GlobalKey<_TerceirosListWidgetState> _terceirosKey = GlobalKey();
-  bool _condutorEhProprietario = true;
+  bool _condutorEhProprietario = false;
 
   // ── Estado geral ──────────────────────────────────────────────────────────
   bool _isSaving = false;
@@ -919,9 +956,10 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
   String _saveStatus = ''; // feedback inline
   String? _ramoSelecionado;
   bool _isApplyingMask = false;
+  String _nomeUsuarioLogado = 'Desconhecido';
+  String? _selectedApoliceId;
 
   // FUNÇÃO PARA AUTO GERAR RELATO
- 
   RelatoStep _stepAtualRelato = RelatoStep.situacao;
 
   Map<RelatoStep, String> _respostasRelato = {};
@@ -952,6 +990,17 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
     ],
   };
 
+  bool _localOcorrenciaManualMode = false;
+
+  // --- Verifica se há alterações ---
+  bool get _hasUnsavedChanges {
+    if (_savedOnce) return false;
+    final hasText = _ctrl.values.any((c) => c.text.isNotEmpty);
+    final hasTerceiros = _terceiros.isNotEmpty;
+    final hasAnexos = _anexos.values.any((list) => list.isNotEmpty);
+    return hasText || hasTerceiros || hasAnexos;
+  }
+
   // ── Cliente ───────────────────────────────────────────────────────────────
   Client? _cliente;
   bool _isNovoCliente = false;
@@ -964,10 +1013,12 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
   LatLng? _localOcorrenciaLatLng;
 
   // ── Grupos expandidos ─────────────────────────────────────────────────────
-  final Set<String> _expanded = {'apolice', 'veiculo', 'terceiros', 'acomp', 'anexos'};
+  final Set<String> _expanded = {'apolice', 'veiculo', 'terceiros', 'danoscorporais', 'danosmateriais', 'acomp', 'anexos', 'vida', 'residencial', 'maquinas', 'empresarial'};
 
   // 🆕 LISTA DE MÚLTIPLOS TERCEIROS (com fotos e documentos)
   List<Map<String, dynamic>> _terceiros = [];
+  List<Map<String, dynamic>> _danoscorporais = [];
+  List<Map<String, dynamic>> _danosmateriais = [];
 
   // -- Ajustes do correção de upload
   String? _currentClaimId;
@@ -978,6 +1029,40 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
 
   // CARREGA SEGURADORAS
   List<String> _seguradoras = [];
+
+  // --- Pop up para sair sem salvar ---
+  Future<bool> _onWillPop() async {
+    if (!_hasUnsavedChanges) {
+      return true; // Pode sair sem aviso
+    }
+
+    // Mostra diálogo de confirmação
+    final shouldPop = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false, // impede fechar ao clicar fora
+      builder: (context) => AlertDialog(
+        title: const Text('Sair sem salvar?'),
+        content: const Text(
+          'Você tem alterações não salvas. Tem certeza que deseja sair?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text(
+              'Sair',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return shouldPop ?? false;
+  }
 
   final Map<String, List<XFile>> _anexos = {
     'Fotos do Sinistro': [],
@@ -1029,12 +1114,10 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
   // 🆕 CALCULAR STATUS DO SINISTRO (comparar com gatilho)
   StatusSinistro _statusSinistro(String valorSinistroStr, String usoAtualStr, String gatilhoStr) {
     try {
-      // Converte para double (remove formatação R$ e converte . para ,)
-      // Primeiro remove R$ e espaços, depois tira pontos de milhar, depois converte vírgula em ponto
       final valorSinistro = double.tryParse(
         valorSinistroStr
-          .replaceAll(RegExp(r'[^\d,]'), '') // Remove tudo exceto dígitos e vírgula
-          .replaceAll(',', '.')               // Converte , para .
+          .replaceAll(RegExp(r'[^\d,]'), '')
+          .replaceAll(',', '.')
       ) ?? 0.0;
       
       final usoAtual = double.tryParse(
@@ -1196,7 +1279,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
                 required: true,
                 flex: 2,
               ),
-              const _Field(id: 'numeroSinistroSeguradora', label: 'Nº Sinistro Seguradora', flex: 2,),
+              const _Field(id: 'numeroSinistroSeguradora', label: 'Nº Sinistro do Seguradorado', flex: 2,),
               const _Field(id: 'numeroApolice', label: 'Nº Apólice', flex: 2,),
               _Field(
                 id: 'dataVigenciaFim',
@@ -1241,6 +1324,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
             ],
             [
               const _Field(id: 'dataSinistro', label: 'Data do Sinistro', hint: 'DD/MM/AAAA', isDate: true, keyboard: TextInputType.number, required: true,flex: 1,),
+              const _Field(id: 'horaOcorrencia', label: 'Hora do Sinistro', hint: 'HH:mm', isTime: true, keyboard: TextInputType.number, flex: 1),
               const _Field(id: 'dataAviso', label: 'Data do Aviso', hint: 'DD/MM/AAAA', isDate: true, keyboard: TextInputType.number, flex: 1,),
               const _Field(id: 'tipoPerda', label: 'Tipo de Perda', isDropdown: true, options: ['PARCIAL', 'TOTAL'], flex: 1,),
               const _Field(
@@ -1286,7 +1370,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
               ),
               _Field(
                 id: 'slaPrevisto',
-                label: 'Tempo Previsto para Encerramento',
+                label: 'Dias para Encerramento',
                 hint: '0 dias',
                 keyboard: TextInputType.number,
                 flex: 1,
@@ -1307,49 +1391,48 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
             ],
           ],
         ),
-
         _Group(
           id: 'veiculo',
           title: 'Veículo Segurado',
           icon: Icons.directions_car_outlined,
           color: const Color(0xFF2E7D32),
           rows: [
+            // Linha 1: Proprietário Legal
             [
-              const _Field(id: 'nomeCondutor', label: 'Nome do Condutor', flex: 3,),
-              _Field(id: 'cpfCondutor', label: 'CPF / CNPJ do Condutor', keyboard: TextInputType.number, flex: 2,inputFormatters: [BRFormatters.cpfCnpjFormatter],),
+              const _Field(id: 'nomeCondutor', label: 'Nome do Proprietário Legal', flex: 3),
+              _Field(id: 'cpfCondutor', label: 'CPF / CNPJ do Proprietário Legal', keyboard: TextInputType.number, flex: 2, inputFormatters: [BRFormatters.cpfCnpjFormatter]),
             ],
-            
+            // Linha 2: Placa, Marca/Modelo, Cor
             [
-              const _Field(id: 'placaSegurado', label: 'Placa', isUpperCase: true, required: true, flex: 1,),
-              const _Field(id: 'marca', label: 'Marca', flex: 3,),
-              const _Field(id: 'modelo', label: 'Modelo', flex: 3,),
-              const _Field(id: 'cor', label: 'Cor', flex: 3,),
-            ],  
+              const _Field(id: 'placaSegurado', label: 'Placa', flex: 1),
+              const _Field(id: 'marca', label: 'Marca/Modelo', flex: 2),
+              const _Field(id: 'cor', label: 'Cor', flex: 1),
+            ],
+            // Linha 3: Chassi, Ano, Ano Modelo
+            [
+              const _Field(id: 'chassi', label: 'Chassi', flex: 2),
+              const _Field(id: 'ano', label: 'Ano', keyboard: TextInputType.number, flex: 1),
+              const _Field(id: 'anoModelo', label: 'Ano Modelo', keyboard: TextInputType.number, flex: 1),
+            ],
+            // Linha 4: Checkbox (usando campo placeholder)
             [
               _Field(
-                id: 'ano',
-                label: 'Ano Fabr.',
-                hint: 'Ex: 2020',
-                keyboard: TextInputType.number,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(4),
-                ],
+                id: '_checkbox_condutor',
+                label: '',
                 flex: 1,
+                isCheckbox: true,
               ),
-
-              _Field(
-                id: 'anoModelo',
-                label: 'Ano Modelo',
-                hint: 'Ex: 2021',
-                keyboard: TextInputType.number,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(4),
-                ],
-                flex: 1,
-              ),
-              const _Field(id: 'chassi', label: 'Chassi', flex: 3,),
+            ],
+            // Linha 5: Condutor Motorista
+            [
+              const _Field(id: 'nomeCondutorMotorista', label: 'Nome do Condutor do Veículo', flex: 2),
+              _Field(id: 'cpfCondutorMotorista', label: 'CPF / CNPJ do Condutor do Veículo', keyboard: TextInputType.number, flex: 2, inputFormatters: [BRFormatters.cpfCnpjFormatter]),
+              _Field(id: 'cnhCondutorMotorista', label: 'CNH do Condutor do Veículo', keyboard: TextInputType.number, flex: 2),
+            ],
+            // Linha 6: Contato do Sinistro
+            [
+              _Field(id: 'nomeContatoSinistro', label: 'Nome do Contato do Sinistro', flex: 3),
+              _Field(id: 'telefoneContatoSinistro', label: 'Telefone de Contato', keyboard: TextInputType.phone, inputFormatters: [BRFormatters.telefoneFormatter], flex: 2),
             ],
           ],
         ),
@@ -1361,6 +1444,24 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
           icon: Icons.people_outlined,
           color: const Color(0xFF6A1B9A),
           rows: [], // Este grupo será renderizado como widget customizado
+        ),
+
+        // 🆕 NOVO GRUPO: DANOS CORPORAIS
+        _Group(
+          id: 'danoscorporais',
+          title: 'Danos Corporais',
+          icon: Icons.medical_information_outlined,
+          color: const Color(0xFFD32F2F),
+          rows: [],
+        ),
+
+        // 🆕 NOVO GRUPO: DANOS MATERIAIS
+        _Group(
+          id: 'danosmateriais',
+          title: 'Danos Materiais',
+          icon: Icons.construction_outlined,
+          color: const Color(0xFFF57F17),
+          rows: [],
         ),
 
         _Group(
@@ -1387,7 +1488,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
             ],
           ],
         ),
-      ];
+    ];
 
   List<_Group> _buildTransporteGroups() => [
     _Group(
@@ -1491,6 +1592,39 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
         ],
         [
           const _Field(id: 'tipoImovel', label: 'Tipo de Imóvel', flex: 2),
+          const _Field(id: 'valorImovel', label: 'Valor do Imóvel (R\$)', flex: 2),  // ← novo
+        ],
+      ],
+    ),
+  ];
+
+  List<_Group> _buildEmpresarialGroups() => [
+    _Group(
+      id: 'empresarial',
+      title: 'Dados da Empresa',
+      icon: Icons.business_outlined,
+      color: const Color(0xFF424242),
+      rows: [
+        [
+          const _Field(id: 'nomeEmpresa', label: 'Nome da Empresa', flex: 3),
+        ],
+        [
+          const _Field(id: 'cnpjEmpresa', label: 'CNPJ', flex: 2),
+          const _Field(id: 'ramoAtividade', label: 'Ramo de Atividade', flex: 2),
+        ],
+        [
+          const _Field(id: 'enderecoEmpresa', label: 'Endereço', flex: 3),
+        ],
+        [
+          const _Field(id: 'areaM2', label: 'Área (m²)', flex: 2),
+          const _Field(id: 'tipoEstrutura', label: 'Tipo de Estrutura', flex: 2),
+        ],
+        [
+          const _Field(id: 'numeroAndares', label: 'Número de Andares', flex: 2),
+          const _Field(id: 'sistemaSeguranca', label: 'Sistema de Segurança', flex: 2),
+        ],
+        [
+          const _Field(id: 'situacaoImovel', label: 'Situação (Próprio/Alugado)', flex: 3),
         ],
       ],
     ),
@@ -1508,7 +1642,13 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
           const _Field(id: 'cpfSegurado', label: 'CPF', flex: 2),
         ],
         [
-          const _Field(id: 'tipoEvento', label: 'Tipo de Evento', flex: 2),
+          const _Field(id: 'idadeSegurado', label: 'Idade', flex: 1),
+          const _Field(id: 'parentesco', label: 'Parentesco', flex: 2),
+          const _Field(id: 'tipoEvento', label: 'Causa / Tipo de Evento', flex: 3),
+        ],
+        [
+          const _Field(id: 'telefone', label: 'Telefone', flex: 2),
+          const _Field(id: 'email', label: 'Email', flex: 3),
         ],
       ],
     ),
@@ -1528,19 +1668,6 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
         ],
       ],
     ),
-    /*
-    _Group(
-      id: 'maquinas_sinistro',
-      title: 'Detalhes do Sinistro',
-      icon: Icons.description_outlined,
-      color: const Color(0xFFFF6F00),
-      rows: [
-        [
-          const _Field(id: 'descricaoSinistro', label: 'Descrição do Sinistro', flex: 3),
-        ],
-      ],
-    ),
-    */
   ];
 
   // -- Função para iniciar os controles de ramos de sinistro
@@ -1562,13 +1689,32 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
         for (final f in row) {
           _ctrl[f.id] = TextEditingController();
           _focus[f.id] = FocusNode();
-
           _focus[f.id]!.addListener(() {
             if (!_focus[f.id]!.hasFocus) _scheduleAutosave();
           });
         }
       }
     }
+
+    // 🔥 NOVO: Listener para limpar dados quando o nome do segurado for apagado
+    _ctrl['empresaSegurada']?.addListener(() {
+      if (_ctrl['empresaSegurada']!.text.trim().isEmpty) {
+        // Limpa dados do cliente
+        if (_cliente != null || _isNovoCliente) {
+          setState(() {
+            _cliente = null;
+            _isNovoCliente = false;
+            _ctrl['cnpjSegurado']!.clear();
+            _ctrl['contatoSegurado']?.clear();
+            _ctrl['numeroApolice']!.clear();
+            _ctrl['dataVigenciaFim']!.clear();
+            _ctrl['valorGatilho']!.clear();
+            _ctrl['seguradora']!.clear();
+            _ctrl['usoAtualApolice']!.clear();
+          });
+        }
+      }
+    });
   }
 
   // Abre picker de ramo ou carrega ramo passado como parâmetro
@@ -1593,53 +1739,59 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
       
       if (ramo == 'Transporte') {
         _groups = [
-          _buildGroups()[0], // apólice
+          _buildGroups()[0],
           ..._buildTransporteGroups(),
-          _buildGroups()[2], // terceiros
-          _buildGroups()[3], // acompanhamento
+          _buildGroups()[2],
+          _buildGroups()[3],
         ];
       } else if (ramo == 'Máquinas') {
         _groups = [
-          _buildGroups()[0], // apólice
+          _buildGroups()[0],
           ..._buildMaquinasGroups(),
-          _buildGroups()[3], // acompanhamento
+          _buildGroups()[3],
         ];
       } else if (ramo == 'Residencial') {
         _groups = [
-          _buildGroups()[0], // apólice
+          _buildGroups()[0],
           ..._buildResidencialGroups(),
-          _buildGroups()[3], // acompanhamento
+          _buildGroups()[3],
         ];
-      } else if (ramo == 'Vidas') {
+      } else if (ramo == 'Empresarial') {  // ← NOVO
         _groups = [
-          _buildGroups()[0], // apólice
+          _buildGroups()[0],
+          ..._buildEmpresarialGroups(),
+          _buildGroups()[3],
+        ];
+      } else if (ramo == 'Vida' || ramo == 'Vidas') {
+        _groups = [
+          _buildGroups()[0],
           ..._buildVidaGroups(),
-          _buildGroups()[3], // acompanhamento
+          _buildGroups()[3],
         ];
       } else {
-        // Veículo / Frota (padrão)
         _groups = _buildGroups();
       }
     });
     _initControllers();
-    
     _preencherSlaPrevisto(ramo);
   }
 
   Future<void> _preencherSlaPrevisto(String ramo) async {
     final dias = await ConfigService().getSlaSinistro(ramo);
-    _ctrl['slaPrevisto']?.text = dias.toString();  // ← Só o número
+    _ctrl['slaPrevisto']?.text = dias.toString();
   }
 
   String _ramoToLabel(String ramo) {
     switch (ramo) {
-      case 'Frota':              return 'Veículo / Frota';
-      case 'Veículo Individual': return 'Veículo Individual';
-      case 'Transporte':         return 'Transporte';
-      case 'Máquinas':           return 'Máquinas e Equipamentos';
-      case 'Residencial':        return 'Residencial';
-      case 'Vidas':              return 'Vidas';
-      default:                   return ramo;
+      case 'Frota':                   return 'Veículo / Frota';
+      case 'Civil Ônibus (RCO)':      return 'Civil Ônibus (RCO)';
+      case 'Veículo Individual':      return 'Veículo Individual';
+      case 'Transporte':              return 'Transporte';
+      case 'Máquinas':                return 'Máquinas e Equipamentos';
+      case 'Empresarial':             return 'Empresarial';
+      case 'Residencial':             return 'Residencial';
+      case 'Vida':
+      case 'Vidas': return 'Vidas';   default: return ramo;
     }
   }
 
@@ -1647,6 +1799,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
   @override
     void initState() {
       super.initState();
+      _loadNomeUsuario();
       _carregarSeguradoras();
       _loadConfig();
 
@@ -1666,12 +1819,16 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
 
   AppConfig _config = AppConfig(id: 'config');
 
-  // ← ADICIONE ESTE MÉTODO
   Future<void> _loadConfig() async {
     final config = await ConfigService().getConfig();
     setState(() {
       _config = config;
     });
+  }
+
+  Future<void> _loadNomeUsuario() async {
+    final nome = await _authService.getUserName();
+    setState(() => _nomeUsuarioLogado = nome);
   }
 
   // ── Autosave ──────────────────────────────────────────────────────────────
@@ -1693,17 +1850,37 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
   // ── Salvar ────────────────────────────────────────────────────────────────
   Future<void> _salvar({bool silent = false}) async {
 
-    debugPrint('================ CTRL KEYS ================');
     _ctrl.forEach((key, value) {
       debugPrint('$key → ${value.text}');
     });
-    debugPrint('===========================================');
 
     if (_isSaving) return;
 
     final userId = _authService.getUserId();
     final userEmail = _authService.getUserEmail();
-    if (userId == 'anonymous_user') return;
+    final horaOcorrencia = _ctrl['horaOcorrencia']?.text; // "HH:mm"
+
+    final diasSla = int.tryParse(_ctrl['slaPrevisto']?.text ?? '') ?? 0;
+    final slaPrevistoData = DateTime.now().add(Duration(days: diasSla));
+
+    if (userId == null || userId == 'anonymous_user') {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(
+              children: [
+                Icon(Icons.error_outline, color: Colors.white),
+                SizedBox(width: 10),
+                Text('Erro: Você não está autenticado. Faça login novamente.'),
+              ],
+            ),
+            backgroundColor: Colors.red.shade700,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
 
     if (_ctrl['tipoPerda']!.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1749,6 +1926,9 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
         placa: _ctrl['placaSegurado']?.text.trim().toUpperCase() ?? '',
         nomeCondutor: _ctrl['nomeCondutor']?.text.trim().toUpperCase() ?? '',
         cpfCondutor: _ctrl['cpfCondutor']?.text.trim().toUpperCase() ?? '',
+        nomeCondutorMotorista: _ctrl['nomeCondutorMotorista']?.text.trim().toUpperCase() ?? '',
+        cpfCondutorMotorista: _ctrl['cpfCondutorMotorista']?.text.trim().toUpperCase() ?? '',
+        cnhCondutorMotorista: _ctrl['cnhCondutorMotorista']?.text.trim().toUpperCase() ?? '',
         cor: _ctrl['cor']?.text.trim().toUpperCase() ?? '',
         marca: _ctrl['marca']?.text.trim().split('/').first.trim() ?? '',
         modelo: _ctrl['modelo']?.text.trim().split('/').last.trim() ?? '',
@@ -1779,7 +1959,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
 
       // Life para Vidas
       final life = Life(
-        localLife: '',
+        localLife: _ctrl['endereco']?.text.trim() ?? '',
         nomeSegurado: _ctrl['nomeSegurado']?.text.trim() ?? '',
         cpfSegurado: _ctrl['cpfSegurado']?.text.trim() ?? '',
         idadeSegurado: int.tryParse(_ctrl['idadeSegurado']?.text.trim() ?? '0') ?? 0,
@@ -1837,6 +2017,134 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
         }
       }
 
+      // 🔴 FAZER UPLOAD DE FOTOS E DOCUMENTOS DOS DANOS CORPORAIS
+      for (var i = 0; i < _danoscorporais.length; i++) {
+        final dano = _danoscorporais[i];
+        
+        // Upload de fotos locais
+        if ((dano['fotosLocais'] as List<XFile>?)?.isNotEmpty ?? false) {
+          final fotosComprimidas = await ImageService()
+              .compressImages(dano['fotosLocais'] as List<XFile>);
+          
+          final fotosUrls = await _firestoreService.uploadThirdPartyPhotos(
+            _numeroSinistroGerado!,
+            'dano_corporal_$i',
+            fotosComprimidas,
+          );
+          
+          dano['fotosUrls'] = fotosUrls;
+        }
+        
+        // Upload de documentos locais
+        if ((dano['documentosLocais'] as List<PlatformFile>?)?.isNotEmpty ?? false) {
+          final xfiles = (dano['documentosLocais'] as List<PlatformFile>).map((pf) {
+            if (pf.bytes != null) {
+              return XFile.fromData(pf.bytes!, name: pf.name);
+            } else {
+              return XFile(pf.path!, name: pf.name);
+            }
+          }).toList();
+          
+          final documentosUrls = await _firestoreService.uploadThirdPartyDocuments(
+            _numeroSinistroGerado!,
+            'dano_corporal_$i',
+            xfiles,
+          );
+          
+          dano['documentosUrls'] = documentosUrls;
+        }
+      }
+
+      // 🟡 FAZER UPLOAD DE FOTOS E DOCUMENTOS DOS DANOS MATERIAIS
+      for (var i = 0; i < _danosmateriais.length; i++) {
+        final dano = _danosmateriais[i];
+        
+        print('🔍 DEBUG Dano Material $i - Fotos locais: ${(dano['fotosLocais'] as List<XFile>?)?.length ?? 0}');
+        
+        // Upload de fotos locais
+        if ((dano['fotosLocais'] as List<XFile>?)?.isNotEmpty ?? false) {
+          try {
+            final fotosComprimidas = await ImageService()
+                .compressImages(dano['fotosLocais'] as List<XFile>);
+            
+            final fotosUrls = await _firestoreService.uploadThirdPartyPhotos(
+              _numeroSinistroGerado!,
+              'dano_material_$i',
+              fotosComprimidas,
+            );
+            
+            print('✅ Upload Foto Dano Material $i OK! URLs: $fotosUrls');
+            
+            // 🆕 SALVAR AS URLs NO MAP!
+            dano['fotosUrls'] = fotosUrls;
+            dano.remove('fotosLocais'); // Remove a lista local
+            
+          } catch (e) {
+            print('❌ Erro ao fazer upload de fotos: $e');
+          }
+        }
+        
+        // Upload de documentos locais
+        if ((dano['documentosLocais'] as List<PlatformFile>?)?.isNotEmpty ?? false) {
+          try {
+            // Converter PlatformFile → XFile
+            final xfiles = (dano['documentosLocais'] as List<PlatformFile>).map((pf) {
+              if (pf.bytes != null) {
+                return XFile.fromData(pf.bytes!, name: pf.name);
+              } else {
+                return XFile(pf.path!, name: pf.name);
+              }
+            }).toList();
+            
+            final documentosUrls = await _firestoreService.uploadThirdPartyDocuments(
+              _numeroSinistroGerado!,
+              'dano_material_$i',
+              xfiles,
+            );
+            
+            // 🆕 SALVAR AS URLs NO MAP!
+            dano['documentosUrls'] = documentosUrls;
+            dano.remove('documentosLocais'); // Remove a lista local
+            
+          } catch (e) {
+            print('❌ Erro ao fazer upload de documentos: $e');
+          }
+        }
+      }
+
+      // 🆕 CONVERTER DANOS CORPORAIS (Map) EM OBJETOS BodilyInjury
+      final danoscorporaisObj = _danoscorporais.map((t) {
+        return BodilyInjury(
+          id: t['id'] ?? '',
+          nome: t['nome'] ?? '',
+          cpfCnpj: t['cpfCnpj'] ?? '',
+          endereco: t['endereco'] ?? '',
+          telefone: t['telefone'] ?? '',
+          numeroSinistro: t['numeroSinistro'] ?? '',
+          email: t['email'] ?? '',
+          relato: t['relato'] ?? '',
+          fotosUrls: t['fotosUrls'] as List<String>?,
+          documentosUrls: t['documentosUrls'] as List<String>?,
+        );
+      }).toList();
+      
+      final danosmaterialisObj = _danosmateriais.map((d) {
+        return MaterialDamage(
+          id: d['id'] ?? '',
+          nome: d['nome'] ?? '',
+          cpfCnpj: d['cpfCnpj'] ?? '',
+          endereco: d['endereco'] ?? '',
+          telefone: d['telefone'] ?? '',
+          numeroSinistro: d['numeroSinistro'] ?? '',
+          email: d['email'] ?? '',
+          relato: d['relato'] ?? '',
+          tipoPatrimonio: d['tipoPatrimonio'] ?? '',
+          descricao: d['descricao'] ?? '',
+          fotosUrls: (d['fotosUrls'] as List<String>?) ?? [],
+          documentosUrls: (d['documentosUrls'] as List<String>?) ?? [],
+        );
+      }).toList();
+
       // 🆕 CONVERTER LISTA DE TERCEIROS (Map) EM OBJETOS ThirdParty
       final terceirosObj = _terceiros.map((t) {
         return ThirdParty(
@@ -1863,6 +2171,9 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
           enderecoTerceiro: t['endereco'] ?? '',
           fotosUrls: t['fotosUrls'] as List<String>?,
           documentosUrls: t['documentosUrls'] as List<String>?,
+          nomeContatoTerceiro: t['nomeContatoTerceiro'] ?? '',
+          telefoneContatoTerceiro: t['telefoneContatoTerceiro'] ?? '',
+          registroSeguradoraTerceiro: t['registroSeguradoraTerceiro'] ?? '',
         );
       }).toList();
 
@@ -1897,16 +2208,34 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
         )
       : null;
 
+      Business? business;
+      if (_ramoSelecionado == 'Empresarial') {
+        business = Business(
+          id: const Uuid().v4(),
+          nomeEmpresa: _ctrl['nomeEmpresa']?.text.trim() ?? '',
+          cnpjEmpresa: _ctrl['cnpjEmpresa']?.text.trim() ?? '',
+          enderecoEmpresa: _ctrl['enderecoEmpresa']?.text.trim() ?? '',
+          ramoAtividade: _ctrl['ramoAtividade']?.text.trim(),
+          areaM2: double.tryParse(_ctrl['areaM2']?.text.trim() ?? '') ?? 0.0,
+          tipoEstrutura: _ctrl['tipoEstrutura']?.text.trim(),
+          numeroAndares: int.tryParse(_ctrl['numeroAndares']?.text.trim() ?? ''),
+          sistemaSeguranca: _ctrl['sistemaSeguranca']?.text.trim(),
+          situacaoImovel: _ctrl['situacaoImovel']?.text.trim(),
+          anexos: [],
+        );
+      }
+
       final novoClaim = Claim(
         idCliente: _cliente?.id ?? '',
         responsavelId: userId,
         numeroSinistro: _numeroSinistroGerado!,
         tipoOcorrencia: 'Sinistro',
-        ramoSinistro: _ramoSelecionado ?? 'Frota',  // ✅ corrigido
+        ramoSinistro: _ramoSelecionado ?? 'Frota',
         dataOcorrencia: _parseData('dataSinistro'),
+        horaOcorrencia: horaOcorrencia,
         dataAviso: _parseData('dataAviso'),
         tipoPerda: _ctrl['tipoPerda']!.text,
-        localOcorrencia: _ctrl['localOcorrencia']!.text.trim(),
+        localOcorrencia: _ctrl['localOcorrencia']?.text.trim() ?? _ctrl['enderecoEmpresa']?.text.trim() ?? 'Local não informado',
         enderecoTerceiro: _ctrl['endereco']?.text.trim() ?? '',
         relatoEvento: (_ctrl['relatoEvento']?.text ?? '').trim(),
         requerAprovacaoGerencial: false,
@@ -1915,14 +2244,19 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
         dataUltimaAtualizacao: DateTime.now(),
         historicoStatus: [
           {
-            'status': _ctrl['status']!.text.isNotEmpty ? _ctrl['status']!.text : 'Aberto',
+            'status': (_ctrl['status']?.text ?? '').isNotEmpty 
+                ? _ctrl['status']!.text 
+                : 'Aberto',
             'data': Timestamp.now(),
-            'responsavel': userId,
-            'responsavelEmail': userEmail,
+            'responsavel': userId ?? '',
+            'responsavelEmail': userEmail ?? '',
+            'registrado_por': _nomeUsuarioLogado ?? 'Usuário desconhecido',
           }
-        ],
-        terceiros: terceirosObj,  // 🆕 MUDE: agora é lista de múltiplos terceiros
-        veiculoSelecionado: veiculo,  // ✅ apenas uma vez, aqui
+        ], // ⚠️ ATENÇÃO: esta vírgula é OBRIGATÓRIA
+        terceiros: terceirosObj,
+        veiculoSelecionado: veiculo,
+        danoscorporais: danoscorporaisObj,
+        danosmateriais: danosmaterialisObj,
         transporte: transporte,
         fotosUrls: [],
         arquivosLaudosUrls: [],
@@ -1930,29 +2264,21 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
         seguradora: _ctrl['seguradora']!.text.trim(),
         clientNome: _cliente?.nome ?? _ctrl['empresaSegurada']!.text.trim(),
         clientCnpjCpf: _cliente?.cnpjCpf ?? _ctrl['cnpjSegurado']!.text.trim(),
-        
-//        valorTotalSinistro: double.tryParse(_ctrl['valor']!.text.replaceAll('.', '').replaceAll(',', '.')) ?? 0.0,
-        
         valorTotalSinistro: () {
           final raw = _ctrl['valor']!.text;
-          final clean = raw.replaceAll(RegExp(r'[^\d,]'), '');  // Remove tudo menos dígitos e vírgula
-          final parsed = double.tryParse(clean.replaceAll(',', '.')) ?? 0.0;
-          print('🔍 DEBUG VALOR SINISTRO:');
-          print('  Raw: "$raw"');
-          print('  Clean: "$clean"');
-          print('  Parsed: $parsed');
-          return parsed;
+          final clean = raw.replaceAll(RegExp(r'[^\d,]'), '');
+          return double.tryParse(clean.replaceAll(',', '.')) ?? 0.0;
         }(),
-        
-        status: _ctrl['status']!.text.isNotEmpty ? _ctrl['status']!.text : 'Aberto',
+        status: (_ctrl['status']?.text ?? '').isNotEmpty ? _ctrl['status']!.text : 'Aberto',
         house: _ramoSelecionado == 'Residencial' ? house : null,
         life: _ramoSelecionado == 'Vidas' ? life : null,
         maquinaria: _ramoSelecionado == 'Máquinas' ? maquinaria : null,
+        business: _ramoSelecionado == 'Empresarial' ? business : null,
+        nomeContatoSinistro: _ctrl['nomeContatoSinistro']?.text ?? '',
+        telefoneContatoSinistro: _ctrl['telefoneContatoSinistro']?.text ?? '',
+        slaPrevisto: slaPrevistoData,
+        apoliceId: _selectedApoliceId, 
       );
-
-      // ===============================
-      // 🚀 FLUXO CORRETO
-      // ===============================
 
       if (!_savedOnce) {
         // 1. cria sinistro
@@ -1966,7 +2292,6 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
         // 🆕 ATUALIZAR totalReceita DO CLIENTE
         await _atualizarTotalReceitaCliente(_cliente?.id ?? '');
 
-        // 2. upload anexos
         setState(() => _isUploadingAnexos = true);
 
         final anexosUrls =
@@ -1974,7 +2299,6 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
 
         setState(() => _isUploadingAnexos = false);
 
-        // 3. aplica anexos no objeto
         if (anexosUrls.isNotEmpty) {
           novoClaim.fotosUrls =
               anexosUrls['Fotos do Sinistro'] ?? [];
@@ -1986,14 +2310,12 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
           ];
         }
 
-        // 4. update com anexos
         await _firestoreService
             .getSinistrosCollection()
             .doc(_currentClaimId)
             .update(novoClaim.toMap());
 
       } else if (_currentClaimId != null) {
-        // edição
 
         setState(() => _isUploadingAnexos = true);
 
@@ -2018,8 +2340,6 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
             .doc(_currentClaimId)
             .update(novoClaim.toMap());
       }
-
-      // ===============================
 
       if (!silent && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2050,7 +2370,6 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
 
   // ── Métodos de anexo ─────────────────────────────────────────────────────
 
-  // Adiciona arquivos recebidos via drag & drop ou file picker a uma categoria
   void _adicionarArquivos(
     String categoria,
     List<XFile> arquivos, [
@@ -2072,7 +2391,6 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
   void _removerArquivo(String categoria, XFile arquivo) {
     setState(() {
       _anexos[categoria]!.remove(arquivo);
-      // Remove também o PlatformFile correspondente pelo nome
       _platformFiles[categoria]?.removeWhere((pf) => pf.name == arquivo.name);
     });
   }
@@ -2090,8 +2408,6 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
     }
 
     // Para todas as categorias no web, ou documentos em qualquer plataforma
-    // withData: true garante que file.bytes seja populado no web
-    // (sem isso, bytes é null e o upload falha com _Namespace error)
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
       withData: kIsWeb,
@@ -2178,58 +2494,93 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
 
   // ── Busca de cliente ──────────────────────────────────────────────────────
   Future<void> _abrirBuscaCliente() async {
-      print('🔍 _abrirBuscaCliente CHAMADO!');  // 🆕 Adicione
     final result = await showDialog<ClientSearchResult>(
       context: context,
       builder: (_) => ClientSearchDialog(
         initialQuery: _ctrl['empresaSegurada']?.text ?? '',
-        onClientSelected: (c) =>
-            c != null ? ClientSearchResult.client(c) : null,
+        onClientSelected: (c) => c != null ? ClientSearchResult.client(c) : null,
       ),
     );
     if (result == null) return;
 
     if (result.client != null) {
+      // 🔥 FILTRA APÓLICES DO RAMO SELECIONADO
+      final ramoAtual = _ramoSelecionado ?? '';
+      final apolicesDoRamo = result.client!.apolices
+          .where((a) => a.ramo == ramoAtual)
+          .toList();
+
+      Apolice? apolice;
+
+      if (apolicesDoRamo.isEmpty) {
+        // ⚠️ Nenhuma apólice para este ramo, mas preenche dados do cliente
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('⚠️ Cliente não possui apólice para o ramo "$ramoAtual". Preencha manualmente.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        apolice = null;
+      } else if (apolicesDoRamo.length > 1) {
+        // 🔥 SE HOUVER MÚLTIPLAS APÓLICES, ABRE MODAL PARA ESCOLHER
+        apolice = await showDialog<Apolice>(
+          context: context,
+          builder: (_) => ApoliceSelectionDialog(
+            apolices: apolicesDoRamo,
+            ramoSelecionado: ramoAtual,
+          ),
+        );
+      } else {
+        // Uma única apólice
+        apolice = apolicesDoRamo.first;
+      }
+
+      // ✅ PREENCHE OS DADOS DO CLIENTE (SEMPRE)
       setState(() {
+        _selectedApoliceId = apolice?.id;
         _cliente = result.client;
         _isNovoCliente = false;
-          final ramoSelecionado = _ctrl['ramoSinistro']?.text ?? '';
-          final apoliceAtiva = result.client!.apolices.firstWhere(
-            (a) => a.ramo == ramoSelecionado &&
-                  a.dataInicio.isBefore(DateTime.now()) &&
-                  a.dataFim.isAfter(DateTime.now()),
-            orElse: () => result.client!.apolices.isNotEmpty 
-                ? result.client!.apolices.first 
-                : null as dynamic,
-          );
-          
-          if (apoliceAtiva != null) {
-            _ctrl['numeroApolice']!.text = apoliceAtiva.numeroApolice;
-            _ctrl['dataVigenciaFim']!.text = DateFormat('dd/MM/yyyy').format(apoliceAtiva.dataFim);
-            _ctrl['valorGatilho']!.text = _formatarMoeda((apoliceAtiva.valorGatilho * 100).toInt());
-          }
-        // 🆕 Calcular e carregar Uso Atual da Apólice
-        _calcularUsoAtualCliente(result.client!.id).then((valor) {
-          setState(() {
-            _ctrl['usoAtualApolice']!.text = _formatarMoeda((valor * 100).toInt());
-          });
-        });
-
+        _ctrl['empresaSegurada']!.text = result.client!.nome;
         _ctrl['cnpjSegurado']!.text = result.client!.cnpjCpf;
         _ctrl['contatoSegurado']?.text = result.client!.contato;
+
+        // ✅ PREENCHE DADOS DA APÓLICE (SE HOUVER)
+        if (apolice != null) {
+          _ctrl['numeroApolice']!.text = apolice.numeroApolice;
+          _ctrl['dataVigenciaFim']!.text = DateFormat('dd/MM/yyyy').format(apolice.dataFim);
+          _ctrl['valorGatilho']!.text = _formatarMoeda((apolice.valorGatilho * 100).toInt());
+
+          if (apolice.seguradora.isNotEmpty) {
+            _ctrl['seguradora']!.text = apolice.seguradora;
+          }
+        } else {
+          // Limpa campos da apólice se não encontrou
+          _ctrl['numeroApolice']!.clear();
+          _ctrl['dataVigenciaFim']!.clear();
+          _ctrl['valorGatilho']!.clear();
+          _ctrl['seguradora']!.clear();
+        }
       });
-    } else if (result.searchText != null &&
-        result.searchText!.isNotEmpty) {
+
+      // 🔥 Atualiza o uso atual da apólice
+      _calcularUsoAtualCliente(result.client!.id).then((valor) {
+        setState(() {
+          _ctrl['usoAtualApolice']!.text = _formatarMoeda((valor * 100).toInt());
+        });
+      });
+
+    } else if (result.searchText != null && result.searchText!.isNotEmpty) {
       setState(() {
         _cliente = null;
         _isNovoCliente = true;
+        _selectedApoliceId = null;
         _ctrl['empresaSegurada']!.text = result.searchText!;
       });
     }
   }
-
+ 
   // 🆕 CALCULAR USO ATUAL DA APÓLICE (soma de todos os sinistros)
-Future<double> _calcularUsoAtualCliente(String clienteId) async {
+  Future<double> _calcularUsoAtualCliente(String clienteId) async {
     try {
       if (clienteId.isEmpty) return 0.0;
       
@@ -2412,7 +2763,178 @@ Future<double> _calcularUsoAtualCliente(String clienteId) async {
     }
   }
 
-// ── Modal de Auto Preenchimento ────────────────────────────────────────────
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 🔴 UPLOAD DE FOTOS - DANOS CORPORAIS
+// ═════════════════════════════════════════════════════════════════════════════
+ 
+// 🔴 UPLOAD DE FOTOS - DANOS CORPORAIS
+Future<void> _uploadFotoBodilyInjury(int danoIndex) async {
+  try {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: true,
+    );
+
+    if (result == null || result.files.isEmpty) return;
+    if (!mounted) return;
+
+    final xfiles = result.files.map((f) {
+      if (f.bytes != null) {
+        return XFile.fromData(f.bytes!, name: f.name);
+      } else {
+        return XFile(f.path!, name: f.name);
+      }
+    }).toList();
+
+    if (mounted) {
+      setState(() {
+        if (_danoscorporais[danoIndex]['fotosLocais'] == null) {
+          _danoscorporais[danoIndex]['fotosLocais'] = <XFile>[];
+        }
+        (_danoscorporais[danoIndex]['fotosLocais'] as List<XFile>).addAll(xfiles);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ ${xfiles.length} foto(s) adicionada(s)'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Erro ao adicionar fotos: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+// 📄 UPLOAD DE DOCUMENTOS - DANOS CORPORAIS
+Future<void> _uploadDocumentoBodilyInjury(int danoIndex) async {
+  try {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+    );
+
+    if (result == null || result.files.isEmpty) return;
+    if (!mounted) return;
+
+    if (mounted) {
+      setState(() {
+        if (_danoscorporais[danoIndex]['documentosLocais'] == null) {
+          _danoscorporais[danoIndex]['documentosLocais'] = <PlatformFile>[];
+        }
+        (_danoscorporais[danoIndex]['documentosLocais'] as List<PlatformFile>).addAll(result.files);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ ${result.files.length} documento(s) adicionado(s)'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Erro ao adicionar documentos: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+// 🔴 UPLOAD DE FOTOS - DANOS MATERIAIS
+Future<void> _uploadFotoMaterialDamage(int danoIndex) async {
+  try {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: true,
+    );
+
+    if (result == null || result.files.isEmpty) return;
+    if (!mounted) return;
+
+    final xfiles = result.files.map((f) {
+      if (f.bytes != null) {
+        return XFile.fromData(f.bytes!, name: f.name);
+      } else {
+        return XFile(f.path!, name: f.name);
+      }
+    }).toList();
+
+    if (mounted) {
+      setState(() {
+        if (_danosmateriais[danoIndex]['fotosLocais'] == null) {
+          _danosmateriais[danoIndex]['fotosLocais'] = <XFile>[];
+        }
+        (_danosmateriais[danoIndex]['fotosLocais'] as List<XFile>).addAll(xfiles);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ ${xfiles.length} foto(s) adicionada(s)'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Erro ao adicionar fotos: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+// 📄 UPLOAD DE DOCUMENTOS - DANOS MATERIAIS
+Future<void> _uploadDocumentoMaterialDamage(int danoIndex) async {
+  try {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+    );
+
+    if (result == null || result.files.isEmpty) return;
+    if (!mounted) return;
+
+    if (mounted) {
+      setState(() {
+        if (_danosmateriais[danoIndex]['documentosLocais'] == null) {
+          _danosmateriais[danoIndex]['documentosLocais'] = <PlatformFile>[];
+        }
+        (_danosmateriais[danoIndex]['documentosLocais'] as List<PlatformFile>).addAll(result.files);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ ${result.files.length} documento(s) adicionado(s)'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Erro ao adicionar documentos: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+  // ── Modal de Auto Preenchimento ────────────────────────────────────────────
 
   void _abrirAutoFillModal() async {
     final result = await showDialog(
@@ -2429,8 +2951,10 @@ Future<double> _calcularUsoAtualCliente(String clienteId) async {
     setState(() {
       final veiculo = data['veiculo'] ?? {};
       final condutor = data['condutor'] ?? {};
-      final file = data['crlvFile']; // 🔥 FALTAVA ISSO
+      final file = data['crlvFile'];
+      final isProprietario = data['condutorEhProprietario'] ?? true;
 
+      // Preenche veículo
       _ctrl['placaSegurado']?.text = veiculo['placa'] ?? '';
       _ctrl['marca']?.text = veiculo['marca'] ?? '';
       _ctrl['modelo']?.text = veiculo['modelo'] ?? '';
@@ -2439,8 +2963,7 @@ Future<double> _calcularUsoAtualCliente(String clienteId) async {
       _ctrl['anoModelo']?.text = veiculo['anoModelo'] ?? '';
       _ctrl['cor']?.text = veiculo['cor'] ?? '';
 
-      final isProprietario = data['condutorEhProprietario'] ?? true;
-
+      // Preenche condutor (proprietário)
       if (isProprietario) {
         _ctrl['nomeCondutor']?.text = condutor['nome'] ?? '';
         _ctrl['cpfCondutor']?.text = condutor['cpf'] ?? '';
@@ -2449,13 +2972,25 @@ Future<double> _calcularUsoAtualCliente(String clienteId) async {
         _ctrl['cpfCondutor']?.text = '';
       }
 
+      // 🔥 Sincroniza o checkbox da tela principal
+      _condutorEhProprietario = isProprietario;
+
+      // 🔥 Copia para os campos de condutor motorista
+      if (isProprietario) {
+        _ctrl['nomeCondutorMotorista']?.text = condutor['nome'] ?? '';
+        _ctrl['cpfCondutorMotorista']?.text = condutor['cpf'] ?? '';
+      } else {
+        _ctrl['nomeCondutorMotorista']?.text = '';
+        _ctrl['cpfCondutorMotorista']?.text = '';
+      }
+
+      // Relato
       _ctrl['relatoEvento']?.text = data['relato'] ?? '';
 
-      // 🔥 AQUI ESTÁ O PULO DO GATO
+      // Anexo
       if (file != null) {
         _platformFiles['Documentos do Veículo'] ??= [];
         _platformFiles['Documentos do Veículo']!.add(file);
-
         _anexos['Documentos do Veículo']!.add(
           XFile.fromData(file.bytes!, name: file.name),
         );
@@ -2657,34 +3192,59 @@ Future<double> _calcularUsoAtualCliente(String clienteId) async {
       return texto;
     }
 
-    if (ramo == 'Frota' || ramo == 'Veículo Individual') {
+    if (ramo == 'Frota' || ramo == 'Veículo Individual' || ramo == 'Civil Ônibus (RCO)') {
       final placa = _ctrl['placaSegurado']?.text ?? '';
-      final condutor = _ctrl['nomeCondutor']?.text ?? '';
+      final proprietario = _ctrl['nomeCondutor']?.text ?? '';
+      final cpfProprietario = _ctrl['cpfCondutor']?.text ?? '';
 
       String texto = 'o veículo segurado';
 
       if (placa.isNotEmpty) {
         texto += ' de placa $placa';
       }
-      if (condutor.isNotEmpty) {
-        texto += ', conduzido por $condutor';
 
-        final cpf = _ctrl['cpfCondutor']?.text ?? '';
-
-        if (cpf.isNotEmpty) {
-         texto += ' (CPF ${_formatCpf(cpf)})';
+      // Dados do proprietário
+      if (proprietario.isNotEmpty) {
+        texto += ', de propriedade de $proprietario';
+        if (cpfProprietario.isNotEmpty) {
+          texto += ' (CPF ${_formatCpf(cpfProprietario)})';
         }
       }
+
+      // Dados do condutor
+      if (_condutorEhProprietario) {
+        // Proprietário é o condutor
+        if (proprietario.isNotEmpty) {
+          texto += ', conduzido pelo proprietário';
+        } else {
+          texto += ', conduzido pelo proprietário (não informado)';
+        }
+      } else {
+        // Condutor é diferente do proprietário
+        final motorista = _ctrl['nomeCondutorMotorista']?.text ?? '';
+        final cpfMotorista = _ctrl['cpfCondutorMotorista']?.text ?? '';
+
+        if (motorista.isNotEmpty) {
+          texto += ', conduzido por $motorista';
+          if (cpfMotorista.isNotEmpty) {
+            texto += ' (CPF ${_formatCpf(cpfMotorista)})';
+          }
+        } else {
+          texto += ', com condutor não informado';
+        }
+      }
+
       return texto;
     }
 
-    if (ramo == 'Vidas') {
+    if (ramo == 'Vida') {
       final nome = _ctrl['nomeSegurado']?.text ?? '';
       if (nome.isNotEmpty) {
         return 'o segurado $nome';
       }
       return 'o segurado';
     }
+
     return 'o objeto segurado';
   }
 
@@ -2887,6 +3447,25 @@ Future<double> _calcularUsoAtualCliente(String clienteId) async {
         .trim();
   }
 
+  // --- Copiar dados do cliente para 'Vidas' ---
+  void _copiarDadosCliente() {
+    if (_cliente == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecione um cliente primeiro')),
+      );
+      return;
+    }
+    setState(() {
+      _ctrl['nomeSegurado']?.text = _cliente!.nome;
+      _ctrl['cpfSegurado']?.text = _cliente!.cnpjCpf;
+      _ctrl['telefone']?.text = _cliente!.contatoTelefone;
+      _ctrl['email']?.text = _cliente!.email;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Dados do cliente copiados para o segurado')),
+    );
+  }
+
   Widget _buildResumoRelato() {
     return Wrap(
       spacing: 8,
@@ -2939,7 +3518,9 @@ Future<double> _calcularUsoAtualCliente(String clienteId) async {
   // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return WillPopScope(
+      onWillPop: _onWillPop,
+      child: Scaffold(
       backgroundColor: const Color(0xFFF4F6F9),
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -3045,11 +3626,122 @@ Future<double> _calcularUsoAtualCliente(String clienteId) async {
                             }
                         },
                       ),
+                      const SizedBox(height: 16),
                     ],
                   ),
                 );
               }
-              
+              // 🔴 DANOS CORPORAIS (AGORA FORA DO IF!)
+              if (g.id == 'danoscorporais') {
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border(left: BorderSide(color: const Color(0xFFD32F2F), width: 4)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.04),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      )
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.medical_information_outlined, color: const Color(0xFFD32F2F), size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Danos Corporais',
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      _BodilyInjuryListWidget(
+                        danoscorporais: _danoscorporais,
+                        onAdd: (novoItem) {
+                          setState(() {
+                            _danoscorporais.add(novoItem);
+                          });
+                        },
+                        onRemove: (index) {
+                          setState(() {
+                            _danoscorporais.removeAt(index);
+                          });
+                        },
+                        onEditField: (index, fieldId, value) {
+                          setState(() {
+                            _danoscorporais[index][fieldId] = value;
+                          });
+                        },
+                        onUploadFoto: _uploadFotoBodilyInjury,
+                        onUploadDocumento: _uploadDocumentoBodilyInjury,
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              // 🟡 DANOS MATERIAIS (TAMBÉM FORA DO IF!)
+              if (g.id == 'danosmateriais') {
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border(left: BorderSide(color: const Color(0xFFF57F17), width: 4)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.04),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      )
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.home_outlined, color: const Color(0xFFF57F17), size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Danos Materiais',
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      _MaterialDamageListWidget(
+                        danosmateriais: _danosmateriais,
+                        onAdd: (novoItem) {
+                          setState(() {
+                            _danosmateriais.add(novoItem);
+                          });
+                        },
+                        onRemove: (index) {
+                          setState(() {
+                            _danosmateriais.removeAt(index);
+                          });
+                        },
+                        onEditField: (index, fieldId, value) {
+                          setState(() {
+                            _danosmateriais[index][fieldId] = value;
+                          });
+                        },
+                        onUploadFoto: _uploadFotoMaterialDamage,
+                        onUploadDocumento: _uploadDocumentoMaterialDamage,
+                      ),
+                    ],
+                  ),
+                );
+              }
               // Caso contrário, renderizar normalmente com _GroupCard
               return _GroupCard(
                 group: g,
@@ -3068,6 +3760,8 @@ Future<double> _calcularUsoAtualCliente(String clienteId) async {
                   ? _abrirAutoFillModal
                   : (g.id == 'transporte')
                       ? _abrirAutoFillTransporteModal
+                              : (g.id == 'vida')         // ← novo
+                              ? _copiarDadosCliente 
                       : null,
               );
             }).toList(),
@@ -3120,6 +3814,7 @@ Future<double> _calcularUsoAtualCliente(String clienteId) async {
             const SizedBox(height: 32),
           ],
         ),
+      ),
       ),
     );
   }
@@ -3416,13 +4111,16 @@ class _GroupCard extends StatelessWidget {
                   ),
 
                   // 🔥 BOTÃO AQUI
-                  if (group.id == 'veiculo' || group.id == 'transporte')
+                  if (group.id == 'veiculo' || group.id == 'transporte' || group.id == 'vida')
                     Padding(
                       padding: const EdgeInsets.only(left: 8),
                       child: TextButton.icon(
-                        onPressed: onAutoFill, // 👈 callback
-                        icon: Icon(Icons.auto_fix_high, size: 14),
-                        label: const Text('Auto'),
+                        onPressed: onAutoFill,
+                        icon: Icon(
+                          group.id == 'vida' ? Icons.copy_all : Icons.auto_fix_high,
+                          size: 14,
+                        ),
+                        label: Text(group.id == 'vida' ? 'Copiar cliente' : 'Auto'),
                         style: TextButton.styleFrom(
                           padding: EdgeInsets.zero,
                           minimumSize: const Size(50, 30),
@@ -3528,6 +4226,40 @@ class _FieldCell extends StatefulWidget {
     @override
     Widget build(BuildContext context) {
 
+        if (widget.field.id == '_checkbox_condutor') {
+        final state = context.findAncestorStateOfType<_SpreadsheetClaimScreenState>();
+        if (state == null) return const SizedBox();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 4), // alinha com os outros campos
+            Row(
+              children: [
+                Checkbox(
+                  value: state._condutorEhProprietario,
+                  onChanged: (value) {
+                    state.setState(() {
+                      state._condutorEhProprietario = value ?? false;
+                      if (state._condutorEhProprietario) {
+                        // Copia os dados do proprietário para o condutor motorista
+                        state._ctrl['nomeCondutorMotorista']?.text = state._ctrl['nomeCondutor']?.text ?? '';
+                        state._ctrl['cpfCondutorMotorista']?.text = state._ctrl['cpfCondutor']?.text ?? '';
+                      } else {
+                        // Limpa os campos do condutor motorista
+                        state._ctrl['nomeCondutorMotorista']?.text = '';
+                        state._ctrl['cpfCondutorMotorista']?.text = '';
+                      }
+                    });
+                  },
+                ),
+                const Text('O condutor é o proprietário do veículo?'),
+              ],
+            ),
+          ],
+        );
+      }
+
       if (widget.field.isAutocomplete &&
       widget.field.autocompleteOptions != null) {
 
@@ -3587,44 +4319,93 @@ class _FieldCell extends StatefulWidget {
       ],
     );
   }
+  
+  // ── Campo de Hora (Time Picker) ──
+  if (widget.field.isTime) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _Label(
+          label: widget.field.label,
+          required: widget.field.required,
+          focused: _focused,
+          color: widget.groupColor,
+        ),
+        const SizedBox(height: 4),
+        TextFormField(
+          controller: widget.controller,
+          focusNode: widget.focusNode,
+          decoration: _inputDecoration(context, widget.groupColor, focused: _focused)
+              .copyWith(
+                hintText: widget.field.hint ?? 'HH:mm',
+                suffixIcon: widget.controller.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () {
+                          widget.controller.clear();
+                          widget.onChanged('');
+                        },
+                      )
+                    : null,
+              ),
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[0-9:]')),
+            LengthLimitingTextInputFormatter(5),
+          ],
+          onTap: () async {
+            // Abre o seletor de hora ao clicar (opcional)
+            final picked = await showTimePicker(
+              context: context,
+              initialTime: TimeOfDay.now(),
+            );
+            if (picked != null) {
+              final hora = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+              widget.controller.text = hora;
+              widget.onChanged(hora);
+            }
+          },
+        ),
+      ],
+    );
+  }
 
-    // Dropdowns
-    if (widget.field.isDropdown && widget.field.options != null) {
-      final value = widget.controller.text.isNotEmpty &&
-              widget.field.options!.contains(widget.controller.text)
-          ? widget.controller.text
-          : null;
+  // Dropdowns
+  if (widget.field.isDropdown && widget.field.options != null) {
+    final value = widget.controller.text.isNotEmpty &&
+            widget.field.options!.contains(widget.controller.text)
+        ? widget.controller.text
+        : null;
 
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _Label(
-              label: widget.field.label,
-              required: widget.field.required,
-              focused: _focused,
-              color: widget.groupColor),
-          const SizedBox(height: 4),
-          DropdownButtonFormField<String>(
-            value: value,
-            focusNode: widget.focusNode,
-            isDense: true,
-            decoration: _inputDecoration(context, widget.groupColor,
-                focused: _focused),
-            hint: Text(widget.field.hint ?? 'Selecione',
-                style: TextStyle(
-                    fontSize: 13, color: Colors.grey.shade400)),
-            items: widget.field.options!
-                .map((o) =>
-                    DropdownMenuItem(value: o, child: Text(o, style: const TextStyle(fontSize: 13))))
-                .toList(),
-            onChanged: (v) {
-              widget.controller.text = v ?? '';
-              widget.onChanged(v ?? '');
-            },
-          ),
-        ],
-      );
-    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _Label(
+            label: widget.field.label,
+            required: widget.field.required,
+            focused: _focused,
+            color: widget.groupColor),
+        const SizedBox(height: 4),
+        DropdownButtonFormField<String>(
+          value: value,
+          focusNode: widget.focusNode,
+          isDense: true,
+          decoration: _inputDecoration(context, widget.groupColor,
+              focused: _focused),
+          hint: Text(widget.field.hint ?? 'Selecione',
+              style: TextStyle(
+                  fontSize: 13, color: Colors.grey.shade400)),
+          items: widget.field.options!
+              .map((o) =>
+                  DropdownMenuItem(value: o, child: Text(o, style: const TextStyle(fontSize: 13))))
+              .toList(),
+          onChanged: (v) {
+            widget.controller.text = v ?? '';
+            widget.onChanged(v ?? '');
+          },
+        ),
+      ],
+    );
+  }
 
   // FORMAT DATE DATA SINISTRO
   if (widget.field.id == 'dataSinistro') {
@@ -3952,64 +4733,110 @@ class _FieldCell extends StatefulWidget {
     ];
 
     if (widget.field.id == 'localOcorrencia') {
-      final state = context.findAncestorStateOfType<_SpreadsheetClaimScreenState>();
-
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _Label(
-            label: widget.field.label,
-            required: widget.field.required,
-            focused: _focused,
-            color: widget.groupColor,
-          ),
-          const SizedBox(height: 4),
-
-          // 🔹 CAMPO
-          TextFormField(
-            controller: widget.controller,
-            readOnly: true,
-            onTap: () async {
-              final result = await state?._openPlaceSearch();
-
-              if (result != null && result.isNotEmpty) {
-                widget.controller.text = result;
-                widget.onChanged(result);
-              }
-            },
-            decoration: _inputDecoration(
-              context,
-              widget.groupColor,
+    final state = context.findAncestorStateOfType<_SpreadsheetClaimScreenState>();
+  
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 🔹 HEADER: Label + Toggle lado a lado
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // Label (Local da Ocorrência)
+            _Label(
+              label: widget.field.label,
+              required: widget.field.required,
               focused: _focused,
-              hint: 'Clique para buscar no mapa',
-            ).copyWith(
-              suffixIcon: const Icon(Icons.location_on),
+              color: widget.groupColor,
             ),
-          ),
-
-          // 🔥 MAP PREVIEW
-          if (state?._localOcorrenciaLatLng != null) ...[
-            const SizedBox(height: 8),
-
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                height: 160,
-                child: Image.network(
-                  'https://maps.googleapis.com/maps/api/staticmap'
-                  '?center=${state!._localOcorrenciaLatLng!.latitude},${state._localOcorrenciaLatLng!.longitude}'
-                  '&zoom=15'
-                  '&size=600x300'
-                  '&markers=color:red|${state._localOcorrenciaLatLng!.latitude},${state._localOcorrenciaLatLng!.longitude}'
-                  '&key=AIzaSyCoE3ZT1_EMmET0RaSmBeFMWQiYwJcl1YE',
-                  fit: BoxFit.cover,
+            const SizedBox(width: 8),  // Espaço entre label e botão
+            
+            // ✅ Toggle bem ao lado do título
+            TextButton.icon(
+              onPressed: () {
+                state?.setState(() {
+                  state._localOcorrenciaManualMode = !state._localOcorrenciaManualMode;
+                });
+              },
+              icon: Icon(
+                state?._localOcorrenciaManualMode == true
+                    ? Icons.location_on
+                    : Icons.edit,
+                size: 16,
+              ),
+              label: Text(
+                state?._localOcorrenciaManualMode == true
+                    ? 'Usar Mapa'
+                    : 'Entrada Manual',
+                style: const TextStyle(fontSize: 12),
+              ),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                backgroundColor: Colors.grey.shade200,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
                 ),
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 4),
+  
+        // 🔹 CAMPO
+        TextFormField(
+          controller: widget.controller,
+          readOnly: state?._localOcorrenciaManualMode == false,
+          onTap: () async {
+            if (state?._localOcorrenciaManualMode == false) {
+              final result = await state?._openPlaceSearch();
+  
+              if (result != null && result.isNotEmpty) {
+                widget.controller.text = result;
+                widget.onChanged(result);
+              }
+            }
+          },
+          onChanged: state?._localOcorrenciaManualMode == true 
+              ? (value) => widget.onChanged(value)
+              : null,
+          decoration: _inputDecoration(
+            context,
+            widget.groupColor,
+            focused: _focused,
+            hint: state?._localOcorrenciaManualMode == true
+                ? 'Digite o endereço'
+                : 'Clique para buscar no mapa',
+          ).copyWith(
+            suffixIcon: state?._localOcorrenciaManualMode == true
+                ? const Icon(Icons.edit_note)
+                : const Icon(Icons.location_on),
+          ),
+        ),
+  
+        // 🔥 MAP PREVIEW
+        if (state?._localOcorrenciaManualMode == false &&
+            state?._localOcorrenciaLatLng != null) ...[
+          const SizedBox(height: 8),
+  
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              height: 160,
+              child: Image.network(
+                'https://maps.googleapis.com/maps/api/staticmap'
+                '?center=${state!._localOcorrenciaLatLng!.latitude},${state._localOcorrenciaLatLng!.longitude}'
+                '&zoom=15'
+                '&size=600x300'
+                '&markers=color:red|${state._localOcorrenciaLatLng!.latitude},${state._localOcorrenciaLatLng!.longitude}'
+                '&key=AIzaSyCoE3ZT1_EMmET0RaSmBeFMWQiYwJcl1YE',
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
         ],
-      );
-    }
+      ],
+    );
+  }
 
     if (widget.field.id == 'relatoEvento') {
       final state = context.findAncestorStateOfType<_SpreadsheetClaimScreenState>();
@@ -5217,4 +6044,1262 @@ enum StatusApolice {
   normal,
   atencao,
   vencida,
+}
+
+// 📝 WIDGETS CUSTOMIZADOS PARA DANOS CORPORAIS E DANOS MATERIAIS
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ INSTRUÇÃO: Copie esses widgets para o FINAL do arquivo spreadsheet_claim_screen.dart
+// (após todas as outras classes e widgets)
+//
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 🆕 WIDGET PARA LISTA DE DANOS CORPORAIS
+// ═════════════════════════════════════════════════════════════════════════════
+
+class _BodilyInjuryListWidget extends StatefulWidget {
+  final List<Map<String, dynamic>> danoscorporais;
+  final Function(Map<String, dynamic>) onAdd;
+  final Function(int) onRemove;
+  final Function(int, String, dynamic) onEditField;
+  final Function(int)? onUploadFoto;
+  final Function(int)? onUploadDocumento;
+ 
+  const _BodilyInjuryListWidget({
+    Key? key,
+    required this.danoscorporais,
+    required this.onAdd,
+    required this.onRemove,
+    required this.onEditField,
+    this.onUploadFoto,
+    this.onUploadDocumento,
+  }) : super(key: key);
+ 
+  @override
+  State<_BodilyInjuryListWidget> createState() => _BodilyInjuryListWidgetState();
+}
+ 
+class _BodilyInjuryListWidgetState extends State<_BodilyInjuryListWidget> {
+  late Map<int, Map<String, TextEditingController>> _controllers = {};
+ 
+  final MaskTextInputFormatter _cpfCnpjFormatter = MaskTextInputFormatter(
+    mask: '###.###.###-##',
+    filter: {"#": RegExp(r'[0-9]')},
+    type: MaskAutoCompletionType.lazy,
+  );
+ 
+  final MaskTextInputFormatter _telefoneFormatter = MaskTextInputFormatter(
+    mask: '(##) #####-####',
+    filter: {"#": RegExp(r'[0-9]')},
+    type: MaskAutoCompletionType.lazy,
+  );
+ 
+  @override
+  void initState() {
+    super.initState();
+    _initializeControllers();
+  }
+ 
+  void _initializeControllers() {
+    for (var map in _controllers.values) {
+      for (var c in map.values) {
+        c.dispose();
+      }
+    }
+    _controllers.clear();
+ 
+    for (int i = 0; i < widget.danoscorporais.length; i++) {
+      _controllers[i] = {
+        'nome': TextEditingController(text: widget.danoscorporais[i]['nome'] ?? ''),
+        'cpfCnpj': TextEditingController(text: widget.danoscorporais[i]['cpfCnpj'] ?? ''),
+        'endereco': TextEditingController(text: widget.danoscorporais[i]['endereco'] ?? ''),
+        'telefone': TextEditingController(text: widget.danoscorporais[i]['telefone'] ?? ''),
+        'numeroSinistro': TextEditingController(text: widget.danoscorporais[i]['numeroSinistro'] ?? ''),
+        'email': TextEditingController(text: widget.danoscorporais[i]['email'] ?? ''),
+        'relato': TextEditingController(text: widget.danoscorporais[i]['relato'] ?? ''),
+      };
+    }
+  }
+ 
+  @override
+  void didUpdateWidget(_BodilyInjuryListWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.danoscorporais.length != oldWidget.danoscorporais.length) {
+      _initializeControllers();
+    }
+  }
+ 
+  @override
+  void dispose() {
+    for (var controllerMap in _controllers.values) {
+      for (var controller in controllerMap.values) {
+        controller.dispose();
+      }
+    }
+    super.dispose();
+  }
+ 
+  void _showImageViewer(ImageProvider imageProvider) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          insetPadding: const EdgeInsets.all(10),
+          child: InteractiveViewer(
+            panEnabled: true,
+            minScale: 0.5,
+            maxScale: 4,
+            child: Container(
+              color: Colors.black,
+              child: Image(
+                image: imageProvider,
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+ 
+  void _confirmDeleteFoto(int index, XFile file) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Remover foto'),
+          content: const Text('Tem certeza que deseja excluir esta foto?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Excluir', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        );
+      },
+    );
+ 
+    if (confirm == true) {
+      setState(() {
+        final lista = widget.danoscorporais[index]['fotosLocais'] as List<XFile> ?? [];
+        lista.remove(file);
+      });
+ 
+      widget.onEditField(index, 'fotosLocais', 
+        widget.danoscorporais[index]['fotosLocais']);
+    }
+  }
+ 
+  void _confirmDeleteDocumento(int index, PlatformFile file) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Remover documento'),
+          content: const Text('Tem certeza que deseja excluir este documento?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text(
+                'Excluir',
+                style: TextStyle(color: Colors.red),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+ 
+    if (confirm == true) {
+      setState(() {
+        final lista = widget.danoscorporais[index]['documentosLocais'] as List<PlatformFile>;
+        lista.remove(file);
+      });
+ 
+      widget.onEditField(
+        index,
+        'documentosLocais',
+        widget.danoscorporais[index]['documentosLocais'],
+      );
+    }
+  }
+ 
+  Widget _buildField({
+    required String label,
+    required TextEditingController? controller,
+    required void Function(String) onChanged,
+    List<TextInputFormatter>? inputFormatters,
+    TextInputType keyboardType = TextInputType.text,
+    int maxLines = 1,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      maxLines: maxLines,
+      onChanged: onChanged,
+      decoration: InputDecoration(
+        label: Text(label),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        isDense: true,
+      ),
+    );
+  }
+ 
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (widget.danoscorporais.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Column(
+                children: [
+                  Text(
+                    'Nenhum dano corporal adicionado',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey.shade500,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                    ElevatedButton.icon(
+                        onPressed: () {
+                          const uuid = Uuid();
+                          widget.onAdd({
+                            'id': uuid.v4(),
+                            'nome': '',
+                            'cpfCnpj': '',
+                            'endereco': '',
+                            'telefone': '',
+                            'numeroSinistro': '',
+                            'email': '',
+                            'relato': '',
+                          });
+                        },
+                        icon: const Icon(Icons.add),
+                        label: const Text('Adicionar Dano Corporal'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFD32F2F),
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                ],
+            ),
+          )
+        else
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: widget.danoscorporais.length,
+            itemBuilder: (context, index) {
+              final dano = widget.danoscorporais[index];
+              final ctrls = _controllers[index] ?? {};
+ 
+              return Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Dano Corporal ${index + 1}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFFD32F2F),
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            if (widget.onUploadFoto != null)
+                              IconButton(
+                                icon: const Icon(Icons.photo_outlined, color: Color(0xFFD32F2F), size: 18),
+                                onPressed: () => widget.onUploadFoto?.call(index),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                tooltip: 'Adicionar fotos',
+                              ),
+                            if (widget.onUploadDocumento != null)
+                              IconButton(
+                                icon: const Icon(Icons.description_outlined, color: Color(0xFFD32F2F), size: 18),
+                                onPressed: () => widget.onUploadDocumento?.call(index),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                tooltip: 'Adicionar documentos',
+                              ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                              onPressed: () => widget.onRemove(index),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+ 
+                    // Campos
+                    _buildField(
+                      label: 'Nome *',
+                      controller: ctrls['nome'],
+                      onChanged: (val) => widget.onEditField(index, 'nome', val),
+                    ),
+                    const SizedBox(height: 8),
+ 
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildField(
+                            label: 'CPF/CNPJ',
+                            controller: ctrls['cpfCnpj'],
+                            inputFormatters: [_cpfCnpjFormatter],
+                            onChanged: (val) => widget.onEditField(index, 'cpfCnpj', val),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildField(
+                            label: 'Telefone',
+                            controller: ctrls['telefone'],
+                            inputFormatters: [_telefoneFormatter],
+                            onChanged: (val) => widget.onEditField(index, 'telefone', val),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+ 
+                    _buildField(
+                      label: 'Endereço',
+                      controller: ctrls['endereco'],
+                      onChanged: (val) => widget.onEditField(index, 'endereco', val),
+                    ),
+                    const SizedBox(height: 8),
+ 
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildField(
+                            label: 'Nº Sinistro',
+                            controller: ctrls['numeroSinistro'],
+                            onChanged: (val) => widget.onEditField(index, 'numeroSinistro', val),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildField(
+                            label: 'E-mail',
+                            controller: ctrls['email'],
+                            keyboardType: TextInputType.emailAddress,
+                            onChanged: (val) => widget.onEditField(index, 'email', val),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+ 
+                    _buildField(
+                      label: 'Relato do Evento',
+                      controller: ctrls['relato'],
+                      onChanged: (val) => widget.onEditField(index, 'relato', val),
+                      maxLines: 3,
+                    ),
+ 
+                    // 🆕 FOTOS
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Fotos do Dano Corporal',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          if (((dano['fotosUrls'] as List<String>?)?.isEmpty ?? true) &&
+                              ((dano['fotosLocais'] as List<XFile>?)?.isEmpty ?? true))
+                            Text(
+                              'Nenhuma foto',
+                              style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                            )
+                          else
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                // Fotos salvas no Firestore (URLs)
+                                ...((dano['fotosUrls'] as List<String>?) ?? []).map((url) {
+                                  return Container(
+                                    width: 60,
+                                    height: 60,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: Colors.grey.shade300),
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          _showImageViewer(NetworkImage(url));
+                                        },
+                                        child: Image.network(url, fit: BoxFit.cover),
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                                // Fotos locais (antes de salvar)
+                                ...((dano['fotosLocais'] as List<XFile>?) ?? []).map((xfile) {
+                                  return FutureBuilder<Uint8List>(
+                                    future: xfile.readAsBytes(),
+                                    builder: (context, snapshot) {
+                                      if (!snapshot.hasData) {
+                                        return Container(
+                                          width: 60,
+                                          height: 60,
+                                          alignment: Alignment.center,
+                                          child: const CircularProgressIndicator(strokeWidth: 2),
+                                        );
+                                      }
+ 
+                                      return Stack(
+                                        clipBehavior: Clip.none,
+                                        children: [
+                                          GestureDetector(
+                                            onTap: () {
+                                              _showImageViewer(MemoryImage(snapshot.data!));
+                                            },
+                                            child: ClipRRect(
+                                              borderRadius: BorderRadius.circular(6),
+                                              child: Image.memory(
+                                                snapshot.data!,
+                                                width: 60,
+                                                height: 60,
+                                                fit: BoxFit.cover,
+                                              ),
+                                            ),
+                                          ),
+                                          Positioned(
+                                            top: -5,
+                                            right: -5,
+                                            child: GestureDetector(
+                                              onTap: () => _confirmDeleteFoto(index, xfile),
+                                              child: Container(
+                                                width: 18,
+                                                height: 18,
+                                                decoration: const BoxDecoration(
+                                                  color: Colors.red,
+                                                  shape: BoxShape.circle,
+                                                ),
+                                                child: const Icon(Icons.close, size: 12, color: Colors.white),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  );
+                                }).toList(),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ),
+ 
+                    // 🆕 DOCUMENTOS
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Documentos do Dano Corporal',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          if (((dano['documentosUrls'] as List<String>?)?.isEmpty ?? true) &&
+                              ((dano['documentosLocais'] as List<PlatformFile>?)?.isEmpty ?? true))
+                            Text(
+                              'Nenhum documento',
+                              style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                            )
+                          else
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Documentos salvos no Firestore (URLs)
+                                ...((dano['documentosUrls'] as List<String>?) ?? []).map((url) {
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 2),
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.description, size: 14, color: Colors.grey),
+                                        const SizedBox(width: 4),
+                                        Expanded(
+                                          child: Text(
+                                            url.split('/').last,
+                                            style: const TextStyle(fontSize: 9),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }).toList(),
+                                // Documentos locais (antes de salvar)
+                                ...((dano['documentosLocais'] as List<PlatformFile>?) ?? []).map((file) {
+                                  return Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade100,
+                                          borderRadius: BorderRadius.circular(6),
+                                          border: Border.all(color: Colors.grey.shade300, width: 0.8),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.cloud_upload, size: 14, color: Colors.orange),
+                                            const SizedBox(width: 5),
+                                            ConstrainedBox(
+                                              constraints: const BoxConstraints(maxWidth: 120),
+                                              child: Text(
+                                                file.name,
+                                                style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Positioned(
+                                        top: -5,
+                                        right: -5,
+                                        child: GestureDetector(
+                                          onTap: () => _confirmDeleteDocumento(index, file),
+                                          child: Container(
+                                            width: 18,
+                                            height: 18,
+                                            decoration: const BoxDecoration(
+                                              color: Colors.red,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: const Icon(Icons.close, size: 12, color: Colors.white),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                }).toList(),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+ 
+        const SizedBox(height: 16),
+        if (widget.danoscorporais.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: ElevatedButton.icon(
+              onPressed: () {
+                const uuid = Uuid();
+                widget.onAdd({
+                  'id': uuid.v4(),
+                  'nome': '',
+                  'cpfCnpj': '',
+                  'endereco': '',
+                  'telefone': '',
+                  'numeroSinistro': '',
+                  'email': '',
+                  'relato': '',
+                });
+              },
+              icon: const Icon(Icons.add),
+              label: const Text('Adicionar Outro Dano Corporal'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFD32F2F),
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+ 
+// ═════════════════════════════════════════════════════════════════════════════
+// 🆕 WIDGET PARA LISTA DE DANOS MATERIAIS
+// ═════════════════════════════════════════════════════════════════════════════
+ 
+class _MaterialDamageListWidget extends StatefulWidget {
+  final List<Map<String, dynamic>> danosmateriais;
+  final Function(Map<String, dynamic>) onAdd;
+  final Function(int) onRemove;
+  final Function(int, String, dynamic) onEditField;
+  final Function(int)? onUploadFoto;
+  final Function(int)? onUploadDocumento;
+ 
+  const _MaterialDamageListWidget({
+    Key? key,
+    required this.danosmateriais,
+    required this.onAdd,
+    required this.onRemove,
+    required this.onEditField,
+    this.onUploadFoto,
+    this.onUploadDocumento,
+  }) : super(key: key);
+ 
+  @override
+  State<_MaterialDamageListWidget> createState() => _MaterialDamageListWidgetState();
+}
+ 
+class _MaterialDamageListWidgetState extends State<_MaterialDamageListWidget> {
+  late Map<int, Map<String, TextEditingController>> _controllers = {};
+ 
+  final MaskTextInputFormatter _cpfCnpjFormatter = MaskTextInputFormatter(
+    mask: '###.###.###-##',
+    filter: {"#": RegExp(r'[0-9]')},
+    type: MaskAutoCompletionType.lazy,
+  );
+ 
+  final MaskTextInputFormatter _telefoneFormatter = MaskTextInputFormatter(
+    mask: '(##) #####-####',
+    filter: {"#": RegExp(r'[0-9]')},
+    type: MaskAutoCompletionType.lazy,
+  );
+ 
+  final List<String> _tiposPatrimonio = ['Casa', 'Estabelecimento', 'Veículo', 'Outros'];
+ 
+  @override
+  void initState() {
+    super.initState();
+    _initializeControllers();
+  }
+ 
+  void _initializeControllers() {
+    for (var map in _controllers.values) {
+      for (var c in map.values) {
+        c.dispose();
+      }
+    }
+    _controllers.clear();
+ 
+    for (int i = 0; i < widget.danosmateriais.length; i++) {
+      _controllers[i] = {
+        'nome': TextEditingController(text: widget.danosmateriais[i]['nome'] ?? ''),
+        'cpfCnpj': TextEditingController(text: widget.danosmateriais[i]['cpfCnpj'] ?? ''),
+        'endereco': TextEditingController(text: widget.danosmateriais[i]['endereco'] ?? ''),
+        'telefone': TextEditingController(text: widget.danosmateriais[i]['telefone'] ?? ''),
+        'numeroSinistro': TextEditingController(text: widget.danosmateriais[i]['numeroSinistro'] ?? ''),
+        'email': TextEditingController(text: widget.danosmateriais[i]['email'] ?? ''),
+        'descricao': TextEditingController(text: widget.danosmateriais[i]['descricao'] ?? ''),
+        'relato': TextEditingController(text: widget.danosmateriais[i]['relato'] ?? ''),
+      };
+    }
+  }
+ 
+  @override
+  void didUpdateWidget(_MaterialDamageListWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.danosmateriais.length != oldWidget.danosmateriais.length) {
+      _initializeControllers();
+    }
+  }
+ 
+  @override
+  void dispose() {
+    for (var controllerMap in _controllers.values) {
+      for (var controller in controllerMap.values) {
+        controller.dispose();
+      }
+    }
+    super.dispose();
+  }
+ 
+  
+  void _showImageViewer(ImageProvider imageProvider) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          insetPadding: const EdgeInsets.all(10),
+          child: InteractiveViewer(
+            panEnabled: true,
+            minScale: 0.5,
+            maxScale: 4,
+            child: Container(
+              color: Colors.black,
+              child: Image(
+                image: imageProvider,
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+ 
+  void _confirmDeleteFoto(int index, XFile file) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Remover foto'),
+          content: const Text('Tem certeza que deseja excluir esta foto?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Excluir', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        );
+      },
+    );
+ 
+    if (confirm == true) {
+      setState(() {
+        final lista = widget.danosmateriais[index]['fotosLocais'] as List<XFile> ?? [];
+        lista.remove(file);
+      });
+ 
+      widget.onEditField(index, 'fotosLocais', 
+        widget.danosmateriais[index]['fotosLocais']);
+    }
+  }
+ 
+  void _confirmDeleteDocumento(int index, PlatformFile file) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Remover documento'),
+          content: const Text('Tem certeza que deseja excluir este documento?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text(
+                'Excluir',
+                style: TextStyle(color: Colors.red),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+ 
+    if (confirm == true) {
+      setState(() {
+        final lista = widget.danosmateriais[index]['documentosLocais'] as List<PlatformFile>;
+        lista.remove(file);
+      });
+ 
+      widget.onEditField(
+        index,
+        'documentosLocais',
+        widget.danosmateriais[index]['documentosLocais'],
+      );
+    }
+  }
+ 
+  Widget _buildField({
+    required String label,
+    required TextEditingController? controller,
+    required void Function(String) onChanged,
+    List<TextInputFormatter>? inputFormatters,
+    TextInputType keyboardType = TextInputType.text,
+    int maxLines = 1,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      maxLines: maxLines,
+      onChanged: onChanged,
+      decoration: InputDecoration(
+        label: Text(label),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        isDense: true,
+      ),
+    );
+  }
+ 
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (widget.danosmateriais.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Column(
+                children: [
+                  Text(
+                    'Nenhum dano material adicionado',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey.shade500,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      const uuid = Uuid();
+                      widget.onAdd({
+                        'id': uuid.v4(),
+                        'nome': '',
+                        'cpfCnpj': '',
+                        'endereco': '',
+                        'telefone': '',
+                        'numeroSinistro': '',
+                        'email': '',
+                        'relato': '',
+                      });
+                    },
+                    icon: const Icon(Icons.add),
+                    label: const Text('Adicionar Dano Material'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFD32F2F),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    ),
+                  ),
+                ],
+            ),
+          )
+        else
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: widget.danosmateriais.length,
+            itemBuilder: (context, index) {
+              final dano = widget.danosmateriais[index];
+              final ctrls = _controllers[index] ?? {};
+ 
+              return Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Dano Material ${index + 1}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFFF57F17),
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            if (widget.onUploadFoto != null)
+                              IconButton(
+                                icon: const Icon(Icons.photo_outlined, color: Color(0xFFF57F17), size: 18),
+                                onPressed: () => widget.onUploadFoto?.call(index),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                tooltip: 'Adicionar fotos',
+                              ),
+                            if (widget.onUploadDocumento != null)
+                              IconButton(
+                                icon: const Icon(Icons.description_outlined, color: Color(0xFFF57F17), size: 18),
+                                onPressed: () => widget.onUploadDocumento?.call(index),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                tooltip: 'Adicionar documentos',
+                              ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                              onPressed: () => widget.onRemove(index),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+ 
+                    // Campos
+                    _buildField(
+                      label: 'Nome *',
+                      controller: ctrls['nome'],
+                      onChanged: (val) => widget.onEditField(index, 'nome', val),
+                    ),
+                    const SizedBox(height: 8),
+ 
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildField(
+                            label: 'CPF/CNPJ',
+                            controller: ctrls['cpfCnpj'],
+                            inputFormatters: [_cpfCnpjFormatter],
+                            onChanged: (val) => widget.onEditField(index, 'cpfCnpj', val),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildField(
+                            label: 'Telefone',
+                            controller: ctrls['telefone'],
+                            inputFormatters: [_telefoneFormatter],
+                            onChanged: (val) => widget.onEditField(index, 'telefone', val),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+ 
+                    _buildField(
+                      label: 'Endereço',
+                      controller: ctrls['endereco'],
+                      onChanged: (val) => widget.onEditField(index, 'endereco', val),
+                    ),
+                    const SizedBox(height: 8),
+ 
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildField(
+                            label: 'Nº Sinistro',
+                            controller: ctrls['numeroSinistro'],
+                            onChanged: (val) => widget.onEditField(index, 'numeroSinistro', val),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildField(
+                            label: 'E-mail',
+                            controller: ctrls['email'],
+                            keyboardType: TextInputType.emailAddress,
+                            onChanged: (val) => widget.onEditField(index, 'email', val),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+ 
+                    _buildField(
+                      label: 'Relato do Evento',
+                      controller: ctrls['relato'],
+                      onChanged: (val) => widget.onEditField(index, 'relato', val),
+                      maxLines: 3,
+                    ),
+ 
+                    // 🆕 FOTOS
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Fotos do Dano Corporal',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          if (((dano['fotosUrls'] as List<String>?)?.isEmpty ?? true) &&
+                              ((dano['fotosLocais'] as List<XFile>?)?.isEmpty ?? true))
+                            Text(
+                              'Nenhuma foto',
+                              style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                            )
+                          else
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                // Fotos salvas no Firestore (URLs)
+                                ...((dano['fotosUrls'] as List<String>?) ?? []).map((url) {
+                                  return Container(
+                                    width: 60,
+                                    height: 60,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: Colors.grey.shade300),
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          _showImageViewer(NetworkImage(url));
+                                        },
+                                        child: Image.network(url, fit: BoxFit.cover),
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                                // Fotos locais (antes de salvar)
+                                ...((dano['fotosLocais'] as List<XFile>?) ?? []).map((xfile) {
+                                  return FutureBuilder<Uint8List>(
+                                    future: xfile.readAsBytes(),
+                                    builder: (context, snapshot) {
+                                      if (!snapshot.hasData) {
+                                        return Container(
+                                          width: 60,
+                                          height: 60,
+                                          alignment: Alignment.center,
+                                          child: const CircularProgressIndicator(strokeWidth: 2),
+                                        );
+                                      }
+ 
+                                      return Stack(
+                                        clipBehavior: Clip.none,
+                                        children: [
+                                          GestureDetector(
+                                            onTap: () {
+                                              _showImageViewer(MemoryImage(snapshot.data!));
+                                            },
+                                            child: ClipRRect(
+                                              borderRadius: BorderRadius.circular(6),
+                                              child: Image.memory(
+                                                snapshot.data!,
+                                                width: 60,
+                                                height: 60,
+                                                fit: BoxFit.cover,
+                                              ),
+                                            ),
+                                          ),
+                                          Positioned(
+                                            top: -5,
+                                            right: -5,
+                                            child: GestureDetector(
+                                              onTap: () => _confirmDeleteFoto(index, xfile),
+                                              child: Container(
+                                                width: 18,
+                                                height: 18,
+                                                decoration: const BoxDecoration(
+                                                  color: Colors.red,
+                                                  shape: BoxShape.circle,
+                                                ),
+                                                child: const Icon(Icons.close, size: 12, color: Colors.white),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  );
+                                }).toList(),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ),
+ 
+                    // 🆕 DOCUMENTOS
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Documentos do Dano Corporal',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          if (((dano['documentosUrls'] as List<String>?)?.isEmpty ?? true) &&
+                              ((dano['documentosLocais'] as List<PlatformFile>?)?.isEmpty ?? true))
+                            Text(
+                              'Nenhum documento',
+                              style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                            )
+                          else
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Documentos salvos no Firestore (URLs)
+                                ...((dano['documentosUrls'] as List<String>?) ?? []).map((url) {
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 2),
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.description, size: 14, color: Colors.grey),
+                                        const SizedBox(width: 4),
+                                        Expanded(
+                                          child: Text(
+                                            url.split('/').last,
+                                            style: const TextStyle(fontSize: 9),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }).toList(),
+                                // Documentos locais (antes de salvar)
+                                ...((dano['documentosLocais'] as List<PlatformFile>?) ?? []).map((file) {
+                                  return Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade100,
+                                          borderRadius: BorderRadius.circular(6),
+                                          border: Border.all(color: Colors.grey.shade300, width: 0.8),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.cloud_upload, size: 14, color: Colors.orange),
+                                            const SizedBox(width: 5),
+                                            ConstrainedBox(
+                                              constraints: const BoxConstraints(maxWidth: 120),
+                                              child: Text(
+                                                file.name,
+                                                style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Positioned(
+                                        top: -5,
+                                        right: -5,
+                                        child: GestureDetector(
+                                          onTap: () => _confirmDeleteDocumento(index, file),
+                                          child: Container(
+                                            width: 18,
+                                            height: 18,
+                                            decoration: const BoxDecoration(
+                                              color: Colors.red,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: const Icon(Icons.close, size: 12, color: Colors.white),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                }).toList(),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+ 
+        const SizedBox(height: 16),
+        if (widget.danosmateriais.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: ElevatedButton.icon(
+              onPressed: () {
+                const uuid = Uuid();
+                widget.onAdd({
+                  'id': uuid.v4(),
+                  'nome': '',
+                  'cpfCnpj': '',
+                  'endereco': '',
+                  'telefone': '',
+                  'numeroSinistro': '',
+                  'email': '',
+                  'relato': '',
+                });
+              },
+              icon: const Icon(Icons.add),
+              label: const Text('Adicionar Outro Dano Corporal'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFD32F2F),
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 }

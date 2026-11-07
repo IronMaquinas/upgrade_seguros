@@ -25,6 +25,9 @@ class ThirdParty {
   List<XFile>? documentos;   // documentos locais
   List<String>? documentosUrls; // urls dos documentos no Firestore
   double franquia; // valor da franquia
+  String? nomeContatoTerceiro;
+  String? telefoneContatoTerceiro;
+  String? registroSeguradoraTerceiro;
 
   ThirdParty({
     required this.nome,
@@ -47,6 +50,9 @@ class ThirdParty {
     this.documentosUrls,
     this.franquia = 0.0,
     required this.enderecoTerceiro,
+    this.nomeContatoTerceiro,
+    this.telefoneContatoTerceiro,
+    this.registroSeguradoraTerceiro,
   });
 
   Map<String, dynamic> toMap() {
@@ -69,6 +75,9 @@ class ThirdParty {
       'documentosUrls': documentosUrls ?? [],
       'franquia': franquia,
       'endereco_terceiro': enderecoTerceiro,
+      'nomeContatoTerceiro': nomeContatoTerceiro,
+      'telefoneContatoTerceiro': telefoneContatoTerceiro,
+      'registroSeguradoraTerceiro': registroSeguradoraTerceiro,
     };
   }
 
@@ -92,6 +101,9 @@ class ThirdParty {
       documentosUrls: map['documentosUrls'] != null ? List<String>.from(map['documentosUrls']) : [],
       franquia: (map['franquia'] ?? 0.0).toDouble(),
       enderecoTerceiro: map['endereco_terceiro'] ?? '',
+      nomeContatoTerceiro: map['nomeContatoTerceiro'] as String?,
+      telefoneContatoTerceiro: map['telefoneContatoTerceiro'] as String?,
+      registroSeguradoraTerceiro: map['registroSeguradoraTerceiro'] as String?,
     );
   }
 }

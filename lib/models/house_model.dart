@@ -32,4 +32,21 @@ class House {
       documentosUrls: List<String>.from(map['documentosUrls'] ?? []),
     );
   }
+
+    // ✨ NOVO: copyWith para edições imutáveis
+      House copyWith({
+      String? localHouse,
+      String? tipoImovel,
+      double? valorImovel,
+      List<String>? fotosUrls,
+      List<String>? documentosUrls,
+    }) {
+      return House(
+        localHouse: localHouse ?? this.localHouse,
+        tipoImovel: tipoImovel ?? this.tipoImovel,
+        valorImovel: valorImovel != null ? valorImovel : this.valorImovel,  // ← Mude aqui
+        fotosUrls: fotosUrls ?? this.fotosUrls,
+        documentosUrls: documentosUrls ?? this.documentosUrls,
+      );
+    }
 }

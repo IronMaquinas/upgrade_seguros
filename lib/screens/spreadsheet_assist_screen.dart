@@ -13,6 +13,8 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_google_places_sdk/flutter_google_places_sdk.dart' hide LatLng;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:upgrade_seguros/dialogs/apolice_selection_dialog.dart';
+import 'package:upgrade_seguros/models/apolice_model.dart';
 import 'package:upgrade_seguros/models/vehicle_model.dart';
 import 'package:upgrade_seguros/services/config_service.dart';
 import '../models/claim_model.dart';
@@ -28,10 +30,12 @@ import '../screens/assist_detail_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher_string.dart';
+import 'package:upgrade_seguros/models/workshop_model.dart';
 
 class SpreadsheetAssistScreen extends StatefulWidget {
-  const SpreadsheetAssistScreen({super.key});
-
+  final String tipoAssistencia;
+  const SpreadsheetAssistScreen({Key? key, required this.tipoAssistencia}) : super(key: key);
+  
   @override
   State<SpreadsheetAssistScreen> createState() => _SpreadsheetAssistScreenState();
 }
@@ -47,15 +51,20 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
   DateTime? _dataAgendamento;
   TimeOfDay? _horaAgendamento;
   final List<Map<String, dynamic>> _tarefasLocais = [];
+  bool _isRetroativo = false;
+  DateTime? _dataRecebimentoComunicado;
+  TimeOfDay? _horaRecebimentoComunicado;
 
-  Vehicle? _veiculoSelecionado;         // veículo escolhido da lista do cliente
-  bool _veiculoManual = false;          // true = digitar manualmente
+
+  Vehicle? _veiculoSelecionado;
+  bool _veiculoManual = false;
   final TextEditingController _veiculoMarcaCtrl = TextEditingController();
   final TextEditingController _veiculoModeloCtrl = TextEditingController();
   final TextEditingController _veiculoCorCtrl = TextEditingController();
   final TextEditingController _veiculoAnoCtrl = TextEditingController();
   final TextEditingController _veiculoPlacaCtrl = TextEditingController();
   final TextEditingController _veiculoChassiCtrl = TextEditingController();
+  final TextEditingController _outroAssistenciaCtrl = TextEditingController(); 
 
   // Campos de assistência
   final TextEditingController _tipoAssistenciaCtrl = TextEditingController();
@@ -78,16 +87,40 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
   List<String> _seguradoras = [];
   final TextEditingController _numeroApoliceCtrl = TextEditingController();
 
+  final TextEditingController _cpfCnpjCtrl = TextEditingController();
+  final TextEditingController _telefoneCtrl = TextEditingController();
+  final TextEditingController _vigenciaCtrl = TextEditingController();
+
+  // ─── Controllers específicos de RESIDENCIAL ───────────────────────────────
+  final TextEditingController _tipoServicoCtrl = TextEditingController();
+  final TextEditingController _outroServicoCtrl = TextEditingController();
+  final TextEditingController _enderecoCtrl = TextEditingController();
+  final TextEditingController _telefoneContatoLocalCtrl  = TextEditingController(); // telefoneContatoLocal
+  final TextEditingController _telefoneClienteCtrl = TextEditingController(); // telefoneCliente
+
   // Google Places
   final _places = FlutterGooglePlacesSdk('AIzaSyCoE3ZT1_EMmET0RaSmBeFMWQiYwJcl1YE');
   LatLng? _localOcorrenciaLatLng;
   LatLng? _localDestinoLatLng;
   LatLng? _oficinaTerceiroLatLng;
+  LatLng? _enderecoLatLng;
+
+  bool _localOcorrenciaManualMode = false;
+  bool _localDestinoManualMode = false;
 
   bool _isSaving = false;
   bool _isUploadingAnexos = false;
   String? _savedDocId;       // ID do doc após primeiro save (para tarefas)
   String? _savedNumero;      // número da assistência após primeiro save
+
+  String _vigenciaApolice = '';
+  String _nomeUsuarioLogado = 'Desconhecido';
+
+  List<Workshop> _workshopsDisponiveis = [];
+  Workshop? _workshopSelecionado;
+  bool _carregandoWorkshops = false;
+  List<String> _oficinasNomes = [];
+  final _oficinaNomeCtrl = TextEditingController();
 
   // Anexos
   final Map<String, List<XFile>> _anexos = {
@@ -103,8 +136,25 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
   @override
   void initState() {
     super.initState();
+    _loadNomeUsuario();
     _carregarSeguradoras();
     _loadConfig();
+    _carregarWorkshops();
+
+    // 🔥 Listener para resetar quando o nome for apagado
+     _clienteBuscaCtrl.addListener(() {
+      if (_clienteBuscaCtrl.text.trim().isEmpty) {
+        setState(() {
+          _cliente = null;
+          _cpfCnpjCtrl.clear();
+          _telefoneCtrl.clear();
+          _contatoCtrl.clear();
+          _numeroApoliceCtrl.clear();
+          _vigenciaCtrl.clear();
+          _vigenciaApolice = ''; // se você ainda tiver essa variável
+        });
+      }
+    });
   }
 
   @override
@@ -133,44 +183,129 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
     _veiculoChassiCtrl.dispose();
     _tempoSlaCtrl.dispose();
     _outroVidroCtrl.dispose();
+    _outroAssistenciaCtrl.dispose();
+  }
+
+  String _formatarVigencia(DateTime data) {
+    return DateFormat('dd/MM/yyyy').format(data);
+  }
+
+  Future<void> _loadNomeUsuario() async {
+    final nome = await _authService.getUserName();
+    setState(() => _nomeUsuarioLogado = nome);
+  }
+
+  // Método para carregar workshops do Firestore
+  Future<void> _carregarWorkshops() async {
+    setState(() => _carregandoWorkshops = true);
+    try {
+      final docs = await FirebaseFirestore.instance
+          .collection('workshops')
+          .orderBy('nome')
+          .get();
+      
+      setState(() {
+        _workshopsDisponiveis = docs.docs
+            .map((doc) => Workshop.fromMap({...doc.data(), 'id': doc.id}))
+            .toList();
+        
+        // ✨ NOVO: Extrair nomes
+        _oficinasNomes = _workshopsDisponiveis
+            .map((w) => w.nome.toUpperCase())
+            .toList();
+        
+        _carregandoWorkshops = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Erro ao carregar workshops: $e');
+      setState(() => _carregandoWorkshops = false);
+    }
   }
 
   Future<void> _loadConfig() async {
-    final minutos = await ConfigService().getSlaAssistencia('Veicular');
+    final tipoRamo = widget.tipoAssistencia == 'veiculo' ? 'Veicular' : 'Residencial';
+    final minutos = await ConfigService().getSlaAssistencia(tipoRamo);
     setState(() {
       _tempoSlaCtrl.text = minutos.toString();
     });
   }
 
-  // ABRIR BUSCA DE CLIENTES
   Future<void> _abrirBuscaCliente() async {
     final result = await showDialog<ClientSearchResult>(
       context: context,
       useRootNavigator: false,
       builder: (_) => ClientSearchDialog(
         initialQuery: _clienteBuscaCtrl.text,
-        onClientSelected: (c) => c != null
-            ? ClientSearchResult.client(c)
-            : null,
+        onClientSelected: (c) => c != null ? ClientSearchResult.client(c) : null,
       ),
     );
+    if (result == null) return;
 
-    if (result?.client != null) {
-      setState(() {
-        _cliente = result!.client!;
-        _clienteBuscaCtrl.text = _cliente!.nome;
-        
-        // 🔥 NOVO: Carrega apólice ativa
-        final apoliceAtiva = _cliente!.apolices.firstWhere(
-          (a) => a.dataInicio.isBefore(DateTime.now()) &&
-                a.dataFim.isAfter(DateTime.now()),
-          orElse: () => _cliente!.apolices.isNotEmpty 
-              ? _cliente!.apolices.first 
-              : null as dynamic,
+    if (result.client != null) {
+      final cliente = result.client!;
+      
+      // 🔥 DEFINE OS RAMOS VÁLIDOS PARA ESSE TIPO
+      final ramosValidos = widget.tipoAssistencia == 'veiculo'
+          ? ['Frota', 'Veículo Individual', 'Transporte', 'Civil Ônibus (RCO)']
+          : ['Residencial'];
+
+      // 🔥 FILTRA APÓLICES - DEVE ESTAR EM UM DOS RAMOS VÁLIDOS E ATIVA
+      final apolicesDoRamo = cliente.apolices
+          .where((a) => ramosValidos.contains(a.ramo) &&
+                a.dataInicio.isBefore(DateTime.now()) &&
+                a.dataFim.isAfter(DateTime.now()))
+          .toList();
+
+      Apolice? apoliceParaMostrar;
+
+      if (apolicesDoRamo.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('⚠️ Cliente não possui apólice ativa para ${widget.tipoAssistencia == 'veiculo' ? 'veículos' : 'residencial'}.'),
+            backgroundColor: Colors.orange,
+          ),
         );
-        
-        if (apoliceAtiva != null) {
-          _numeroApoliceCtrl.text = apoliceAtiva.numeroApolice;
+        apoliceParaMostrar = null;
+      } else if (apolicesDoRamo.length > 1) {
+        // 🔥 ABRE MODAL PARA ESCOLHER
+        apoliceParaMostrar = await showDialog<Apolice>(
+          context: context,
+          builder: (_) => ApoliceSelectionDialog(
+            apolices: apolicesDoRamo,
+            ramoSelecionado: widget.tipoAssistencia == 'veiculo' ? 'Veicular' : 'Residencial',
+          ),
+        );
+      } else {
+        // Uma única apólice, seleciona automaticamente
+        apoliceParaMostrar = apolicesDoRamo.first;
+      }
+
+      // ✅ PREENCHE OS DADOS DO CLIENTE (SEMPRE)
+      final cpfCnpjFormatado = cliente.cnpjCpf.length <= 11
+          ? BRFormatters.formatarCPF(cliente.cnpjCpf)
+          : BRFormatters.formatarCNPJ(cliente.cnpjCpf);
+
+      final telefoneFormatado = cliente.contatoTelefone.isNotEmpty
+          ? BRFormatters.formatarTelefone(cliente.contatoTelefone)
+          : 'Não informado';
+
+      setState(() {
+        _cliente = cliente;
+        _clienteBuscaCtrl.text = cliente.nome;
+        _cpfCnpjCtrl.text = cpfCnpjFormatado;
+        _telefoneCtrl.text = telefoneFormatado;
+        _contatoCtrl.text = cliente.contato.isNotEmpty ? cliente.contato : 'Não informado';
+
+        // ✅ PREENCHE DADOS DA APÓLICE (SE HOUVER)
+        if (apoliceParaMostrar != null) {
+          _numeroApoliceCtrl.text = apoliceParaMostrar.numeroApolice;
+          _vigenciaApolice = BRFormatters.formatarData(apoliceParaMostrar.dataFim);
+          _seguradoraCtrl.text = apoliceParaMostrar.seguradora;
+        } else {
+          // Limpa campos da apólice se não encontrou
+          _numeroApoliceCtrl.clear();
+          _vigenciaApolice = '';
+          _seguradoraCtrl.clear();
         }
       });
     }
@@ -187,6 +322,143 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
           .map((doc) => doc['nome'] as String)
           .toList();
     });
+  }
+
+  /// Abre popup para selecionar data/hora do comunicado retroativo
+  Future<void> _abrirPopupRecebimentoComunicado() async {
+    DateTime dataSelecionada = _dataRecebimentoComunicado ?? DateTime.now();
+    TimeOfDay horaSelecionada = _horaRecebimentoComunicado ?? TimeOfDay.now();
+  
+    final resultado = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (ctx, setStateDialog) => AlertDialog(
+          title: const Text('Quando a assistência foi comunicada?'),
+          // ✨ NOVA MENSAGEM INFORMATIVA
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // ✨ MENSAGEM DE INSTRUÇÃO
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    border: Border.all(color: Colors.blue.shade300),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    'Preencha somente se o atendimento já foi realizado e trata-se de atualização do sistema',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.blue.shade700,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // DATA
+                Row(
+                  children: [
+                    // DATA (Esquerda)
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: dataSelecionada,
+                            firstDate: DateTime.now().subtract(const Duration(days: 60)),
+                            lastDate: DateTime.now(),
+                          );
+                          if (picked != null) {
+                            setStateDialog(() => dataSelecionada = picked);
+                          }
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey.shade300),
+                            borderRadius: BorderRadius.circular(8),
+                            color: Colors.grey.shade50,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.calendar_today_outlined, color: Colors.orange.shade700),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  DateFormat('dd/MM/yyyy').format(dataSelecionada),
+                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // HORA (Direita)
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () async {
+                          final picked = await showTimePicker(
+                            context: context,
+                            initialTime: horaSelecionada,
+                          );
+                          if (picked != null) {
+                            setStateDialog(() => horaSelecionada = picked);
+                          }
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey.shade300),
+                            borderRadius: BorderRadius.circular(8),
+                            color: Colors.grey.shade50,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.access_time_outlined, color: Colors.orange.shade700),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  horaSelecionada.format(context),
+                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Confirmar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  
+    if (resultado == true) {
+      setState(() {
+        _isRetroativo = true;
+        _dataRecebimentoComunicado = dataSelecionada;
+        _horaRecebimentoComunicado = horaSelecionada;
+      });
+    }
   }
 
   void _adicionarTarefaLocal() async {
@@ -520,6 +792,8 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
   }
 
   Future<void> _salvar({bool silent = true, bool notificarWhatsApp = false}) async {
+    final userId = _authService.getUserId();
+    final userEmail = _authService.getUserEmail();
     // Validações
     if (_cliente == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -528,7 +802,12 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
       return;
     }
 
-    if (_tipoAssistenciaCtrl.text.isEmpty) {
+    // Valida tipo de assistência (veicular) ou tipo de serviço (residencial)
+    late String tipoSelecionado = widget.tipoAssistencia == 'veiculo' 
+      ? _tipoAssistenciaCtrl.text 
+      : _tipoServicoCtrl.text;
+
+    if (tipoSelecionado.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Selecione o tipo de assistência')),
       );
@@ -542,11 +821,32 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
       return;
     }
 
+    // Validação: Se é "outro", campo descrição é obrigatório
+    if (widget.tipoAssistencia == 'veiculo' && _tipoAssistenciaCtrl.text == 'outro') {
+      if (_outroAssistenciaCtrl.text.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Descreva qual foi a requisição do cliente'))
+        );
+        setState(() => _isSaving = false);
+        return;
+      }
+    }
+
+    // ✨ VALIDAÇÃO: Se é retroativo, agendamento é obrigatório
+    if (_isRetroativo && _dataAgendamento == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ Se o comunicado é retroativo, a data de agendamento é obrigatória'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
     setState(() => _isSaving = true);
 
     try {
-      print('=== SALVANDO ASSISTÊNCIA ===');
-      print('DEBUG 1: Cliente selecionado: ${_cliente!.nome}');
 
       // Gera número de assistência
       final agora = DateTime.now();
@@ -557,21 +857,25 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
           '${agora.hour.toString().padLeft(2, '0')}'
           '${agora.minute.toString().padLeft(2, '0')}'
           '${agora.second.toString().padLeft(2, '0')}';
-      print('DEBUG 2: numeroAssistencia = $numeroAssistencia');
 
       // Configura SLA padrão (30 minutos para a maioria)
       final minutosSla = int.tryParse(_tempoSlaCtrl.text) ?? 30;  // ← Já vem preenchido da config
-      final slaPrevisto = DateTime.now().add(Duration(minutes: minutosSla));      print('DEBUG 3: slaPrevisto = $slaPrevisto');
-      final tipoSelecionado = _tipoAssistenciaCtrl.text;
+      final slaPrevisto = DateTime.now().add(Duration(minutes: minutosSla));
+      //final tipoSelecionado = _tipoAssistenciaCtrl.text;
       final ramoApolice = tipoSelecionado == 'Veicular' ? 'Veículo Individual' : 'Residencial';
 
       // Cria o claim como assistência
       final assist = Claim(
         idCliente: _cliente!.id,
         numeroSinistro: numeroAssistencia,
-        tipoOcorrencia: _tipoAssistenciaCtrl.text == 'vidro' && _tiposVidroSelecionados.isNotEmpty
-          ? 'vidro:${_tiposVidroSelecionados.join(',')}'
-          : _tipoAssistenciaCtrl.text,
+        tipoOcorrencia: widget.tipoAssistencia == 'veiculo' && _tipoAssistenciaCtrl.text == 'vidro' && _tiposVidroSelecionados.isNotEmpty
+        ? 'vidro:${_tiposVidroSelecionados.join(',')}'
+        : widget.tipoAssistencia == 'veiculo'
+            ? _tipoAssistenciaCtrl.text
+            : _tipoServicoCtrl.text,
+        tipoOcorrenciaOutro: widget.tipoAssistencia == 'veiculo'
+            ? (_tipoAssistenciaCtrl.text == 'outro' && _outroAssistenciaCtrl.text.isNotEmpty ? _outroAssistenciaCtrl.text : null)
+            : (_tipoServicoCtrl.text == 'outro' && _outroServicoCtrl.text.isNotEmpty ? _outroServicoCtrl.text : null),
         ramoSinistro: 'Assistência',
         dataOcorrencia: DateTime.now(),
         dataAviso: DateTime.now(),
@@ -582,25 +886,19 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
         dataUltimaAtualizacao: DateTime.now(),
         clientNome: _cliente!.nome,
         clientCnpjCpf: _cliente!.cnpjCpf,
-        numeroSeguradora: _cliente!.apolices
-          .firstWhere(
-            (a) => a.ramo == ramoApolice &&
-                  a.dataInicio.isBefore(DateTime.now()) &&
-                  a.dataFim.isAfter(DateTime.now()),
-            orElse: () => null as dynamic,
-          )
-          ?.numeroApolice ?? '',
+        numeroSeguradora: _numeroApoliceCtrl.text.isNotEmpty
+            ? _numeroApoliceCtrl.text
+            : '',
         status: 'Aberto',
-        enderecoTerceiro: _oficinaTerceiroCtrl.text,
+        enderecoTerceiro: widget.tipoAssistencia == 'veiculo' ? _oficinaTerceiroCtrl.text : _enderecoCtrl.text,
         localDestino: _localDestinoCtrl.text.isNotEmpty ? _localDestinoCtrl.text : null,
         nomeContato: _nomeContatoCtrl.text.isNotEmpty ? _nomeContatoCtrl.text : null,
-        telefoneContatoLocal: _contatoCtrl.text.isNotEmpty ? _contatoCtrl.text : null,
+        telefoneContatoLocal: _telefoneContatoLocalCtrl.text.isNotEmpty ? _telefoneContatoLocalCtrl.text : null,
         protocoloSeguradora: _protocoloSeguradoraCtrl.text.isNotEmpty ? _protocoloSeguradoraCtrl.text.toUpperCase() : null,
         valorFranquia: BRFormatters.parseFromMoeda(_franquiaCtrl.text),
         // 🆕 Campos de assistência
         tipo: 'assistencia',
-        tipoAssistencia: _tipoAssistenciaCtrl.text.toLowerCase().replaceAll(' ', '_'),
-        slaPrevisto: slaPrevisto,
+        tipoAssistencia: tipoSelecionado.toLowerCase().replaceAll(' ', '_'),        slaPrevisto: slaPrevisto,
         tempoSlaMinutos: minutosSla,
         dataAgendamento: _dataAgendamento,
         horaAgendamento: _horaAgendamento != null
@@ -615,21 +913,54 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
         telefoneCliente: _cliente!.contatoTelefone.isNotEmpty
           ? _cliente!.contatoTelefone
           : null,
-
+        enderecoOficina: _oficinaTerceiroCtrl.text.isNotEmpty
+          ? _oficinaTerceiroCtrl.text
+          : null,
+        responsavelId: userId,
+        responsavelEmail: userEmail,       
+        historicoStatus: [
+          {
+            'status': 'Aberto',
+            'data': Timestamp.now(),
+            'responsavel': userId,
+            'responsavelEmail': userEmail,
+            'registrado_por': _nomeUsuarioLogado,
+          }
+        ],
         veiculoSelecionado: _veiculoSelecionado ?? (
-        _veiculoMarcaCtrl.text.isNotEmpty ? Vehicle(
-          marca: _veiculoMarcaCtrl.text,
-          modelo: _veiculoModeloCtrl.text,
-          cor: _veiculoCorCtrl.text,
-          ano: int.tryParse(_veiculoAnoCtrl.text) ?? 0,
-          anomodelo: int.tryParse(_veiculoAnoCtrl.text) ?? 0,
-          placa: _veiculoPlacaCtrl.text.toUpperCase(),
-          chassi: _veiculoChassiCtrl.text.toUpperCase(),
-        ) : null
-      ),
-      
+          _veiculoMarcaCtrl.text.isNotEmpty ? Vehicle(
+            marca: _veiculoMarcaCtrl.text,
+            modelo: _veiculoModeloCtrl.text,
+            cor: _veiculoCorCtrl.text,
+            ano: int.tryParse(_veiculoAnoCtrl.text) ?? 0,
+            anomodelo: int.tryParse(_veiculoAnoCtrl.text) ?? 0,
+            placa: _veiculoPlacaCtrl.text.toUpperCase(),
+            chassi: _veiculoChassiCtrl.text.toUpperCase(),
+          ) : null
+        ),
+        dataRecebimentoComunicado: _isRetroativo ? _dataRecebimentoComunicado : null,
+        horaRecebimentoComunicado: _isRetroativo && _horaRecebimentoComunicado != null
+            ? '${_horaRecebimentoComunicado!.hour.toString().padLeft(2, '0')}:${_horaRecebimentoComunicado!.minute.toString().padLeft(2, '0')}'
+            : null,
       );
-      print('DEBUG 4: Claim criado: ${assist.numeroSinistro}');
+
+      // ✨ Se retroativo, adiciona data/hora do comunicado às anotações
+      if (_isRetroativo && _dataRecebimentoComunicado != null) {
+        final horaStr = _horaRecebimentoComunicado != null
+            ? ' ${_horaRecebimentoComunicado!.format(context)}'
+            : '';
+        final dataReceb = DateFormat('dd/MM/yyyy').format(_dataRecebimentoComunicado!);
+        
+        assist.anotacoes = [
+          {
+            'autor': '⏰ SISTEMA',
+            'conteudo': '[RETROATIVO] Comunicado recebido em: $dataReceb$horaStr',
+            'data': DateTime.now().toIso8601String(),
+            'tipo': 'retroativo',
+          },
+          ...?assist.anotacoes,
+        ];
+      }
 
       // Se houver anotações, adiciona
       if (_anotacoesCtrl.text.isNotEmpty) {
@@ -641,13 +972,10 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
             'data': DateTime.now().toIso8601String(),
           },
         ];
-        print('DEBUG 5: Anotações adicionadas');
       }
 
       // Salva no Firestore
-      print('DEBUG 6: Enviando para Firestore...');
       final docId = await _firestoreService.addClaim(assist);
-      print('DEBUG 7: docId recebido = "$docId"');
 
       if (docId == null || docId.isEmpty) {
         throw Exception('Falha ao obter ID do documento do Firestore');
@@ -684,8 +1012,6 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
         await _abrirWhatsApp(docId, numeroAssistencia);
       }
 
-      print('DEBUG 9: docId válido, preparando navegação');
-
       if (!silent) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Assistência criada com sucesso')),
@@ -693,17 +1019,13 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
       }
 
       // Redireciona para o detalhe
-      print('DEBUG 10: Antes de mounted check');
       if (mounted) {
-        print('DEBUG 11: Widget ainda mounted, navegando para AssistDetailScreen');
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (_) => AssistDetailScreen(assistId: docId),
           ),
         );
-        print('DEBUG 12: pushReplacement chamado');
       } else {
-        print('DEBUG 11: Widget não mounted, abortando navegação');
       }
     } catch (e) {
       print('❌ ERRO NA CATCH: $e');
@@ -717,10 +1039,21 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
         );
       }
     } finally {
-      print('DEBUG 13: Finalmente - definindo _isSaving = false');
       if (mounted) setState(() => _isSaving = false);
     }
   }
+
+  // --- Tipos de Serviços ---
+  static const _tiposServico = [
+    ('eletricista', '⚡ Eletricista'),
+    ('encanador', '🔧 Encanador'),
+    ('reparo_equipamentos', '🛠️ Reparo de Equipamentos'),
+    ('chaveiro', '🔑 Chaveiro'),
+    ('vidraceiro', '🪟 Vidraceiro'),
+    ('pintura', '🎨 Pintura'),
+    ('limpeza', '🧹 Limpeza'),
+    ('outro', 'ℹ️ Outro'),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -755,7 +1088,9 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: SingleChildScrollView(
+      body: Container(
+      color: Colors.grey.shade100,
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -768,16 +1103,27 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
               title: 'Cliente & Apólice',
               children: [
                 TextField(
+                  controller: _clienteBuscaCtrl,
                   onTap: _abrirBuscaCliente,
-                  readOnly: true,
                   decoration: InputDecoration(
                     labelText: 'Nome do Cliente',
-                    hintText: 'Clique para buscar cliente',
+                    hintText: 'Digite o nome ou clique para buscar',
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                     prefixIcon: const Icon(Icons.business),
-                    suffixIcon: const Icon(Icons.search),
+                    suffixIcon: _clienteBuscaCtrl.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () {
+                              setState(() {
+                                _clienteBuscaCtrl.clear();
+                                _cliente = null;
+                                _numeroApoliceCtrl.clear();
+                                _vigenciaApolice = '';
+                              });
+                            },
+                          )
+                        : const Icon(Icons.search),
                   ),
-                  controller: _clienteBuscaCtrl,
                 ),
                 if (_cliente != null) ...[
                   const SizedBox(height: 12),
@@ -790,7 +1136,7 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
                             labelText: 'CNPJ / CPF',
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                           ),
-                          controller: TextEditingController(text: _cliente!.cnpjCpf),
+                          controller: _cpfCnpjCtrl,
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -801,34 +1147,66 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
                             labelText: 'Nº Apólice',
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                           ),
-                          controller: _numeroApoliceCtrl,  // Usa o controller que já preenche
+                          controller: _numeroApoliceCtrl,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          readOnly: true,
+                          decoration: InputDecoration(
+                            labelText: 'Vigência da Apólice',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            prefixIcon: const Icon(Icons.calendar_today_outlined),
+                            suffixIcon: _vigenciaCtrl.text.isNotEmpty
+                                ? _statusVigenciaIcon(_vigenciaCtrl.text)
+                                : null,
+                          ),
+                          controller: _vigenciaCtrl,
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    readOnly: true,
-                    decoration: InputDecoration(
-                      labelText: 'Telefone do Cliente',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      prefixIcon: const Icon(Icons.phone_outlined),
-                    ),
-                      controller: TextEditingController(text: _cliente!.contatoTelefone),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          readOnly: true,
+                          decoration: InputDecoration(
+                            labelText: 'Telefone do Cliente',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            prefixIcon: const Icon(Icons.phone_outlined),
+                          ),
+                          controller: _telefoneCtrl,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          readOnly: true,
+                          decoration: InputDecoration(
+                            labelText: 'Nome do Contato (sócio/representante)',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            prefixIcon: const Icon(Icons.person_outline),
+                          ),
+                          controller: _contatoCtrl,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ],
             ),
-
             const SizedBox(height: 12),
-
+            if (widget.tipoAssistencia == 'veiculo') ...[
             // ── 2. Tipo de Assistência ───────────────────────────────────
             _buildSectionCard(
               icon: Icons.assignment,
               color: Colors.orange,
               title: 'Tipo de Assistência',
               children: [
-                // Linha 1: Seguradora (autocomplete) + Protocolo + Franquia
+                // ─────── LINHA 1: Seguradora + Protocolo + Franquia + SLA ────────
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -906,17 +1284,94 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
                         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       ),
                     ),
+                    // ✨ RETROATIVO - WIDTH DOBRADO (260)
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 260,
+                      child: GestureDetector(
+                        onTap: () async {
+                          if (!_isRetroativo) {
+                            await _abrirPopupRecebimentoComunicado();
+                          } else {
+                            showDialog(
+                              context: context,
+                              builder: (_) => AlertDialog(
+                                title: const Text('Comunicado Retroativo'),
+                                content: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (_dataRecebimentoComunicado != null)
+                                      Text(
+                                        '${DateFormat('dd/MM/yyyy').format(_dataRecebimentoComunicado!)} ${_horaRecebimentoComunicado != null ? _horaRecebimentoComunicado!.format(context) : ''}',
+                                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                      ),
+                                  ],
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () {
+                                      setState(() {
+                                        _isRetroativo = false;
+                                        _dataRecebimentoComunicado = null;
+                                        _horaRecebimentoComunicado = null;
+                                      });
+                                      Navigator.pop(context);
+                                    },
+                                    child: const Text('Remover'),
+                                  ),
+                                  TextButton(
+                                    onPressed: () async {
+                                      Navigator.pop(context);
+                                      await _abrirPopupRecebimentoComunicado();
+                                    },
+                                    child: const Text('Editar'),
+                                  ),
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context),
+                                    child: const Text('OK'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+                        },
+                        child: InputDecorator(
+                          decoration: InputDecoration(
+                            labelText: _isRetroativo ? 'Comunicado Retroativo' : 'Comunicado Retroativo',
+                            prefixIcon: Icon(
+                              _isRetroativo ? Icons.check_circle : Icons.circle_outlined,
+                              color: _isRetroativo ? Colors.orange : Colors.grey.shade400,
+                            ),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            helperText: _isRetroativo ? 'Clique para editar' : null,
+                            filled: _isRetroativo,
+                            fillColor: _isRetroativo ? Colors.orange.shade50 : Colors.transparent,
+                          ),
+                          child: Text(
+                            _isRetroativo && _dataRecebimentoComunicado != null
+                                ? '${DateFormat('dd/MM').format(_dataRecebimentoComunicado!)} ${_horaRecebimentoComunicado != null ? _horaRecebimentoComunicado!.format(context) : ''}'
+                                : '',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: _isRetroativo ? Colors.black : Colors.grey.shade400,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
+
                 const SizedBox(height: 16),
 
-                // Linha 2: Tipo de assistência
+                // Linha 4: Tipo de assistência (MANTÉM IGUAL)
                 const Text('Tipo de assistência:',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 12),
                 _buildTipoAssistenciaSelector(),
 
-                // ── VEÍCULO ── INSERIR AQUI ──────────────────────────────
+                // ── VEÍCULO ────────────────────────────────
+                //if (widget.tipoAssistencia == 'veiculo') ...[
                 const SizedBox(height: 16),
                 const Divider(),
                 const SizedBox(height: 8),
@@ -1006,6 +1461,7 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
                     'Toque para selecionar o veículo da ocorrência',
                     style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
                   ),
+                
                 ] else ...[
                   if (_cliente == null)
                     Text(
@@ -1036,7 +1492,7 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
                 ],
               ],
             ),
-
+            ],
             const SizedBox(height: 12),
 
             // ── 3. Localização & Contato ─────────────────────────────────
@@ -1050,59 +1506,160 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Local da ocorrência
+                    // 🔹 LOCAL DA OCORRÊNCIA
                     Expanded(
-                      child: TextField(
-                        controller: _localizacaoCtrl,
-                        readOnly: true,
-                        onTap: () async {
-                          final result = await _openPlaceSearch(
-                            onLatLng: (ll) => _localOcorrenciaLatLng = ll,
-                          );
-                          if (result != null && result.isNotEmpty) {
-                            setState(() => _localizacaoCtrl.text = result);
-                          }
-                        },
-                        decoration: InputDecoration(
-                          labelText: 'Local da ocorrência',
-                          hintText: 'Clique para buscar',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                          prefixIcon: const Icon(Icons.pin_drop_outlined),
-                          suffixIcon: const Icon(Icons.location_on),
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Header com toggle
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              const Text(
+                                'Local da ocorrência',
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                              ),
+                              const SizedBox(width: 8),
+                              TextButton.icon(
+                                onPressed: () {
+                                  setState(() {
+                                    _localOcorrenciaManualMode = !_localOcorrenciaManualMode;
+                                  });
+                                },
+                                icon: Icon(
+                                  _localOcorrenciaManualMode ? Icons.location_on : Icons.edit,
+                                  size: 16,
+                                ),
+                                label: Text(
+                                  _localOcorrenciaManualMode ? 'Usar Mapa' : 'Entrada Manual',
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  backgroundColor: Colors.grey.shade200,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          // Campo
+                          TextField(
+                            controller: _localizacaoCtrl,
+                            readOnly: !_localOcorrenciaManualMode,  // ✅ Dinâmico
+                            onTap: () async {
+                              if (!_localOcorrenciaManualMode) {  // ✅ Só abre mapa se estiver em modo mapa
+                                final result = await _openPlaceSearch(
+                                  onLatLng: (ll) => _localOcorrenciaLatLng = ll,
+                                );
+                                if (result != null && result.isNotEmpty) {
+                                  setState(() => _localizacaoCtrl.text = result);
+                                }
+                              }
+                            },
+                            onChanged: _localOcorrenciaManualMode  // ✅ Reage ao digitado se estiver em modo manual
+                                ? (value) {}
+                                : null,
+                            decoration: InputDecoration(
+                              labelText: _localOcorrenciaManualMode ? 'Digite o endereço' : 'Clique para buscar',
+                              hintText: _localOcorrenciaManualMode ? 'Digite o endereço' : 'Clique para buscar',
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                              prefixIcon: const Icon(Icons.pin_drop_outlined),
+                              suffixIcon: Icon(
+                                _localOcorrenciaManualMode ? Icons.edit_note : Icons.location_on,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(width: 12),
-                    // Local de destino
-                    Expanded(
-                      child: TextField(
-                        controller: _localDestinoCtrl,
-                        readOnly: true,
-                        onTap: () async {
-                          final result = await _openPlaceSearch(
-                            onLatLng: (ll) => _localDestinoLatLng = ll,
-                          );
-                          if (result != null && result.isNotEmpty) {
-                            setState(() => _localDestinoCtrl.text = result);
-                          }
-                        },
-                        decoration: InputDecoration(
-                          labelText: 'Local de destino (opcional se houver deslocamento)',
-                          hintText: 'Ex: oficina, residência',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                          prefixIcon: const Icon(Icons.flag_outlined),
-                          suffixIcon: _localDestinoCtrl.text.isNotEmpty
-                              ? IconButton(
-                                  icon: const Icon(Icons.clear, size: 18),
-                                  onPressed: () => setState(() {
-                                    _localDestinoCtrl.clear();
-                                    _localDestinoLatLng = null;
-                                  }),
-                                )
-                              : const Icon(Icons.location_on_outlined),
+                    
+                    // 🔹 LOCAL DE DESTINO (só aparece se for veículo)
+                    if (widget.tipoAssistencia == 'veiculo') ...[
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Header com toggle
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                const Text(
+                                  'Local de destino',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                                ),
+                                const SizedBox(width: 8),
+                                TextButton.icon(
+                                  onPressed: () {
+                                    setState(() {
+                                      _localDestinoManualMode = !_localDestinoManualMode;
+                                    });
+                                  },
+                                  icon: Icon(
+                                    _localDestinoManualMode ? Icons.flag_outlined : Icons.edit,
+                                    size: 16,
+                                  ),
+                                  label: Text(
+                                    _localDestinoManualMode ? 'Usar Mapa' : 'Entrada Manual',
+                                    style: const TextStyle(fontSize: 11),
+                                  ),
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    backgroundColor: Colors.grey.shade200,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            // Campo
+                            TextField(
+                              controller: _localDestinoCtrl,
+                              readOnly: !_localDestinoManualMode,  // ✅ Dinâmico
+                              onTap: () async {
+                                if (!_localDestinoManualMode) {  // ✅ Só abre mapa se estiver em modo mapa
+                                  final result = await _openPlaceSearch(
+                                    onLatLng: (ll) => _localDestinoLatLng = ll,
+                                  );
+                                  if (result != null && result.isNotEmpty) {
+                                    setState(() => _localDestinoCtrl.text = result);
+                                  }
+                                }
+                              },
+                              onChanged: _localDestinoManualMode  // ✅ Reage ao digitado se estiver em modo manual
+                                  ? (value) {}
+                                  : null,
+                              decoration: InputDecoration(
+                                labelText: _localDestinoManualMode 
+                                    ? 'Digite o destino' 
+                                    : 'Clique para buscar',
+                                hintText: _localDestinoManualMode
+                                    ? 'Ex: oficina, residência'
+                                    : 'Ex: oficina, residência',
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                prefixIcon: const Icon(Icons.flag_outlined),
+                                suffixIcon: _localDestinoCtrl.text.isNotEmpty && !_localDestinoManualMode
+                                    ? IconButton(
+                                        icon: const Icon(Icons.clear, size: 18),
+                                        onPressed: () => setState(() {
+                                          _localDestinoCtrl.clear();
+                                          _localDestinoLatLng = null;
+                                        }),
+                                      )
+                                    : Icon(
+                                        _localDestinoManualMode ? Icons.location_on_outlined : Icons.edit,
+                                      ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
 
@@ -1176,7 +1733,7 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
                     Expanded(
                       flex: 2,
                       child: TextField(
-                        controller: _contatoCtrl,
+                        controller: _telefoneContatoLocalCtrl,
                         decoration: InputDecoration(
                           labelText: 'Telefone',
                           hintText: '(11) 99999-9999',
@@ -1193,6 +1750,231 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
             ),
 
             const SizedBox(height: 12),
+
+            if (widget.tipoAssistencia == 'residencial') ...[
+              // ── 2. Tipo de Serviço & Seguradora ────────────────────────────
+              _buildSectionCard(
+                icon: Icons.home_repair_service,
+                color: Colors.blue.shade700,
+                title: 'Tipo de Serviço & Seguradora',
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: Autocomplete<String>(
+                          optionsBuilder: (textEditingValue) {
+                            if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
+                            return _seguradoras.where((s) =>
+                                s.toLowerCase().contains(textEditingValue.text.toLowerCase()));
+                          },
+                          onSelected: (selection) =>
+                              setState(() => _seguradoraCtrl.text = selection),
+                          fieldViewBuilder: (ctx, autoCtrl, focusNode, onSubmitted) {
+                            autoCtrl.text = _seguradoraCtrl.text;
+                            return TextField(
+                              controller: autoCtrl,
+                              focusNode: focusNode,
+                              decoration: InputDecoration(
+                                labelText: 'Seguradora',
+                                prefixIcon: const Icon(Icons.business_outlined),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              onChanged: (v) => _seguradoraCtrl.text = v,
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: _protocoloSeguradoraCtrl,
+                          decoration: InputDecoration(
+                            labelText: 'Protocolo da Seguradora',
+                            prefixIcon: const Icon(Icons.confirmation_number_outlined),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          textCapitalization: TextCapitalization.characters,
+                          onChanged: (v) {
+                            final upper = v.toUpperCase();
+                            if (upper != v) {
+                              _protocoloSeguradoraCtrl.value = _protocoloSeguradoraCtrl.value
+                                  .copyWith(text: upper, selection: TextSelection.collapsed(offset: upper.length));
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 160,
+                        child: TextField(
+                          controller: _franquiaCtrl,
+                          decoration: InputDecoration(
+                            labelText: 'Franquia',
+                            prefixIcon: const Icon(Icons.attach_money),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [BRFormatters.moedaFormatter],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 130,
+                        child: TextField(
+                          controller: _tempoSlaCtrl,
+                          decoration: InputDecoration(
+                            labelText: 'SLA (minutos)',
+                            prefixIcon: const Icon(Icons.timer_outlined),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            helperText: 'Padrão: 30 min',
+                          ),
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Tipo de serviço
+                  const Text('Tipo de serviço:',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _tiposServico.map((tipo) {
+                      final isSelected = _tipoServicoCtrl.text == tipo.$1;
+                      return FilterChip(
+                        label: Text(tipo.$2),
+                        selected: isSelected,
+                        onSelected: (_) {
+                          setState(() {
+                            if (isSelected) {
+                              // Se já está selecionado, deseleciona
+                              _tipoServicoCtrl.text = '';
+                              _outroServicoCtrl.clear();
+                            } else {
+                              // Se não está selecionado, seleciona este
+                              _tipoServicoCtrl.text = tipo.$1;
+                              if (tipo.$1 != 'outro') {
+                                _outroServicoCtrl.clear();
+                              }
+                            }
+                          });
+                        },
+                        selectedColor: Colors.blue.shade100,
+                        side: BorderSide(
+                          color: isSelected
+                              ? Colors.blue.shade600
+                              : Colors.grey.shade300,
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  if (_tipoServicoCtrl.text == 'outro') ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Qual foi a requisição do cliente?',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.orange.shade700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _outroServicoCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'Descreva o serviço',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        prefixIcon: const Icon(Icons.edit_outlined),
+                      ),
+                    ),
+                  ],                ],
+              ),
+              const SizedBox(height: 12),
+
+              if (widget.tipoAssistencia == 'veiculo') ...[
+              // ── 3. Local do Serviço ────────────────────────────────────
+              _buildSectionCard(
+                icon: Icons.location_on,
+                color: const Color(0xFF2E7D32),
+                title: 'Local do Serviço',
+                children: [
+                  TextField(
+                    controller: _enderecoCtrl,
+                    readOnly: true,
+                    onTap: () async {
+                      final result = await _openPlaceSearch(
+                        onLatLng: (ll) => _enderecoLatLng = ll,
+                      );
+                      if (result != null && result.isNotEmpty) {
+                        setState(() => _enderecoCtrl.text = result);
+                      }
+                    },
+                    decoration: InputDecoration(
+                      labelText: 'Endereço do serviço',
+                      hintText: 'Clique para buscar',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      prefixIcon: const Icon(Icons.home_outlined),
+                      suffixIcon: _enderecoCtrl.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              onPressed: () =>
+                                  setState(() {
+                                    _enderecoCtrl.clear();
+                                    _enderecoLatLng = null;
+                                  }),
+                            )
+                          : const Icon(Icons.search),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          controller: _nomeContatoCtrl,
+                          decoration: InputDecoration(
+                            labelText: 'Nome do contato no local (opcional)',
+                            prefixIcon:
+                                const Icon(Icons.person_outlined),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: _telefoneCtrl,
+                          decoration: InputDecoration(
+                            labelText: 'Telefone',
+                            prefixIcon:
+                                const Icon(Icons.phone_outlined),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                          ),
+                          keyboardType: TextInputType.phone,
+                          inputFormatters: [
+                            BRFormatters.telefoneFormatter
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),                ],
+              ),
+              ],
+              const SizedBox(height: 12),
+            ],
 
             // ── 4. Relato & Anotações ────────────────────────────────────
             _buildSectionCard(
@@ -1265,11 +2047,15 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
                     Expanded(
                       child: InkWell(
                         onTap: () async {
+                          // ✨ ELEGÂNCIA: Permite datas passadas SÓ se retroativo
+                          final firstDate = _isRetroativo && _dataRecebimentoComunicado != null
+                              ? DateTime.now().subtract(const Duration(days: 90))
+                              : DateTime.now();
                           final picked = await showDatePicker(
                             context: context,
                             initialDate: _dataAgendamento ??
                                 DateTime.now().add(const Duration(days: 1)),
-                            firstDate: DateTime.now(),
+                            firstDate: firstDate,  // ✅ Condicional
                             lastDate: DateTime(2100),
                           );
                           if (picked != null) setState(() => _dataAgendamento = picked);
@@ -1323,38 +2109,151 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
 
                 const SizedBox(height: 16),
 
-                // Oficina / local do serviço
-                TextField(
-                  controller: _oficinaTerceiroCtrl,
-                  readOnly: true,
-                  onTap: () async {
-                    final result = await _openPlaceSearch(
-                      onLatLng: (ll) => _oficinaTerceiroLatLng = ll,
-                    );
-                    if (result != null && result.isNotEmpty) {
-                      setState(() => _oficinaTerceiroCtrl.text = result);
-                    }
-                  },
-                  decoration: InputDecoration(
-                    labelText: 'Endereço da oficina / local do serviço (opcional)',
-                    hintText: 'Clique para buscar',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    prefixIcon: const Icon(Icons.build_outlined),
-                    suffixIcon: _oficinaTerceiroCtrl.text.isNotEmpty
-                        ? IconButton(
-                            icon: const Icon(Icons.clear, size: 18),
-                            onPressed: () => setState(() {
-                              _oficinaTerceiroCtrl.clear();
-                              _oficinaTerceiroLatLng = null;
-                            }),
-                          )
-                        : const Icon(Icons.location_on_outlined),
-                  ),
+                if (widget.tipoAssistencia == 'veiculo') ...[
+                // Endereço da Oficina E Nome da Oficina (lado a lado)
+                Row(
+                  children: [
+                    // ─── ESQUERDA: Nome da Oficina (40%)
+                    Expanded(
+                      flex: 40,
+                      child: Autocomplete<String>(
+                        optionsBuilder: (textEditingValue) {
+                          if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
+                          return _oficinasNomes.where((o) =>
+                              o.toLowerCase().contains(textEditingValue.text.toLowerCase()));
+                        },
+                        onSelected: (selection) {
+                          // Quando clica em uma sugestão, busca o endereço
+                          final oficinaSelecionada = _workshopsDisponiveis
+                              .firstWhereOrNull((w) => w.nome.toUpperCase() == selection.toUpperCase());
+                          if (oficinaSelecionada?.endereco != null && 
+                              _oficinaTerceiroCtrl.text.isEmpty) {
+                            setState(() => _oficinaTerceiroCtrl.text = oficinaSelecionada!.endereco!);
+                          }
+                        },
+                        fieldViewBuilder: (ctx, autoCtrl, focusNode, onSubmitted) {
+                          autoCtrl.addListener(() {
+                            _oficinaNomeCtrl.text = autoCtrl.text.toUpperCase();
+                          });
+                          
+                          return TextField(
+                            controller: autoCtrl,
+                            focusNode: focusNode,
+                            inputFormatters: [
+                              UpperCaseTextFormatter(),
+                            ],
+                            decoration: InputDecoration(
+                              labelText: 'Nome da Oficina (opcional)',
+                              hintText: 'Digite ou selecione',
+                              prefixIcon: const Icon(Icons.build_outlined),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                              suffixIcon: autoCtrl.text.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.clear, size: 18),
+                                      onPressed: () {
+                                        autoCtrl.clear();
+                                        _oficinaNomeCtrl.clear();
+                                      },
+                                    )
+                                  : null,
+                            ),
+                          );
+                        },
+                        optionsViewBuilder: (context, onSelected, options) {
+                          return Align(
+                            alignment: Alignment.topLeft,
+                            child: Material(
+                              elevation: 4.0,
+                              child: Container(
+                                color: Colors.white,
+                                constraints: const BoxConstraints(maxHeight: 200),
+                                child: ListView.builder(
+                                  padding: EdgeInsets.zero,
+                                  shrinkWrap: true,
+                                  itemCount: options.length,
+                                  itemBuilder: (context, index) {
+                                    final String option = options.elementAt(index);
+                                    final oficina = _workshopsDisponiveis
+                                        .firstWhereOrNull((w) => w.nome.toUpperCase() == option.toUpperCase());
+                                    
+                                    return InkWell(
+                                      onTap: () => onSelected(option.toUpperCase()),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 8,
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              option.toUpperCase(),
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                            if (oficina?.endereco != null && 
+                                                oficina!.endereco!.isNotEmpty)
+                                              Text(
+                                                oficina.endereco!,
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.grey.shade600,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // ─── DIREITA: Endereço da Oficina (60%)
+                    Expanded(
+                      flex: 60,
+                      child: TextField(
+                        controller: _oficinaTerceiroCtrl,
+                        readOnly: true,
+                        onTap: () async {
+                          final result = await _openPlaceSearch(
+                            onLatLng: (ll) => _oficinaTerceiroLatLng = ll,
+                          );
+                          if (result != null && result.isNotEmpty) {
+                            setState(() => _oficinaTerceiroCtrl.text = result);
+                          }
+                        },
+                        decoration: InputDecoration(
+                          labelText: 'Endereço da oficina / local do serviço (opcional)',
+                          hintText: 'Clique para buscar',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          prefixIcon: const Icon(Icons.location_on_outlined),
+                          suffixIcon: _oficinaTerceiroCtrl.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, size: 18),
+                                  onPressed: () => setState(() {
+                                    _oficinaTerceiroCtrl.clear();
+                                    _oficinaTerceiroLatLng = null;
+                                  }),
+                                )
+                              : null,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
 
                 const SizedBox(height: 12),
 
-                // Contato da oficina lado a lado
+                // Contato da oficina lado a lado (mantém como estava)
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1387,7 +2286,7 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
                 ),
 
                 const SizedBox(height: 12),
-
+                ],
                 // Lista de tarefas locais
                 if (_tarefasLocais.isEmpty)
                   Padding(
@@ -1481,6 +2380,7 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
           ],
         ),
       ),
+      )
     );
   }
 
@@ -1494,6 +2394,7 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
   }) {
     return Card(
       elevation: 2,
+      color: Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1550,6 +2451,10 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
       ('outro_vidro', 'Outro'),
     ];
 
+    if (widget.tipoAssistencia != 'veiculo') {
+      return const SizedBox.shrink();
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1574,6 +2479,45 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
                   : Colors.grey.shade300,
             ),
           )).toList(),
+        ),
+
+        // ─── NOVO: AnimatedSwitcher para "OUTRO" ────────
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 200),
+          child: _tipoAssistenciaCtrl.text == 'outro'
+              ? Padding(
+                  key: const ValueKey('outro_assistencia'),
+                  padding: const EdgeInsets.only(top: 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.help_outline, size: 14, color: Colors.orange),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Qual foi a requisição do cliente?',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.orange.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _outroAssistenciaCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Descrição da Assistência',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          prefixIcon: const Icon(Icons.edit_outlined),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : const SizedBox.shrink(key: ValueKey('vazio_outro')),
         ),
 
         // Subtipo de vidro — aparece apenas quando vidro está selecionado
@@ -1659,6 +2603,25 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
         ),
       ],
     );
+  }
+
+  // --- WIDGET PARA COR DE VIGÊNCIA DA APÓLICE ---
+  Widget? _statusVigenciaIcon(String dataStr) {
+    try {
+      final data = DateFormat('dd/MM/yyyy').parse(dataStr);
+      final hoje = DateTime.now();
+      final diff = data.difference(hoje).inDays;
+
+      if (diff < 0) {
+        return const Icon(Icons.error, color: Colors.red);
+      } else if (diff <= 30) {
+        return const Icon(Icons.warning_amber_rounded, color: Colors.orange);
+      } else {
+        return const Icon(Icons.check_circle, color: Colors.green);
+      }
+    } catch (e) {
+      return null;
+    }
   }
 
 }
@@ -2023,6 +2986,30 @@ class _AssistDocChip extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─── Extension para firstWhereOrNull ──────────────────────────────────────
+extension IterableExtension<T> on Iterable<T> {
+  T? firstWhereOrNull(bool Function(T) test) {
+    for (var element in this) {
+      if (test(element)) return element;
+    }
+    return null;
+  }
+}
+ 
+// ─── Formatter para forçar CAIXA ALTA ─────────────────────────────────────
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    return newValue.copyWith(
+      text: newValue.text.toUpperCase(),
+      selection: newValue.selection,
     );
   }
 }
