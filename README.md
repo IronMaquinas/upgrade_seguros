@@ -2,7 +2,7 @@
 
 > Plataforma web/mobile para corretoras de seguros gerenciarem sinistros, assistências, clientes, tarefas e métricas de desempenho em tempo real.
 
-**Versão do documento:** Etapa 02 (base `fdb7ce6` + Etapa 01)
+**Versão do documento:** Etapa 03 (base `fdb7ce6` + Etapas 01 e 02)
 **Última atualização:** 07/11/2026
 **Status:** app em uso; ciclo de entregas com verificação por md5 em andamento. Etapa 02: terceiros identificados por personagem (proprietário / motorista / contato) e **histórico de valores do sinistro** (lançamentos com nota fiscal, segurado + terceiros). Pendências de segurança abertas — ver [🔐 Pendências de Segurança](#-pendências-de-segurança).
 
@@ -169,13 +169,14 @@ Cada terceiro é identificado por personagem (Etapa 02), na abertura (planilha),
 | Grupo | Campos |
 |---|---|
 | **Proprietário do veículo** (conforme CRLV) | Nome, CPF/CNPJ, telefone, e-mail, endereço, placa, chassi, marca, modelo, cor, ano fabricação, ano modelo |
-| **Motorista** | "O motorista é o próprio proprietário" **ou** nome, CPF, telefone, e-mail |
+| **Motorista** | "O motorista é o próprio proprietário" **ou** nome, CPF, telefone, e-mail. **CNH** sempre (Etapa 03), inclusive quando é o proprietário |
 | **Contato** | Nome e telefone de quem a corretora aciona |
 | **Sinistro do terceiro** | Nº do registro na seguradora do terceiro, relato |
 | **Valores pagos a este terceiro** | Subtotal dos lançamentos do terceiro (ver abaixo) |
 
 - O botão **Auto** (CRLV) preenche o proprietário (nome/CPF do CRLV) e o veículo; a pergunta "condutor é o proprietário?" marca o grupo Motorista.
 - Cada terceiro tem um `id` estável, que liga os lançamentos de valor a ele. Terceiros antigos ganham o `id` no primeiro lançamento.
+- **Padrão visual (Etapa 03):** a planilha de abertura usa o mesmo campo em todos os grupos (rótulo em cima, caixa cinza) e os mesmos títulos com ícone. Veículo Segurado e Terceiros ficam espelhados: 🪪 Proprietário (CRLV) → 🚗 Veículo → 🧍 Motorista → 📇 Contato. Para um título novo dentro de um grupo da planilha, use `_Field(isHeader: true, headerIcon: …, label: …, hint: subtítulo)`.
 
 ---
 
@@ -444,6 +445,7 @@ Sistema salva em avaliacoes + atualiza claim + recalcula NPS do cliente
 | `nome`, `cpf`, `contato`, `email`, `endereco_terceiro` | **Proprietário** (CRLV) — `contato` é o telefone |
 | `placa`, `chassi`, `cor`, `marcaTerceiro`, `modeloTerceiro`, `anoFabricacaoTerceiro`, `anoModeloTerceiro`, `veiculo` | Veículo do proprietário |
 | **🆕 `motoristaMesmoProprietario`**, **`nomeMotorista`**, **`cpfMotorista`**, **`telefoneMotorista`**, **`emailMotorista`** | **Motorista** — Etapa 02 |
+| **🆕 `cnhMotorista`** | CNH do motorista (vale mesmo quando é o proprietário) — Etapa 03 |
 | `nomeContatoTerceiro`, `telefoneContatoTerceiro` | **Contato** |
 | `registroSeguradoraTerceiro`, `relato` | Sinistro do terceiro |
 | `fotosUrls`, `documentosUrls`, `franquia`, `numeroSinistroTerceiro` | Anexos e campos históricos |
@@ -555,6 +557,7 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 
 | Etapa | Data | Base | O que mudou |
 |---|---|---|---|
+| 03 | 07/11/2026 | `fdb7ce6` + 01 + 02 | **Harmonia visual da abertura:** Terceiros com o mesmo campo da planilha (rótulo em cima, caixa cinza); Veículo Segurado com os títulos e ícones dos Terceiros (Proprietário legal / Veículo / Motorista / Contato do sinistro); título "Veículo" também no terceiro (planilha e diálogos); checkbox do motorista no mesmo estilo nos dois. **CNH do motorista do terceiro** (planilha, diálogos, detalhe, PDF). |
 | 02 | 07/11/2026 | `fdb7ce6` + 01 | **Terceiros por personagem** (proprietário CRLV / motorista / contato / sinistro do terceiro) na abertura, nos diálogos e no PDF. **Histórico de valores do sinistro**: lançamentos com data, tipo, valor, segurado ou terceiro, NF/evidências, quem registrou; cancelamento com motivo; total = segurado + terceiros; encerramento exige lançamento; valor da abertura vira 1º lançamento. Correções: telefone do terceiro não aparecia ao reabrir a planilha; editar terceiro apagava marca/modelo/anos da tela; WhatsApp do contato abria o telefone do proprietário. Teste novo: `test/lancamento_model_test.dart`. |
 | 01 | 07/11/2026 | `fdb7ce6` | README reorganizado (seções duplicadas unificadas, sem perder informação); novas seções de Pendências de Segurança, Armadilhas, Processo de Entrega e Histórico; Cloud Function do Telegram e estrutura de `lib/` documentadas; `verificar-entrega.js` no `.gitignore`. Sem mudança de código. |
 
@@ -629,6 +632,7 @@ apolices: [
 - [x] Processo de entrega com verificador (Etapa 01)
 - [x] Terceiros identificados por proprietário / motorista / contato (Etapa 02)
 - [x] Histórico de valores do sinistro com NF e cancelamento rastreável (Etapa 02)
+- [x] Abertura com padrão visual único entre Veículo Segurado e Terceiros + CNH do motorista do terceiro (Etapa 03)
 
 ### 🔐 Segurança (ver [Pendências de Segurança](#-pendências-de-segurança))
 - [ ] 🔴 S1 — Trocar token do Telegram e tirar o arquivo do git
