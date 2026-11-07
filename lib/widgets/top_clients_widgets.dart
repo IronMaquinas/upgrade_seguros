@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/client_model.dart';
 import '../models/claim_model.dart';
+import '../utils/gatilho.dart';
 
 class TopClientsWidgets {
   static final _fmtCurrency = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
@@ -340,10 +341,17 @@ class TopClientsWidgets {
   /// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   /// Top 10 Clientes com Maior Risco Financeiro (% de Uso do Gatilho)
   /// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // Etapa 07 — cálculo revisado:
+  //  • gatilho EFETIVO: o do contrato ou, se não houver (0 / 0,01), o % padrão
+  //    das Configurações × valor da apólice (antes, R$ 0,01 dava 2.375.000.000%);
+  //  • gasto = sinistros ligados à apólice, ocorridos DENTRO da vigência e não
+  //    cancelados/negados (antes somava qualquer sinistro da apólice, de qualquer época);
+  //  • % mostrado sem casas decimais.
   static Widget buildTopClientesPorRisco(
       List<Client> clientes,
-      List<Claim> claims,
-    ) {
+      List<Claim> claims, {
+      double percentualGatilho = GatilhoApolice.percentualPadraoInicial,
+    }) {
       if (clientes.isEmpty) return const SizedBox.shrink();
 
       // 1️⃣ Agrupar sinistros por idApolice
@@ -375,20 +383,26 @@ class TopClientsWidgets {
         String numeroApoliceMax = '';
 
         for (final apolice in cliente.apolices) {
-          if (apolice.valorGatilho <= 0) continue; // sem gatilho definido
+          final gatilho = apolice.gatilhoEfetivo(percentualGatilho);
+          if (gatilho <= 0) continue; // sem gatilho e sem valor da apólice
 
-          // Soma dos valores dos sinistros dessa apólice
-          final claimsApolice = claimsPorApolice[apolice.id] ?? [];
+          // Soma dos sinistros dessa apólice dentro da vigência (sem cancelados/negados)
+          final claimsApolice = (claimsPorApolice[apolice.id] ?? []).where((c) => GatilhoApolice.sinistroConta(
+                dataOcorrencia: c.dataOcorrencia,
+                status: c.statusAtual,
+                inicioVigencia: apolice.dataInicio,
+                fimVigencia: apolice.dataFim,
+              ));
           final gastoTotal = claimsApolice.fold<double>(
             0.0,
-            (sum, claim) => sum + (claim.valorTotalSinistro ?? 0.0),
+            (sum, claim) => sum + claim.valorTotalSinistro,
           );
 
-          final percentual = (gastoTotal / apolice.valorGatilho) * 100;
+          final percentual = GatilhoApolice.usoPercentual(gastoTotal, gatilho);
           if (percentual > maxPercentual) {
             maxPercentual = percentual;
             apoliceIdMax = apolice.id;
-            gatilhoMax = apolice.valorGatilho;
+            gatilhoMax = gatilho;
             gastoMax = gastoTotal;
             ramoMax = apolice.ramo;
             numeroApoliceMax = apolice.numeroApolice;
@@ -547,7 +561,7 @@ class TopClientsWidgets {
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
-                                  '${percentual.toStringAsFixed(1)}%',
+                                  '${percentual.toStringAsFixed(0)}%',
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w700,

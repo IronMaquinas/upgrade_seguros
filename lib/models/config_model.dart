@@ -1,4 +1,5 @@
 // lib/models/config_model.dart
+import '../utils/gatilho.dart';
 
 class AppConfig {
   String id; // sempre 'config'
@@ -16,6 +17,10 @@ class AppConfig {
   int notificacaoIntervaloMinutos;          // 30 – reenvio a cada X minutos
   int notificacaoAtrasoMinimo;              // 30 – atraso mínimo para disparar
   List<String> notificacaoTelegramChatIds;  // lista de chat_ids
+
+  // Etapa 07: % do valor da apólice usado como gatilho quando o contrato não
+  // traz o valor (padrão 70%).
+  double percentualGatilhoPadrao;
 
   // Construtor principal
   AppConfig({
@@ -38,6 +43,7 @@ class AppConfig {
     this.notificacaoIntervaloMinutos = 30,
     this.notificacaoAtrasoMinimo = 30,
     this.notificacaoTelegramChatIds = const [],
+    this.percentualGatilhoPadrao = 70.0,
   });
 
   Map<String, dynamic> toMap() {
@@ -54,6 +60,7 @@ class AppConfig {
       'notificacaoIntervaloMinutos': notificacaoIntervaloMinutos,
       'notificacaoAtrasoMinimo': notificacaoAtrasoMinimo,
       'notificacaoTelegramChatIds': notificacaoTelegramChatIds,
+      'percentualGatilhoPadrao': percentualGatilhoPadrao,
     };
   }
 
@@ -84,6 +91,7 @@ class AppConfig {
       notificacaoTelegramChatIds: List<String>.from(
         map['notificacaoTelegramChatIds'] ?? [],
       ),
+      percentualGatilhoPadrao: GatilhoApolice.normalizarPercentual(map['percentualGatilhoPadrao'] as num?),
     );
   }
 }

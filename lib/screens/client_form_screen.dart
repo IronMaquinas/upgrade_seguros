@@ -22,6 +22,8 @@ import 'package:upgrade_seguros/parsers/parser_factory.dart';
 import 'package:upgrade_seguros/services/image_service_web.dart';
 import 'package:upgrade_seguros/services/place_search_delegate.dart';
 import 'package:upgrade_seguros/utils/formatters.dart';
+import 'package:upgrade_seguros/utils/gatilho.dart';
+import 'package:upgrade_seguros/services/config_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/services.dart';
@@ -33,7 +35,7 @@ import 'package:syncfusion_flutter_pdf/pdf.dart';
 import 'package:pdf/pdf.dart' as PDFLib;
 import 'package:flutter_google_places_sdk/flutter_google_places_sdk.dart' hide LatLng;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import '/widgets/vigencia_date_range_widget.dart';
+import '../widgets/vigencia_date_range_widget.dart';
 
 class ClientFormScreen extends StatefulWidget {
   final Client? clientToEdit;
@@ -54,6 +56,8 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
   final _numeroApoliceController = TextEditingController();
   final _valorApoliceController = TextEditingController();
   final _valorGatilhoController = TextEditingController();
+  // Etapa 07: % padrão do gatilho (Configurações), para exibir o gatilho calculado.
+  double _percentualGatilho = GatilhoApolice.percentualPadraoInicial;
   final nomeEmpresaCtrl = TextEditingController();
   final cnpjEmpresaCtrl = TextEditingController();
   final enderecoEmpresaCtrl = TextEditingController();
@@ -82,6 +86,9 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
         if (mounted) setState(() => _isAdmin = value);
       });
       _carregarSeguradoras();
+      ConfigService().getPercentualGatilho().then((p) {
+        if (mounted) setState(() => _percentualGatilho = p);
+      });
 
       final client = widget.clientToEdit;
       if (client != null) {
@@ -1865,7 +1872,16 @@ Widget build(BuildContext context) {
               final emoji = _getEmojiRamo(apolice.ramo);
               final cor = _getCorRamo(apolice.ramo);
               
-              return Container(
+              // Etapa 07: clicar na apólice abre a visualização (sem edição).
+              return InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => _addApoliceDialog(
+                  clientId: widget.clientToEdit?.id ?? '',
+                  apoliceToEdit: apolice,
+                  indexToUpdate: index,
+                  somenteLeitura: true,
+                ),
+                child: Container(
                 margin: const EdgeInsets.only(bottom: 10),
                 decoration: BoxDecoration(
                   border: Border.all(color: Colors.grey.shade200),
@@ -1958,9 +1974,13 @@ Widget build(BuildContext context) {
                             '${DateFormat('dd/MM/yyyy').format(apolice.dataInicio)} até ${DateFormat('dd/MM/yyyy').format(apolice.dataFim)}',
                             style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
                           ),
-                          if (apolice.valorGatilho > 0)
+                          // Etapa 07: gatilho do contrato ou calculado pelo % padrão
+                          if (apolice.gatilhoEfetivo(_percentualGatilho) > 0)
                             Text(
-                              'Gatilho: ${BRFormatters.formatarMoeda(apolice.valorGatilho)}',
+                              apolice.gatilhoInformado
+                                  ? 'Gatilho: ${BRFormatters.formatarMoeda(apolice.valorGatilho)}'
+                                  : 'Gatilho: ${BRFormatters.formatarMoeda(apolice.gatilhoEfetivo(_percentualGatilho))} '
+                                      '(${GatilhoApolice.formatarPercentual(_percentualGatilho)}% — não informado no contrato)',
                               style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
                             ),
 
@@ -2140,6 +2160,7 @@ Widget build(BuildContext context) {
                     ),
                   ],
                 ),
+              ),
               );
             }).toList(),
           ),
@@ -3271,19 +3292,36 @@ Widget build(BuildContext context) {
   }
 
   // Adicionar Apólice
-  void _addApoliceDialog({
+  // Etapa 07:
+  //  • valores aparecem formatados em R$ (antes vinham "120000.1" e, ao salvar sem
+  //    redigitar, a leitura tirava o ponto e gravava R$ 1.200.001,00);
+  //  • o gatilho é sugerido com o % das Configurações enquanto o usuário não
+  //    digita o valor do contrato;
+  //  • [somenteLeitura] = visualização (clicar na apólice), com botão "Editar".
+  Future<void> _addApoliceDialog({
     required String clientId,
     Apolice? apoliceToEdit,
     int? indexToUpdate,
-  }) {
-    
+    bool somenteLeitura = false,
+  }) async {
+    final percentual = await ConfigService().getPercentualGatilho();
+    if (!mounted) return;
+
     final isEditing = apoliceToEdit != null;
-    
+    String moeda(double v) => v > 0 ? BRFormatters.formatarMoeda(v) : '';
+
     final ramoCtrl = TextEditingController(text: apoliceToEdit?.ramo ?? '');
     final seguradoraCtrl = TextEditingController(text: apoliceToEdit?.seguradora ?? '');
     final numeroCtrl = TextEditingController(text: apoliceToEdit?.numeroApolice ?? '');
-    final valorCtrl = TextEditingController(text: apoliceToEdit?.valorApolice.toString() ?? '');
-    final gatilhoCtrl = TextEditingController(text: apoliceToEdit?.valorGatilho.toString() ?? '');
+    final valorCtrl = TextEditingController(text: moeda(apoliceToEdit?.valorApolice ?? 0));
+    // Gatilho do contrato, se houver; senão a sugestão (% × valor da apólice).
+    bool gatilhoDoContrato = apoliceToEdit?.gatilhoInformado ?? false;
+    final gatilhoCtrl = TextEditingController(
+      text: gatilhoDoContrato
+          ? moeda(apoliceToEdit!.valorGatilho)
+          : moeda(GatilhoApolice.sugerido(apoliceToEdit?.valorApolice ?? 0, percentual)),
+    );
+    final textoPercentual = GatilhoApolice.formatarPercentual(percentual);
     
     DateTime? dataInicio = apoliceToEdit?.dataInicio;
     DateTime? dataFim = apoliceToEdit?.dataFim;
@@ -3308,7 +3346,7 @@ Widget build(BuildContext context) {
                 children: [
                   // CABEÇALHO
                   Text(
-                    isEditing ? 'Editar Apólice' : 'Adicionar Apólice',
+                    somenteLeitura ? 'Apólice' : (isEditing ? 'Editar Apólice' : 'Adicionar Apólice'),
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
@@ -3317,7 +3355,7 @@ Widget build(BuildContext context) {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Preencha os dados da apólice e seus bens segurados',
+                    somenteLeitura ? 'Dados da apólice e seus bens segurados' : 'Preencha os dados da apólice e seus bens segurados',
                     style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
                   ),
                   const SizedBox(height: 24),
@@ -3361,9 +3399,11 @@ Widget build(BuildContext context) {
                                   ),
                                 ))
                                 .toList(),
-                            onChanged: (val) {
-                              setModalState(() => ramoCtrl.text = val ?? '');
-                            },
+                            onChanged: somenteLeitura
+                                ? null
+                                : (val) {
+                                    setModalState(() => ramoCtrl.text = val ?? '');
+                                  },
                           ),
                           const SizedBox(height: 12),
 
@@ -3385,6 +3425,7 @@ Widget build(BuildContext context) {
                               return TextField(
                                 controller: textEditingController,
                                 focusNode: focusNode,
+                                readOnly: somenteLeitura,
                                 decoration: InputDecoration(
                                   labelText: 'Seguradora',
                                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -3398,6 +3439,7 @@ Widget build(BuildContext context) {
                           // NÚMERO DA APÓLICE
                           TextField(
                             controller: numeroCtrl,
+                            readOnly: somenteLeitura,
                             decoration: InputDecoration(
                               labelText: 'Número da Apólice',
                               border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -3411,28 +3453,59 @@ Widget build(BuildContext context) {
                               Expanded(
                                 child: TextField(
                                   controller: valorCtrl,
+                                  readOnly: somenteLeitura,
+                                  keyboardType: TextInputType.number,
                                   decoration: InputDecoration(
                                     labelText: 'Valor da Apólice',
+                                    hintText: 'R\$ 0,00',
                                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                                   ),
                                   inputFormatters: [
                                     FilteringTextInputFormatter.digitsOnly,
                                     BRFormatters.moedaFormatter,
                                   ],
+                                  onChanged: (v) {
+                                    // Sugere o gatilho enquanto não há valor do contrato
+                                    if (!gatilhoDoContrato) {
+                                      setModalState(() {
+                                        gatilhoCtrl.text = moeda(
+                                          GatilhoApolice.sugerido(GatilhoApolice.lerMoeda(v), percentual),
+                                        );
+                                      });
+                                    }
+                                  },
                                 ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: TextField(
                                   controller: gatilhoCtrl,
+                                  readOnly: somenteLeitura,
+                                  keyboardType: TextInputType.number,
                                   decoration: InputDecoration(
                                     labelText: 'Valor do Gatilho',
+                                    hintText: 'R\$ 0,00',
+                                    helperText: gatilhoDoContrato
+                                        ? 'Valor do contrato'
+                                        : '$textoPercentual% do valor da apólice${somenteLeitura ? '' : ' — pode alterar'}',
+                                    helperMaxLines: 2,
                                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                                   ),
                                   inputFormatters: [
                                     FilteringTextInputFormatter.digitsOnly,
                                     BRFormatters.moedaFormatter,
                                   ],
+                                  onChanged: (v) {
+                                    // Digitou = valor do contrato. Apagou = volta a sugerir.
+                                    setModalState(() {
+                                      gatilhoDoContrato = v.trim().isNotEmpty;
+                                      if (!gatilhoDoContrato) {
+                                        gatilhoCtrl.text = moeda(
+                                          GatilhoApolice.sugerido(GatilhoApolice.lerMoeda(valorCtrl.text), percentual),
+                                        );
+                                      }
+                                    });
+                                  },
                                 ),
                               ),
                             ],
@@ -3456,7 +3529,7 @@ Widget build(BuildContext context) {
                                   trailing: const Icon(Icons.calendar_today, size: 20),
                                   tileColor: Colors.grey.shade50,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  onTap: () async {
+                                  onTap: somenteLeitura ? null : () async {
                                     final picked = await showDatePicker(
                                       context: dialogContext,
                                       initialDate: dataInicio ?? DateTime.now(),
@@ -3490,7 +3563,7 @@ Widget build(BuildContext context) {
                                   trailing: const Icon(Icons.calendar_today, size: 20),
                                   tileColor: Colors.grey.shade50,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  onTap: () async {
+                                  onTap: somenteLeitura ? null : () async {
                                     final picked = await showDatePicker(
                                       context: dialogContext,
                                       initialDate: dataFim ?? DateTime.now(),
@@ -3518,7 +3591,7 @@ Widget build(BuildContext context) {
                                 style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                               ),
                               const Spacer(),
-                              if (ramoCtrl.text.isNotEmpty)
+                              if (!somenteLeitura && ramoCtrl.text.isNotEmpty)
                                 TextButton.icon(
                                   onPressed: () => _addBemDialog(
                                     ramo: ramoCtrl.text,
@@ -3764,7 +3837,8 @@ Widget build(BuildContext context) {
                                           ],
                                         ),
                                       ),
-                                      // Botões de editar/excluir (mantidos)
+                                      // Botões de editar/excluir (escondidos na visualização)
+                                      if (!somenteLeitura) ...[
                                       IconButton(
                                         icon: const Icon(Icons.edit, size: 16, color: Colors.blue),
                                         onPressed: () {
@@ -3790,6 +3864,7 @@ Widget build(BuildContext context) {
                                           setModalState(() => bensSegurados.removeAt(idx));
                                         },
                                       ),
+                                      ],
                                     ],
                                   ),
                                 );
@@ -3803,6 +3878,35 @@ Widget build(BuildContext context) {
                   const SizedBox(height: 24),
 
                   // BOTÕES
+                  if (somenteLeitura)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+                            child: const Text('Fechar'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _addApoliceDialog(
+                                clientId: clientId,
+                                apoliceToEdit: apoliceToEdit,
+                                indexToUpdate: indexToUpdate,
+                              );
+                            },
+                            icon: const Icon(Icons.edit_outlined, size: 18),
+                            label: const Text('Editar'),
+                            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+                          ),
+                        ),
+                      ],
+                    )
+                  else
                   Row(
                     children: [
                       Expanded(
@@ -3831,8 +3935,8 @@ Widget build(BuildContext context) {
                               numeroApolice: numeroCtrl.text,
                               dataInicio: dataInicio!,
                               dataFim: dataFim!,
-                              valorApolice: BRFormatters.parseFromMoeda(valorCtrl.text) ?? 0,
-                              valorGatilho: BRFormatters.parseFromMoeda(gatilhoCtrl.text) ?? 0,
+                              valorApolice: GatilhoApolice.lerMoeda(valorCtrl.text),
+                              valorGatilho: GatilhoApolice.lerMoeda(gatilhoCtrl.text),
                               bensSegurados: bensSegurados,  // ← NOVO
                             );
 

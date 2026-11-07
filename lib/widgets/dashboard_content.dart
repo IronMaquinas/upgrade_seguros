@@ -509,7 +509,8 @@ void _diagnosticarContratos() {
       for (var apolice in client.apolices) {
         totalApolices++;
         final temValor = apolice.valorApolice > 0;
-        final temGatilho = apolice.valorGatilho > 0;
+        // Etapa 07: sem gatilho no contrato, vale o % padrão × valor da apólice.
+        final temGatilho = apolice.gatilhoInformado || apolice.valorApolice > 0;
         final temDataInicio = apolice.dataInicio != null;
         final temDataFim = apolice.dataFim != null;
         if (temValor && temGatilho && temDataInicio && temDataFim) {
@@ -535,7 +536,7 @@ void _diagnosticarContratos() {
       for (var apolice in client.apolices) {
         final camposFaltando = <String>[];
         if (apolice.valorApolice <= 0) camposFaltando.add('Valor');
-        if (apolice.valorGatilho <= 0) camposFaltando.add('Gatilho');
+        if (!apolice.gatilhoInformado && apolice.valorApolice <= 0) camposFaltando.add('Gatilho');
         if (apolice.dataInicio == null) camposFaltando.add('Data Início');
         if (apolice.dataFim == null) camposFaltando.add('Data Fim');
         if (camposFaltando.isNotEmpty) {
@@ -564,7 +565,7 @@ void _diagnosticarContratos() {
         if (apolice.valorApolice <= 0) {
           faltando.add('Valor');
         }
-        if (apolice.valorGatilho <= 0) {
+        if (!apolice.gatilhoInformado && apolice.valorApolice <= 0) {
           faltando.add('Gatilho');
         }
         if (faltando.isEmpty) continue;

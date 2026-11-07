@@ -77,6 +77,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   List<Claim> _sinistros = [];
   List<Client> _allClients = [];
+  // Etapa 07: % padrão do gatilho (Configurações) para o Top 10 de risco
+  double _percentualGatilho = 70.0;
 
   @override
   void initState() {
@@ -974,6 +976,7 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
           _sinistros = todosSinistros;
           _assistencias = todasAssistencias;
           _allClients = allClients;
+          _percentualGatilho = config.percentualGatilhoPadrao;
           _isLoading = false;
         });
       }
@@ -3227,7 +3230,7 @@ Widget _buildContratosAnualChart() {
                           const SizedBox(height: 12),
                           TopClientsWidgets.buildTopClientesPorReceita(_allClients),
                           const SizedBox(height: 16),
-                          TopClientsWidgets.buildTopClientesPorRisco(_allClients,_sinistros),
+                          TopClientsWidgets.buildTopClientesPorRisco(_allClients, _sinistros, percentualGatilho: _percentualGatilho),
                           const SizedBox(height: 16),
                           _buildClientesRisco(),
                           const SizedBox(height: 16),

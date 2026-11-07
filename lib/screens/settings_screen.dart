@@ -14,6 +14,7 @@ import 'package:upgrade_seguros/services/corretora_service.dart';
 import 'package:upgrade_seguros/services/employee_service.dart';
 import 'package:upgrade_seguros/services/firestore_service.dart';
 import 'package:upgrade_seguros/utils/formatters.dart';
+import 'package:upgrade_seguros/utils/gatilho.dart';
 import '../models/seguradora_model.dart';
 import '../services/seguradora_service.dart';
 import 'package:upgrade_seguros/models/pdf_signature_model.dart';
@@ -933,6 +934,9 @@ class _AbaAjustesState extends State<_AbaAjustes> {
   final TextEditingController _seguradoraNomeController = TextEditingController();
   final TextEditingController _seguradoraTelefoneController = TextEditingController();
   final TextEditingController _seguradoraEmailController = TextEditingController();
+  // Etapa 07: % padrão do gatilho da apólice
+  final TextEditingController _percentualGatilhoController = TextEditingController();
+  bool _salvandoPercentualGatilho = false;
 
   final _corretoraService = CorretoraService();
   Corretora? _corretora;
@@ -956,6 +960,7 @@ class _AbaAjustesState extends State<_AbaAjustes> {
     _seguradoraNomeController.dispose();
     _seguradoraTelefoneController.dispose();
     _seguradoraEmailController.dispose();
+    _percentualGatilhoController.dispose();
     super.dispose();
   }  
 
@@ -1415,8 +1420,40 @@ class _AbaAjustesState extends State<_AbaAjustes> {
     final config = await _configService.getConfig();
     setState(() {
       _config = config;
+      _percentualGatilhoController.text = GatilhoApolice.formatarPercentual(config.percentualGatilhoPadrao);
       _loading = false;
     });
+  }
+
+  // Etapa 07: salva o % padrão do gatilho (1 a 100).
+  Future<void> _salvarPercentualGatilho() async {
+    final texto = _percentualGatilhoController.text.replaceAll(',', '.').replaceAll('%', '').trim();
+    final valor = double.tryParse(texto);
+    if (valor == null || valor < 1 || valor > 100) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Informe um percentual entre 1 e 100.')),
+      );
+      return;
+    }
+    setState(() => _salvandoPercentualGatilho = true);
+    try {
+      await _configService.updatePercentualGatilho(valor);
+      final config = await _configService.getConfig();
+      if (!mounted) return;
+      setState(() {
+        _config = config;
+        _percentualGatilhoController.text = GatilhoApolice.formatarPercentual(config.percentualGatilhoPadrao);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('✅ Gatilho padrão: ${GatilhoApolice.formatarPercentual(valor)}% do valor da apólice')),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _salvandoPercentualGatilho = false);
+    }
   }
 
   @override
@@ -1537,6 +1574,62 @@ class _AbaAjustesState extends State<_AbaAjustes> {
                   ),
                 );
               },
+            ),
+          ),
+
+          // ─── Etapa 07: GATILHO PADRÃO DA APÓLICE ───────────────────────────────
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Gatilho padrão da apólice',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Quando o contrato não informa o valor do gatilho, o sistema usa este percentual '
+                        'do valor da apólice. Também é a sugestão ao cadastrar uma apólice.',
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 90,
+                  child: TextField(
+                    controller: _percentualGatilhoController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    textAlign: TextAlign.center,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      suffixText: '%',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onSubmitted: (_) => _salvarPercentualGatilho(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: 'Salvar',
+                  icon: _salvandoPercentualGatilho
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.check_circle, color: Color(0xFF2E7D32)),
+                  onPressed: _salvandoPercentualGatilho ? null : _salvarPercentualGatilho,
+                ),
+              ],
             ),
           ),
 

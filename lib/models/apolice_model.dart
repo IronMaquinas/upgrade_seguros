@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'bem_segurado_model.dart';  // ← ADICIONA IMPORT
+import '../utils/gatilho.dart';
 
 class Apolice {
   String id;
@@ -23,6 +24,16 @@ class Apolice {
     required this.valorGatilho,
     this.bensSegurados = const [],  // ← NOVO
   });
+
+  // Etapa 07: gatilho informado no contrato ou calculado pelo % da corretora.
+  bool get gatilhoInformado => GatilhoApolice.informado(valorGatilho);
+
+  /// Gatilho que vale para os cálculos (ver lib/utils/gatilho.dart).
+  double gatilhoEfetivo(double percentualPadrao) => GatilhoApolice.efetivo(
+        valorApolice: valorApolice,
+        valorGatilho: valorGatilho,
+        percentual: percentualPadrao,
+      );
 
   Map<String, dynamic> toMap() {
     return {

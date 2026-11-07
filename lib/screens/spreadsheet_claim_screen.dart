@@ -40,6 +40,7 @@ import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'package:upgrade_seguros/models/bodily_injury_model.dart';
 import 'package:upgrade_seguros/models/material_damage_model.dart';
 import 'package:upgrade_seguros/models/lancamento_model.dart';
+import 'package:upgrade_seguros/utils/gatilho.dart';
 
  enum RelatoStep {
     situacao,
@@ -2743,6 +2744,10 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
         apolice = apolicesDoRamo.first;
       }
 
+      // Etapa 07: gatilho efetivo (do contrato ou % padrão das Configurações)
+      final percentualGatilho = await ConfigService().getPercentualGatilho();
+      if (!mounted) return;
+
       // ✅ PREENCHE OS DADOS DO CLIENTE (SEMPRE)
       setState(() {
         _selectedApoliceId = apolice?.id;
@@ -2756,7 +2761,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
         if (apolice != null) {
           _ctrl['numeroApolice']!.text = apolice.numeroApolice;
           _ctrl['dataVigenciaFim']!.text = DateFormat('dd/MM/yyyy').format(apolice.dataFim);
-          _ctrl['valorGatilho']!.text = _formatarMoeda((apolice.valorGatilho * 100).toInt());
+          _ctrl['valorGatilho']!.text = _formatarMoeda((apolice.gatilhoEfetivo(percentualGatilho) * 100).round());
 
           if (apolice.seguradora.isNotEmpty) {
             _ctrl['seguradora']!.text = apolice.seguradora;
@@ -2771,7 +2776,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
       });
 
       // 🔥 Atualiza o uso atual da apólice
-      _calcularUsoAtualCliente(result.client!.id).then((valor) {
+      _calcularUsoAtualCliente(result.client!.id, apolice: apolice).then((valor) {
         setState(() {
           _ctrl['usoAtualApolice']!.text = _formatarMoeda((valor * 100).toInt());
         });
@@ -2788,7 +2793,10 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
   }
  
   // 🆕 CALCULAR USO ATUAL DA APÓLICE (soma de todos os sinistros)
-  Future<double> _calcularUsoAtualCliente(String clienteId) async {
+  // Etapa 07: com apólice escolhida, soma só os sinistros DESSA apólice,
+  // ocorridos dentro da vigência e não cancelados/negados — a mesma regra do
+  // Top 10 de risco dos Relatórios. Sem apólice, soma os sinistros do cliente.
+  Future<double> _calcularUsoAtualCliente(String clienteId, {Apolice? apolice}) async {
     try {
       if (clienteId.isEmpty) return 0.0;
       
@@ -2801,7 +2809,21 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
       double total = 0.0;
       
       for (var doc in snapshot.docs) {
-        final valor = (doc['valor_total_sinistro'] ?? 0.0).toDouble();
+        final dados = doc.data();
+        if (apolice != null) {
+          if ((dados['apolice_id'] ?? '') != apolice.id) continue;
+          final ocorrencia = (dados['data_ocorrencia'] as Timestamp?)?.toDate();
+          if (ocorrencia == null ||
+              !GatilhoApolice.sinistroConta(
+                dataOcorrencia: ocorrencia,
+                status: (dados['status_atual'] ?? '').toString(),
+                inicioVigencia: apolice.dataInicio,
+                fimVigencia: apolice.dataFim,
+              )) {
+            continue;
+          }
+        }
+        final valor = ((dados['valor_total_sinistro'] ?? 0.0) as num).toDouble();
         total += valor;
       }
       

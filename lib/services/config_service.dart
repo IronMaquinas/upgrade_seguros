@@ -1,6 +1,7 @@
 // lib/services/config_service.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/config_model.dart';
+import '../utils/gatilho.dart';
 
 class ConfigService {
   final _db = FirebaseFirestore.instance;
@@ -30,6 +31,27 @@ class ConfigService {
       print('Erro ao buscar config: $e');
       return AppConfig(id: _configDoc);
     }
+  }
+
+  // ── Etapa 07: % padrão do gatilho da apólice ──────────────────────────────
+  // Guardado em memória depois da 1ª leitura (é usado em várias telas).
+  static double? _percentualGatilhoCache;
+
+  Future<double> getPercentualGatilho() async {
+    final cache = _percentualGatilhoCache;
+    if (cache != null) return cache;
+    final config = await getConfig();
+    _percentualGatilhoCache = config.percentualGatilhoPadrao;
+    return config.percentualGatilhoPadrao;
+  }
+
+  Future<void> updatePercentualGatilho(double percentual) async {
+    final valor = GatilhoApolice.normalizarPercentual(percentual);
+    await _ensureConfigExists();
+    await _db.collection(_configCollection).doc(_configDoc).update({
+      'percentualGatilhoPadrao': valor,
+    });
+    _percentualGatilhoCache = valor;
   }
 
   // Atualizar SLA Sinistros

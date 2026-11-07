@@ -12,6 +12,8 @@ import 'package:upgrade_seguros/screens/client_form_screen.dart';
 import 'package:upgrade_seguros/services/auth_service.dart';
 import 'package:upgrade_seguros/services/image_service_web.dart';
 import 'package:upgrade_seguros/utils/formatters.dart';
+import 'package:upgrade_seguros/utils/gatilho.dart';
+import 'package:upgrade_seguros/services/config_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 import '../models/claim_model.dart';
@@ -36,6 +38,8 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     List<Claim> _clientClaims = [];
     bool _isLoading = true; // ✅ Declaração correta
     bool _isLoadingClaims = false;
+    // Etapa 07: % padrão do gatilho (Configurações)
+    double _percentualGatilho = GatilhoApolice.percentualPadraoInicial;
     bool _vigenciaFoiEditada = false;
     bool _isAdmin = false;
     late String _currentUserId; // Adicionado para armazenar o userId
@@ -75,6 +79,9 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     //_fetchClientClaims();
     _loadIsAdmin();
     _loadClient(); // ✅ Carrega do Firestore
+    ConfigService().getPercentualGatilho().then((p) {
+      if (mounted) setState(() => _percentualGatilho = p);
+    });
   }
 
   void _loadIsAdmin() async {
@@ -590,9 +597,13 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                                                     '${DateFormat('dd/MM/yyyy').format(apolice.dataInicio)} até ${DateFormat('dd/MM/yyyy').format(apolice.dataFim)}',
                                                     style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
                                                   ),
-                                                  if (apolice.valorGatilho > 0)
+                                                  // Etapa 07: gatilho do contrato ou calculado pelo % padrão
+                                                  if (apolice.gatilhoEfetivo(_percentualGatilho) > 0)
                                                     Text(
-                                                      'Gatilho: ${BRFormatters.formatarMoeda(apolice.valorGatilho)}',
+                                                      apolice.gatilhoInformado
+                                                          ? 'Gatilho: ${BRFormatters.formatarMoeda(apolice.valorGatilho)}'
+                                                          : 'Gatilho: ${BRFormatters.formatarMoeda(apolice.gatilhoEfetivo(_percentualGatilho))} '
+                                                              '(${GatilhoApolice.formatarPercentual(_percentualGatilho)}% — não informado no contrato)',
                                                       style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
                                                     ),
                                                   
