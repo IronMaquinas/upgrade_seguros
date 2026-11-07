@@ -2,7 +2,7 @@
 
 > Plataforma web/mobile para corretoras de seguros gerenciarem sinistros, assistências, clientes, tarefas e métricas de desempenho em tempo real.
 
-**Versão do documento:** Etapa 04 (GitHub `7295764` = Etapas 01–03)
+**Versão do documento:** Etapa 05 (GitHub `2c48c4c` = Etapas 01–04)
 **Última atualização:** 07/11/2026
 **Status:** app em uso; ciclo de entregas com verificação por md5 em andamento. Etapa 02: terceiros identificados por personagem (proprietário / motorista / contato) e **histórico de valores do sinistro** (lançamentos com nota fiscal, segurado + terceiros). Pendências de segurança abertas — ver [🔐 Pendências de Segurança](#-pendências-de-segurança).
 
@@ -16,6 +16,7 @@
 4. [Fluxos de Sinistros e Assistências](#fluxo-de-sinistros)
    - [Terceiros (Reclamados)](#terceiros-reclamados)
    - [Valores do Sinistro — histórico de lançamentos](#valores-do-sinistro--histórico-de-lançamentos)
+   - [Listas — filtro de status "Em curso"](#listas--filtro-de-status-em-curso)
 5. [Dashboard e Relatórios](#dashboard--painéis-de-gestão)
 6. [Estrutura de Dados (Firestore)](#estrutura-de-dados-firestore)
 7. [Cloud Functions](#cloud-functions-nodejs)
@@ -204,6 +205,22 @@ Seção **Valores do Sinistro** no detalhe do sinistro (Etapa 02). Cada custo vi
 - O campo "Valor Total do Sinistro" do detalhe passou a ser **somente leitura** (calculado).
 - Gravação por **transação** do Firestore: dois usuários lançando ao mesmo tempo não se sobrescrevem.
 - **PDF do sinistro:** nova seção "Valores do Sinistro" (totais + tabela do histórico, cancelados riscados, nomes das NFs). **Excel (CSV):** colunas valor segurado, valor terceiros e quantidade de lançamentos.
+
+---
+
+## Listas — filtro de status "Em curso"
+
+Sinistros e Assistências usam a mesma regra (Etapa 05, `lib/utils/filtro_status.dart`):
+
+| Opção | Mostra |
+|---|---|
+| **Em curso** (padrão ao abrir) | Tudo que não está finalizado. Sinistros: Rascunho, Aberto, Vistoria em Andamento, Aguardando Aprovação, Aguardando Peças, Reparo em Andamento. Assistências: Aberto, Em Andamento, Aguardando Cliente |
+| **Todos** | Todos mesmo, inclusive Concluído e Cancelado |
+| Um status | Só ele |
+
+**Finalizados:** `Concluído`, `Cancelado`, `Negado` (`FiltroStatus.finalizados`).
+
+**Carregamento:** a tela abre buscando no Firestore **só o que está em curso** (`where status_atual not-in finalizados`, sem `orderBy` → não precisa de índice composto; a ordenação é feita no app). O histórico só é baixado quando o filtro pede ("Todos" ou um status finalizado), com o aviso "Carregando histórico…", e fica em memória enquanto a tela estiver aberta.
 
 ---
 
@@ -520,6 +537,8 @@ Levantadas na revisão da base (07/11/2026). O repositório no GitHub está **p�
 ## ⚠️ Armadilhas Conhecidas
 
 - **Análise no ambiente do Claude (desde a Etapa 02):** o SDK do Flutter não baixa lá (Google Storage bloqueado), mas o Claude monta uma análise parcial: Dart SDK do conda-forge + código do Flutter e dos plugins principais (Firestore, Auth, Storage, pickers, pdf/printing) clonados do GitHub nas versões do `pubspec.lock`. Compara os erros/avisos **antes × depois** da mudança — qualquer diagnóstico novo aparece. Plugins sem código lá (mapas, Places, Font Awesome, url_launcher, máscara, Syncfusion, uuid, desktop_drop) ficam sem checagem de tipo. O `flutter analyze` + `flutter test` completos continuam no Mac (`--analyze` do verificador).
+- **Lista "Em curso" e documentos sem `status_atual`:** a consulta `whereNotIn` do Firestore não traz documentos que não têm o campo `status_atual`. Todo sinistro/assistência gravado pelo app tem esse campo; se algum registro antigo/importado não tiver, ele só aparece em "Todos".
+- **Dashboard e Relatórios ainda baixam tudo:** precisam do histórico para calcular. Quando a base crescer (milhares de registros), a solução é ter totais pré-calculados (roadmap).
 - **Lançamentos só por transação:** gravar o sinistro inteiro (`updateClaim` / `Claim.toMap()`) regrava a lista `lancamentos` com o que está em memória. Hoje só o encerramento faz isso, com o estado atualizado pelo listener. Lançar/cancelar valor **sempre** pelo `LancamentosService` (transação), nunca editando a lista e salvando o claim.
 - **Marca/modelo do terceiro editado antes da Etapa 02:** o diálogo de edição antigo gravava marca, modelo e anos só dentro de `veiculo` (a tela mostrava vazio). O `ThirdParty.fromMap` agora cai para `veiculo` quando o campo próprio está vazio; ao salvar de novo, os dois ficam preenchidos.
 - **Pacote importado sem estar no `pubspec.yaml`:** `latlong2` é importado em `widgets/workshop_widget.dart`, mas só chega como dependência de outro pacote. Compila hoje; quebra se o outro pacote deixar de usá-lo. Corrigir quando a etapa mexer nesse arquivo (o import parece não ser usado — `hide LatLng`).
@@ -559,6 +578,7 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 
 | Etapa | Data | Base | O que mudou |
 |---|---|---|---|
+| 05 | 07/11/2026 | `2c48c4c` | **Filtro de status nas listas de Sinistros e Assistências:** "Em curso" (padrão, inclui Rascunho) · "Todos" (todos mesmo, inclusive Concluído/Cancelado) · cada status. Acabou o "Todos" duplicado em Sinistros. **Carregamento:** abre buscando só o que está em curso; o histórico é baixado quando o filtro pede. Regra única em `lib/utils/filtro_status.dart` + teste `test/filtro_status_test.dart`. |
 | 04 | 07/11/2026 | `7295764` | **Abertura:** "Anexos e Documentos" logo após o bem segurado (antes de Terceiros). **Detalhe:** Veículo Segurado espelhando a abertura (Proprietário legal / Veículo / Motorista / Contato do sinistro); Proprietário legal passa a ser exibido; contato do sinistro com WhatsApp. |
 | 03 | 07/11/2026 | `fdb7ce6` + 01 + 02 | **Harmonia visual da abertura:** Terceiros com o mesmo campo da planilha (rótulo em cima, caixa cinza); Veículo Segurado com os títulos e ícones dos Terceiros (Proprietário legal / Veículo / Motorista / Contato do sinistro); título "Veículo" também no terceiro (planilha e diálogos); checkbox do motorista no mesmo estilo nos dois. **CNH do motorista do terceiro** (planilha, diálogos, detalhe, PDF). |
 | 02 | 07/11/2026 | `fdb7ce6` + 01 | **Terceiros por personagem** (proprietário CRLV / motorista / contato / sinistro do terceiro) na abertura, nos diálogos e no PDF. **Histórico de valores do sinistro**: lançamentos com data, tipo, valor, segurado ou terceiro, NF/evidências, quem registrou; cancelamento com motivo; total = segurado + terceiros; encerramento exige lançamento; valor da abertura vira 1º lançamento. Correções: telefone do terceiro não aparecia ao reabrir a planilha; editar terceiro apagava marca/modelo/anos da tela; WhatsApp do contato abria o telefone do proprietário. Teste novo: `test/lancamento_model_test.dart`. |
@@ -637,6 +657,7 @@ apolices: [
 - [x] Histórico de valores do sinistro com NF e cancelamento rastreável (Etapa 02)
 - [x] Abertura com padrão visual único entre Veículo Segurado e Terceiros + CNH do motorista do terceiro (Etapa 03)
 - [x] Anexos logo após o bem segurado na abertura; Veículo Segurado espelhado no detalhe (Etapa 04)
+- [x] Listas com filtro "Em curso" (padrão) e "Todos" de verdade; carregamento só do que está em curso (Etapa 05)
 
 ### 🔐 Segurança (ver [Pendências de Segurança](#-pendências-de-segurança))
 - [ ] 🔴 S1 — Trocar token do Telegram e tirar o arquivo do git
@@ -653,6 +674,7 @@ apolices: [
 - [ ] Danos materiais / corporais com lançamentos próprios (hoje o lançamento é do segurado ou de um terceiro de veículo)
 - [ ] Detalhe do sinistro, próximos passos de harmonia (avaliados na Etapa 04, deixados para depois): mesma ordem de cards da abertura (Anexos em card próprio), modo edição no estilo da planilha (rótulo em cima, caixa cinza), cores/ícones dos cards iguais aos da abertura
 - [ ] Tirar `android/build/` e `node_modules/` do git (subiram no commit `535f7bd`) — junto com S7
+- [ ] Escala: Dashboard e Relatórios com totais pré-calculados (hoje baixam todos os sinistros e assistências); listas com paginação do histórico se "Todos" ficar lento
 - [ ] **Confirmar estrutura de apólices** com cliente
 - [ ] **Testar SLA** com dados novos
 - [ ] Gráficos comparativos (year-over-year)

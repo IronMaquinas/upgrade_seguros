@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:upgrade_seguros/services/auth_service.dart';
 import '../models/claim_model.dart';
 import '../services/firestore_service.dart';
+import '../utils/filtro_status.dart';
 import '../screens/claim_detail_screen.dart';
 import '../screens/spreadsheet_claim_screen.dart';
 
@@ -36,6 +37,10 @@ class ClaimListScreenState extends State<ClaimListScreen> {
   bool _isAdmin = false;
   final AuthService _authService = AuthService();
   bool _shouldReset = true;
+  // Etapa 05: abre só com o que está em curso; o histórico (finalizados) é
+  // baixado quando o filtro pede ("Todos" ou um status finalizado).
+  bool _historicoCarregado = false;
+  bool _carregandoHistorico = false;
 
   String? _selectedStatusFilter;
   String? _selectedRamoFilter;
@@ -173,12 +178,19 @@ class ClaimListScreenState extends State<ClaimListScreen> {
   // ─── Busca e Filtros ─────────────────────────────────────────────
   Future<void> _fetchClaims() async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    final completo = _historicoCarregado || FiltroStatus.precisaHistorico(_selectedStatusFilter);
+    setState(() {
+      _isLoading = true;
+      _carregandoHistorico = completo && !_historicoCarregado;
+    });
     try {
-      final claims = await _firestoreService.getClaims();
+      final claims = completo
+          ? await _firestoreService.getClaims()
+          : await _firestoreService.getSinistrosEmCurso();
       if (mounted) {
         setState(() {
           _claims = claims;
+          _historicoCarregado = completo;
           _filterClaims();
         });
       }
@@ -189,7 +201,19 @@ class ClaimListScreenState extends State<ClaimListScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _carregandoHistorico = false;
+        });
+      }
+    }
+  }
+
+  /// Baixa o histórico na primeira vez que o filtro precisar dele.
+  void _carregarHistoricoSeNecessario() {
+    if (!_historicoCarregado && FiltroStatus.precisaHistorico(_selectedStatusFilter)) {
+      _fetchClaims();
     }
   }
 
@@ -229,19 +253,14 @@ class ClaimListScreenState extends State<ClaimListScreen> {
             _getPlacasParaBusca(claim).toLowerCase().contains(query);
 
         // ── Filtro Status ──
-        final matchesStatus = _selectedStatusFilter == null ||
-            _selectedStatusFilter == 'Todos' ||
-            claim.statusAtual == _selectedStatusFilter;
+        // Etapa 05: null = "Em curso"; "Todos" = todos mesmo.
+        final matchesStatus = FiltroStatus.corresponde(_selectedStatusFilter, claim.statusAtual);
 
         // ── Filtro Ramo ──
         final matchesRamo = _selectedRamoFilter == null ||
             _selectedRamoFilter == 'Todos' ||
             claim.ramoSinistro == _selectedRamoFilter;
         
-        // --- FILTRO VINDO DA DASHBOARD_CONTENT ---
-        // ── Filtro de ocultar concluídos (quando não há filtro de status específico) ──
-        final bool ocultarConcluidos = (_selectedStatusFilter == null);
-        final bool matchesStatusConcluido = ocultarConcluidos ? claim.statusAtual != 'Concluído' : true;
 
         // ── Filtro SLA ──
         bool matchesSla = true;
@@ -312,8 +331,7 @@ class ClaimListScreenState extends State<ClaimListScreen> {
             matchesSla &&
             matchesPeriodo &&
             matchesOficina &&
-            matchesFuncionario &&
-            matchesStatusConcluido;
+            matchesFuncionario;
       }).toList();
     });
   }
@@ -717,6 +735,7 @@ class ClaimListScreenState extends State<ClaimListScreen> {
     required String hint,
     required IconData icon,
     required void Function(T?) onChanged,
+    String rotuloNulo = 'Todos',
   }) {
     return DropdownButtonFormField<T?>(
       value: value,
@@ -739,7 +758,7 @@ class ClaimListScreenState extends State<ClaimListScreen> {
       items: items.map((item) {
         return DropdownMenuItem<T?>(
           value: item,
-          child: Text(item == null ? 'Todos' : item.toString()),
+          child: Text(item == null ? rotuloNulo : item.toString()),
         );
       }).toList(),
       onChanged: onChanged,
@@ -911,19 +930,21 @@ class ClaimListScreenState extends State<ClaimListScreen> {
                     Expanded(
                       child: _buildFilterDropdown<String>(
                         value: _selectedStatusFilter,
+                        // Etapa 05: "Em curso" (padrão) · "Todos" · cada status
                         items: [
                           null,
-                          'Todos',
+                          FiltroStatus.todos,
                           ..._statusOptions.where((s) => s != 'Todos').toList(),
                         ],
+                        rotuloNulo: FiltroStatus.emCurso,
                         hint: 'Filtrar por Status',
                         icon: Icons.filter_list,
                         onChanged: (val) {
                           setState(() {
-                            //_hideConcluido = false;
                             _selectedStatusFilter = val;
                             _filterClaims();
                           });
+                          _carregarHistoricoSeNecessario();
                         },
                       ),
                     ),
@@ -1011,7 +1032,18 @@ class ClaimListScreenState extends State<ClaimListScreen> {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 if (_isLoading) {
-                  return const Center(child: CircularProgressIndicator());
+                  return Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(),
+                        if (_carregandoHistorico) ...[
+                          const SizedBox(height: 12),
+                          Text('Carregando histórico…', style: TextStyle(color: Colors.grey.shade600)),
+                        ],
+                      ],
+                    ),
+                  );
                 }
 
                 if (_filteredClaims.isEmpty) {

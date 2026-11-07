@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:upgrade_seguros/services/auth_service.dart';
 import '../models/claim_model.dart';
 import '../services/firestore_service.dart';
+import '../utils/filtro_status.dart';
 import '../widgets/option_picker_dialog.dart';
 import 'assist_detail_screen.dart';
 import 'spreadsheet_assist_screen.dart';
@@ -34,6 +35,10 @@ class AssistListScreenState extends State<AssistListScreen> {
   bool _isAdmin = false;
   final AuthService _authService = AuthService();
   bool _shouldReset = true;
+  // Etapa 05: abre só com o que está em curso; o histórico (finalizados) é
+  // baixado quando o filtro pede ("Todos" ou um status finalizado).
+  bool _historicoCarregado = false;
+  bool _carregandoHistorico = false;
 
   // Filtros (simplificados para dropdown único)
   String? _selectedStatusFilter;
@@ -182,9 +187,16 @@ class AssistListScreenState extends State<AssistListScreen> {
   // ─── Busca e Filtros ─────────────────────────────────────────────
   Future<void> _fetchAssists() async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    final completo = _historicoCarregado || FiltroStatus.precisaHistorico(_selectedStatusFilter);
+    setState(() {
+      _isLoading = true;
+      _carregandoHistorico = completo && !_historicoCarregado;
+    });
     try {
-      final all = await _firestoreService.getAllClaims();
+      final all = completo
+          ? await _firestoreService.getAllClaims()
+          : await _firestoreService.getAllClaimsEmCurso();
+      _historicoCarregado = completo;
       _assists = all.where((c) => c.isAssistencia).toList();
       _assists.sort((a, b) => b.dataAbertura.compareTo(a.dataAbertura));
       _filterAssists();
@@ -195,7 +207,19 @@ class AssistListScreenState extends State<AssistListScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _carregandoHistorico = false;
+        });
+      }
+    }
+  }
+
+  /// Baixa o histórico na primeira vez que o filtro precisar dele.
+  void _carregarHistoricoSeNecessario() {
+    if (!_historicoCarregado && FiltroStatus.precisaHistorico(_selectedStatusFilter)) {
+      _fetchAssists();
     }
   }
 
@@ -205,8 +229,8 @@ class AssistListScreenState extends State<AssistListScreen> {
     setState(() {
       _filteredAssists = _assists.where((assist) {
         // ── Filtro Status ──
-        final matchesStatus = _selectedStatusFilter == null ||
-          assist.statusAtual == _selectedStatusFilter;
+        // Etapa 05: null = "Em curso"; "Todos" = todos mesmo.
+        final matchesStatus = FiltroStatus.corresponde(_selectedStatusFilter, assist.statusAtual);
 
         // ── Filtro Tipo ──
         final matchesTipo = _selectedTipoFilter == null ||
@@ -220,10 +244,6 @@ class AssistListScreenState extends State<AssistListScreen> {
             (assist.tipoAssistencia ?? '').toLowerCase().contains(query) ||
             assist.clientCnpjCpf.toLowerCase().contains(query) ||
             (assist.veiculoSelecionado?.placa?.toLowerCase() ?? '').contains(query);
-        
-        // ── Filtro de ocultar concluídos (quando não há filtro de status específico) ──
-        final bool ocultarConcluidos = (_selectedStatusFilter == null || _selectedStatusFilter == 'Todos');
-        final bool matchesStatusConcluido = ocultarConcluidos ? assist.statusAtual != 'Concluído' : true;
         
         // --- LÓGICA IS ADMIN ---
         bool matchesFuncionario = true;
@@ -295,8 +315,7 @@ class AssistListScreenState extends State<AssistListScreen> {
             matchesTipo &&
             matchesPeriodo &&
             matchesOficina &&
-            matchesFuncionario &&
-            matchesStatusConcluido;
+            matchesFuncionario;
       }).toList();
     });
   }
@@ -750,6 +769,7 @@ class AssistListScreenState extends State<AssistListScreen> {
     required String hint,
     required IconData icon,
     required void Function(T?) onChanged,
+    String rotuloNulo = 'Todos',
   }) {
     return DropdownButtonFormField<T?>(
       value: value,
@@ -770,7 +790,7 @@ class AssistListScreenState extends State<AssistListScreen> {
         contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       ),
       items: [
-        DropdownMenuItem<T?>(value: null, child: Text('Todos')),
+        DropdownMenuItem<T?>(value: null, child: Text(rotuloNulo)),
         ...items.map((item) => DropdownMenuItem<T?>(value: item, child: Text(item.toString()))),
       ],
       onChanged: onChanged,
@@ -888,7 +908,9 @@ class AssistListScreenState extends State<AssistListScreen> {
                     Expanded(
                       child: _buildFilterDropdown<String>(
                         value: _selectedStatusFilter,
-                        items: _statusOptions.where((s) => s != 'Todos').toList(),
+                        // Etapa 05: "Em curso" (padrão) · "Todos" · cada status
+                        items: [FiltroStatus.todos, ..._statusOptions.where((s) => s != 'Todos')],
+                        rotuloNulo: FiltroStatus.emCurso,
                         hint: 'Filtrar por Status',
                         icon: Icons.filter_list,
                         onChanged: (val) {
@@ -896,6 +918,7 @@ class AssistListScreenState extends State<AssistListScreen> {
                             _selectedStatusFilter = val;
                             _filterAssists();
                           });
+                          _carregarHistoricoSeNecessario();
                         },
                       ),
                     ),
@@ -979,7 +1002,18 @@ class AssistListScreenState extends State<AssistListScreen> {
       body: LayoutBuilder(
         builder: (context, constraints) {
           if (_isLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(),
+                  if (_carregandoHistorico) ...[
+                    const SizedBox(height: 12),
+                    Text('Carregando histórico…', style: TextStyle(color: Colors.grey.shade600)),
+                  ],
+                ],
+              ),
+            );
           }
 
           if (_filteredAssists.isEmpty) {

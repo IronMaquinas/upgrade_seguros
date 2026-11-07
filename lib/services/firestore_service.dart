@@ -18,6 +18,7 @@ import '../models/claim_task_model.dart';
 import '../models/third_party_model.dart'; // Adicionado, se estiver faltando
 import '../models/transport_model.dart'; // Adicionado, se estiver faltando
 import 'package:upgrade_seguros/models/assist_sla_config_model.dart';
+import 'package:upgrade_seguros/utils/filtro_status.dart';
 
 
 const String _cloudFunctionUrl = 'https://uploadfile-hwtlk2s4qq-uc.a.run.app';
@@ -134,6 +135,35 @@ class FirestoreService {
     return snapshot.docs
         .map((doc) => Claim.fromMap(doc.data())..id = doc.id)
         .toList();
+  }
+
+  // Etapa 05: só o que está em curso (status não finalizado). Sem orderBy no
+  // Firestore (dispensa índice composto); ordena aqui, mais recente primeiro.
+  // Atenção: `whereNotIn` não traz documentos sem o campo `status_atual`.
+  Future<List<Claim>> _emCursoDaColecao(String colecao) async {
+    final snapshot = await _db
+        .collection(colecao)
+        .where('status_atual', whereNotIn: FiltroStatus.finalizados)
+        .get();
+    return snapshot.docs.map((doc) => Claim.fromMap(doc.data())..id = doc.id).toList();
+  }
+
+  /// Sinistros em curso (lista de Sinistros, filtro padrão).
+  Future<List<Claim>> getSinistrosEmCurso() async {
+    final lista = await _emCursoDaColecao('sinistros');
+    lista.sort((a, b) => b.dataAbertura.compareTo(a.dataAbertura));
+    return lista;
+  }
+
+  /// Sinistros + assistências em curso (mesmo formato de [getAllClaims]).
+  Future<List<Claim>> getAllClaimsEmCurso() async {
+    final resultados = await Future.wait([
+      _emCursoDaColecao('assistencias'),
+      _emCursoDaColecao('sinistros'),
+    ]);
+    final todos = [...resultados[0], ...resultados[1]];
+    todos.sort((a, b) => b.dataAbertura.compareTo(a.dataAbertura));
+    return todos;
   }
 
   Future<void> updateClaim(Claim claim) async {
