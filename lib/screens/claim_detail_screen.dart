@@ -19,6 +19,8 @@ import 'package:upgrade_seguros/models/corretora_model.dart';
 import 'package:upgrade_seguros/models/employee_model.dart';
 import 'package:upgrade_seguros/models/pdf_signature_model.dart';
 import 'package:upgrade_seguros/models/third_party_model.dart';
+import 'package:upgrade_seguros/widgets/terceiro_form.dart';
+import 'package:upgrade_seguros/widgets/lancamentos_widget.dart';
 import 'package:upgrade_seguros/services/employee_service.dart';
 import 'package:upgrade_seguros/services/image_service_web.dart';
 import 'package:upgrade_seguros/services/pdf_services.dart';
@@ -1442,6 +1444,9 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
         'Numero de sinistro da seguradora',
         'Status',
         'Valor do sinistro',
+        'Valor segurado',
+        'Valor terceiros',
+        'Qtd. lançamentos',
       ];
 
       // 🔥 5. LINHA DE DADOS
@@ -1455,7 +1460,13 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
         _currentClaim.tipoPerda ?? '',
         _currentClaim.numeroSeguradora ?? '',
         _currentClaim.statusAtual ?? '',
-        _currentClaim.valorTotalSinistro.toStringAsFixed(2),
+        _currentClaim.valorTotalCalculado.toStringAsFixed(2),
+        (_currentClaim.lancamentos.isEmpty
+                ? _currentClaim.valorTotalSinistro
+                : _currentClaim.resumoValores.segurado)
+            .toStringAsFixed(2),
+        _currentClaim.resumoValores.terceiros.toStringAsFixed(2),
+        _currentClaim.resumoValores.ativos.toString(),
       ];
 
       // 🔥 6. CSV FINAL
@@ -1476,63 +1487,89 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     }
   }
 
+  // Etapa 02: o encerramento mostra o resumo dos lançamentos em vez de pedir
+  // um valor digitado. Sem nenhum valor lançado, não encerra — oferece lançar.
   Future<void> _showConfirmCloseDialog() async {
-    final controller = TextEditingController(
-      text: _currentClaim.valorTotalSinistro.toStringAsFixed(2),
-    );
-    final userId = _authService.getUserId();
+    final resumo = _currentClaim.resumoValores;
+    final total = _currentClaim.valorTotalCalculado;
 
-    await showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Confirmar Encerramento'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('O valor total dos serviços deste sinistro:'),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: controller,
-                keyboardType: TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Valor Total (R\$)',
-                  prefixText: 'R\$ ',
-                ),
-              ),
-            ],
+    if (total <= 0) {
+      final lancar = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Encerrar sinistro'),
+          content: const Text(
+            'Este sinistro ainda não tem nenhum valor lançado. '
+            'Para encerrar, registre ao menos um lançamento (ex.: reparo, peças ou indenização).',
           ),
           actions: [
-            TextButton(
-              child: const Text('Cancelar'),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-            ElevatedButton(
-              child: const Text('Confirmar e Encerrar'),
-              onPressed: () async {
-                Navigator.of(context).pop();
-                final novoValor = double.tryParse(
-                  controller.text.replaceAll(',', '.')) ?? 0.0;
-
-                setState(() => _isLoading = true);
-                try {
-                  _currentClaim.valorTotalSinistro = novoValor;
-                  await _firestoreService.updateClaim(_currentClaim);
-                  await _firestoreService.atualizarRecomendacaoManutencao(
-                    _currentClaim.idCliente);
-                  await _updateStatus('Concluído');
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Erro ao encerrar sinistro: $e')));
-                } finally {
-                  setState(() => _isLoading = false);
-                }
-              },
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Voltar')),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.add),
+              label: const Text('Novo lançamento'),
+              onPressed: () => Navigator.pop(context, true),
             ),
           ],
+        ),
+      );
+      if (lancar == true && mounted) {
+        await mostrarDialogoNovoLancamento(
+          context,
+          claim: _currentClaim,
+          usuarioNome: _nomeUsuarioLogado,
+          usuarioEmail: _authService.getUserEmail(),
         );
-      },
+      }
+      return;
+    }
+
+    final semHistorico = _currentClaim.lancamentos.isEmpty;
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmar Encerramento'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (semHistorico)
+              Text('Valor registrado antes do histórico: ${formatarMoedaLancamento(total)}')
+            else ...[
+              Text('Segurado: ${formatarMoedaLancamento(resumo.segurado)}'),
+              Text('Terceiros: ${formatarMoedaLancamento(resumo.terceiros)}'),
+              const SizedBox(height: 4),
+              Text(
+                'Total: ${formatarMoedaLancamento(total)} (${resumo.ativos} lançamento(s))',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+            const SizedBox(height: 12),
+            const Text(
+              'Confira os valores em "Valores do Sinistro" antes de encerrar.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(child: const Text('Cancelar'), onPressed: () => Navigator.of(context).pop(false)),
+          ElevatedButton(child: const Text('Confirmar e Encerrar'), onPressed: () => Navigator.of(context).pop(true)),
+        ],
+      ),
     );
+    if (confirmar != true || !mounted) return;
+
+    setState(() => _isLoading = true);
+    try {
+      await _firestoreService.atualizarRecomendacaoManutencao(_currentClaim.idCliente);
+      await _updateStatus('Concluído');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao encerrar sinistro: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   void _showImageViewer(ImageProvider imageProvider) {
@@ -1562,23 +1599,8 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     final _thirdPartyFormKey = GlobalKey<FormState>();
     final ImagePicker _picker = ImagePicker();
 
-    // Controllers
-    final TextEditingController _tpNomeController = TextEditingController();
-    final TextEditingController _tpCpfController = TextEditingController();
-    final TextEditingController _tpContatoController = TextEditingController();
-    final TextEditingController _tpEmailController = TextEditingController();
-    final TextEditingController _tpPlacaController = TextEditingController();
-    final TextEditingController _tpChassiController = TextEditingController();
-    final TextEditingController _tpCorController = TextEditingController();
-    final TextEditingController _marcaTerceiroController = TextEditingController();
-    final TextEditingController _tpModeloController = TextEditingController();
-    final TextEditingController _tpAnoController = TextEditingController();
-    final TextEditingController _tpAnoModeloController = TextEditingController();
-    final TextEditingController _tpRelatoController = TextEditingController();
-    final TextEditingController _enderecoTerceiroController = TextEditingController();
-    final TextEditingController _nomeContatoTerceiroController = TextEditingController();
-    final TextEditingController _telefoneContatoTerceiroController = TextEditingController();
-    final TextEditingController _registroSeguradoraTerceiroController = TextEditingController();
+    // Etapa 02: campos agrupados (proprietário / motorista / contato / sinistro)
+    final _tp = TerceiroFormControllers.novo();
 
     final List<XFile> _thirdPartyPhotos = [];
     final List<XFile> _thirdPartyDocuments = [];
@@ -1615,122 +1637,10 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                         key: _thirdPartyFormKey,
                         child: Column(
                           children: [
-                            buildRow([
-                              TextFormField(
-                                enabled: _isEditing,
-                                controller: _tpNomeController,
-                                decoration: const InputDecoration(labelText: 'Nome do Terceiro'),
-                                validator: (value) => value!.isEmpty ? 'Campo obrigatório' : null,
-                              ),
-                              TextFormField(
-                                enabled: _isEditing,
-                                controller: _tpCpfController,
-                                decoration: const InputDecoration(labelText: 'CPF do Terceiro'),
-                                inputFormatters: [BRFormatters.cpfCnpjFormatter],
-                              ),
-                            ]),
-                            buildRow([
-                              TextFormField(
-                                controller: _tpContatoController,
-                                decoration: InputDecoration(labelText: 'Telefone de Contato'),
-                                inputFormatters: [BRFormatters.telefoneFormatter],
-                              ),
-                              TextFormField(
-                                controller: _tpEmailController,
-                                decoration: InputDecoration(labelText: 'Email do terceriro'),
-                              ),
-                            ]),
-                            
-                            TextFormField(
-                            enabled: _isEditing,
-                                controller: _enderecoTerceiroController,
-                                readOnly: true,
-                                decoration: const InputDecoration(
-                                  labelText: 'Endereço do Terceiro',
-                                  suffixIcon: Icon(Icons.search),
-                                ),
-                                onTap: () => _openPlaceSearchTerceiro('Endereço do Terceiro', _enderecoTerceiroController),
-                                validator: (value) {
-                                  if (value == null || value.isEmpty) return 'Campo obrigatório';
-                                  return null;
-                                },
-                              ),
-                            // ✨ CONTATO DO TERCEIRO
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextFormField(
-                                    enabled: _isEditing,
-                                    controller: _nomeContatoTerceiroController,
-                                    decoration: const InputDecoration(labelText: 'Nome do Contato do Terceiro'),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: TextFormField(
-                                    enabled: _isEditing,
-                                    controller: _telefoneContatoTerceiroController,
-                                    decoration: const InputDecoration(labelText: 'Telefone do Contato do Terceiro'),
-                                    keyboardType: TextInputType.phone,
-                                    inputFormatters: [BRFormatters.telefoneFormatter],
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: TextFormField(
-                                    enabled: _isEditing,
-                                    controller: _registroSeguradoraTerceiroController,
-                                    decoration: InputDecoration(
-                                      labelText: 'Nº do Registro da Seguradora',
-                                      filled: true,
-                                      fillColor: Colors.yellow.shade100,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 16),
-                            const Divider(),
-                            const Text('Veículo do Terceiro', style: TextStyle(fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 8),
-                           buildRow([
-                              TextFormField(
-                                controller: _marcaTerceiroController,
-                                decoration: InputDecoration(labelText: 'Marca'),
-                              ),
-                              TextFormField(
-                                controller: _tpModeloController,
-                                decoration: InputDecoration(labelText: 'Modelo'),
-                              ),
-                              TextFormField(
-                                controller: _tpCorController,
-                                decoration: InputDecoration(labelText: 'Cor'),
-                              ),
-                            ]),
-                            buildRow([
-                              TextFormField(
-                                controller: _tpAnoController,
-                                decoration: InputDecoration(labelText: 'Ano de Fabricação'),
-                              ),
-                              TextFormField(
-                                controller: _tpAnoModeloController,
-                                decoration: InputDecoration(labelText: 'Ano Modelo'),
-                              ),
-                              TextFormField(
-                                controller: _tpPlacaController,
-                                decoration: InputDecoration(labelText: 'Placa'),
-                              ),
-                              TextFormField(
-                                controller: _tpChassiController,
-                                decoration: InputDecoration(labelText: 'Chassi'),
-                              ),
-                            ]),
-                            TextFormField(
-                              enabled: _isEditing,
-                              controller: _tpRelatoController,
-                              decoration: const InputDecoration(labelText: 'Relato do Terceiro sobre o Evento'),
-                              maxLines: 3,
+                            TerceiroIdentificacaoForm(
+                              controllers: _tp,
+                              onBuscarEndereco: () =>
+                                  _openPlaceSearchTerceiro('Endereço do Terceiro', _tp.endereco),
                             ),
                             const SizedBox(height: 16),
                             const Align(
@@ -1891,7 +1801,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                   // ✅ 2. Upload de documentos - USANDO A NOVA FUNÇÃO
                                   List<String> documentoUrls = [];
                                   if (_thirdPartyDocuments.isNotEmpty) {
-                                    final terceiroId = 'terceiro_${_currentClaim.terceiros.length}';
+                                    final terceiroId = _tp.id;
                                     documentoUrls = await _firestoreService.uploadThirdPartyDocuments(
                                       _currentClaim.numeroSinistro,
                                       terceiroId,
@@ -1902,37 +1812,9 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                   // Fechar diálogo de loading
                                   Navigator.of(context).pop();
 
-                                  final novoTerceiro = ThirdParty(
-                                    nome: _tpNomeController.text,
-                                    cpf: _tpCpfController.text,
-                                    contato: _tpContatoController.text,
-                                    email: _tpEmailController.text,
-                                    placa: _tpPlacaController.text,
-                                    chassi: _tpChassiController.text,
-                                    cor: _tpCorController.text,
-                                    marcaTerceiro: _marcaTerceiroController.text,
-                                    modeloTerceiro: _tpModeloController.text,
-                                    anoFabricacaoTerceiro: _tpAnoController.text,
-                                    anoModeloTerceiro: _tpAnoModeloController.text,
-                                    numeroSinistroTerceiro: '', // ou algum valor se tiver
-
-                                    veiculo: Vehicle(
-                                      marca: _marcaTerceiroController.text,
-                                      modelo: _tpModeloController.text,
-                                      ano: int.tryParse(_tpAnoController.text) ?? 0,
-                                      anomodelo: int.tryParse(_tpAnoModeloController.text) ?? 0,
-                                      chassi: _tpChassiController.text,
-                                    ),
-
-                                    relato: _tpRelatoController.text,
-                                    enderecoTerceiro: _enderecoTerceiroController.text,
-
+                                  final novoTerceiro = _tp.montar(
                                     fotosUrls: fotoUrls,
                                     documentosUrls: documentoUrls,
-
-                                    nomeContatoTerceiro: _nomeContatoTerceiroController.text,
-                                    telefoneContatoTerceiro: _telefoneContatoTerceiroController.text,
-                                    registroSeguradoraTerceiro: _registroSeguradoraTerceiroController.text,
                                   );
                                   
                                   Navigator.of(context).pop(novoTerceiro);
@@ -2012,24 +1894,8 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     final _thirdPartyFormKey = GlobalKey<FormState>();
     final ImagePicker _picker = ImagePicker();
 
-    // Controllers para os campos do terceiro
-    final TextEditingController _tpNomeController = TextEditingController(text: terceiro.nome);
-    final TextEditingController _tpCpfController = TextEditingController(text: terceiro.cpf);
-    final TextEditingController _tpContatoController = TextEditingController(text: terceiro.contato);
-    final TextEditingController _tpEmailController = TextEditingController(text: terceiro.email);
-    final TextEditingController _tpPlacaController = TextEditingController(text: terceiro.placa);
-    final TextEditingController _tpChassiController = TextEditingController(text: terceiro.chassi);
-    final TextEditingController _tpCorController = TextEditingController(text: terceiro.cor);
-    final TextEditingController _tpMarcaController = TextEditingController(text: terceiro.veiculo.marca);
-    final TextEditingController _tpModeloController = TextEditingController(text: terceiro.veiculo.modelo);
-    final TextEditingController _tpAnoController = TextEditingController(text: terceiro.veiculo.ano.toString());
-    final TextEditingController _tpAnoModeloController = TextEditingController(text: terceiro.veiculo.anomodelo.toString());
-    final TextEditingController _tpRelatoController = TextEditingController(text: terceiro.relato ?? '');
-    final TextEditingController _enderecoTerceiroController = TextEditingController(text: terceiro.enderecoTerceiro);
-
-    final TextEditingController _nomeContatoTerceiroController = TextEditingController(text: terceiro.nomeContatoTerceiro ?? '');
-    final TextEditingController _telefoneContatoTerceiroController = TextEditingController(text: terceiro.telefoneContatoTerceiro ?? '');
-    final TextEditingController _registroSeguradoraTerceiroController = TextEditingController(text: terceiro.registroSeguradoraTerceiro ?? '');
+    // Etapa 02: campos agrupados (proprietário / motorista / contato / sinistro)
+    final _tp = TerceiroFormControllers.de(terceiro);
 
     // Listas para gerenciar fotos e documentos
     List<XFile> _thirdPartyPhotos = [];
@@ -2117,147 +1983,10 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                         key: _thirdPartyFormKey,
                         child: Column(
                           children: [
-                            buildRow([
-                              TextFormField(
-                                enabled: _isEditing,
-                                controller: _tpNomeController,
-                                decoration: const InputDecoration(labelText: 'Nome do Terceiro'),
-                                validator: (value) => value!.isEmpty ? 'Campo obrigatório' : null,
-                              ),
-                              TextFormField(
-                                enabled: _isEditing,
-                                controller: _tpCpfController,
-                                decoration: const InputDecoration(labelText: 'CPF do Terceiro'),
-                                inputFormatters: [BRFormatters.cpfCnpjFormatter],
-                              ),
-                            ]),
-                            buildRow([
-                              TextFormField(
-                                controller: _tpContatoController,
-                                decoration: InputDecoration(labelText: 'Telefone do Terceiro'),
-                                inputFormatters: [BRFormatters.telefoneFormatter],
-                              ),
-                              TextFormField(
-                                controller: _tpEmailController,
-                                decoration: InputDecoration(labelText: 'Email do Terceiro'),
-                              ),
-                            ]),
-                            TextFormField(
-                            enabled: _isEditing,
-                                controller: _enderecoTerceiroController,
-                                readOnly: true,
-                                decoration: const InputDecoration(
-                                  labelText: 'Endereço do Terceiro',
-                                  suffixIcon: Icon(Icons.search),
-                                ),
-                                onTap: () => _openPlaceSearchTerceiro('Endereço do Terceiro', _enderecoTerceiroController),
-                                validator: (value) {
-                                  if (value == null || value.isEmpty) return 'Campo obrigatório';
-                                  return null;
-                                },
-                              ),
-                            
-                            // ✨ CONTATO DO TERCEIRO
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextFormField(
-                                    enabled: _isEditing,
-                                    controller: _nomeContatoTerceiroController,
-                                    decoration: const InputDecoration(labelText: 'Nome do Contato do Terceiro'),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: TextFormField(
-                                    enabled: _isEditing,
-                                    controller: _telefoneContatoTerceiroController,
-                                    decoration: const InputDecoration(labelText: 'Telefone do Contato do Terceiro'),
-                                    keyboardType: TextInputType.phone,
-                                    inputFormatters: [BRFormatters.telefoneFormatter],
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: TextFormField(
-                                    enabled: _isEditing,
-                                    controller: _registroSeguradoraTerceiroController,
-                                    decoration: InputDecoration(
-                                      labelText: 'Nº do Registro da Seguradora',
-                                      filled: true,
-                                      fillColor: Colors.yellow.shade100,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 16),
-                            const Divider(),
-                            const Text('Veículo do Terceiro', style: TextStyle(fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextFormField(
-                                    enabled: _isEditing,
-                                    controller: _tpMarcaController,
-                                    decoration: const InputDecoration(labelText: 'Marca do Veículo'),
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(                                  
-                                  child: TextFormField(
-                                    enabled: _isEditing,
-                                    controller: _tpModeloController,
-                                    decoration: const InputDecoration(labelText: 'Modelo do Veículo'),
-                                  ),
-                                ),
-                              ],
-                            ),
-                           Row(
-                              children: [
-                                Expanded(
-                                  child: TextFormField(
-                                    enabled: _isEditing,
-                                    controller: _tpAnoController,
-                                    decoration: const InputDecoration(labelText: 'Ano de Fabricação'),
-                                    keyboardType: TextInputType.number,
-                                    validator: (value) => value == null || value.isEmpty ? 'Campo obrigatório' : null,
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: TextFormField(
-                                    enabled: _isEditing,
-                                    controller: _tpAnoModeloController,
-                                    decoration: const InputDecoration(labelText: 'Ano Modelo'),
-                                    keyboardType: TextInputType.number,
-                                    validator: (value) => value == null || value.isEmpty ? 'Campo obrigatório' : null,
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(                                  
-                                  child: TextFormField(
-                                    enabled: _isEditing,
-                                    controller: _tpPlacaController,
-                                    decoration: const InputDecoration(labelText: 'Placa do Veículo'),
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: TextFormField(
-                                    controller: _tpChassiController,
-                                    decoration: InputDecoration(labelText: 'Chassi'),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            TextFormField(
-                              enabled: _isEditing,
-                              controller: _tpRelatoController,
-                              decoration: const InputDecoration(labelText: 'Relato do Terceiro sobre o Evento'),
-                              maxLines: 3,
+                            TerceiroIdentificacaoForm(
+                              controllers: _tp,
+                              onBuscarEndereco: () =>
+                                  _openPlaceSearchTerceiro('Endereço do Terceiro', _tp.endereco),
                             ),
 
                             const SizedBox(height: 20),
@@ -2498,28 +2227,9 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                   // Fechar diálogo de loading
                                   Navigator.of(context).pop();
 
-                                  final novoTerceiro = ThirdParty(
-                                    nome: _tpNomeController.text,
-                                    cpf: _tpCpfController.text,
-                                    contato: _tpContatoController.text,
-                                    email: _tpEmailController.text,
-                                    placa: _tpPlacaController.text,
-                                    chassi: _tpChassiController.text,
-                                    cor: _tpCorController.text,
-                                    veiculo: Vehicle(
-                                      marca: _tpMarcaController.text,
-                                      modelo: _tpModeloController.text,
-                                      ano: int.tryParse(_tpAnoController.text) ?? 0,
-                                      anomodelo: int.tryParse(_tpAnoModeloController.text) ?? 0,
-                                      chassi: '',
-                                    ),
-                                    relato: _tpRelatoController.text,
+                                  final novoTerceiro = _tp.montar(
                                     fotosUrls: finalPhotoUrls,
                                     documentosUrls: finalDocumentUrls,
-                                    enderecoTerceiro: _enderecoTerceiroController.text,
-                                    nomeContatoTerceiro: _nomeContatoTerceiroController.text.isNotEmpty ? _nomeContatoTerceiroController.text : null,
-                                    telefoneContatoTerceiro: _telefoneContatoTerceiroController.text.isNotEmpty ? _telefoneContatoTerceiroController.text : null,
-                                    registroSeguradoraTerceiro: _registroSeguradoraTerceiroController.text.isNotEmpty ? _registroSeguradoraTerceiroController.text : null,
                                   );
                                   
                                   Navigator.of(context).pop(novoTerceiro);
@@ -2621,6 +2331,162 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
   }
 
   // WIDGET PARA FORMATAR TERCEIROS
+
+  // ── Etapa 02: abre nota fiscal / evidência de um lançamento ─────────────
+  Future<void> _abrirAnexoLancamento(String url) async {
+    final limpa = url.trim();
+    if (await canLaunchUrlString(limpa)) {
+      await launchUrlString(limpa, mode: LaunchMode.externalApplication);
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível abrir o arquivo.')),
+      );
+    }
+  }
+
+  // ── Etapa 02: exibição do terceiro agrupada por personagem ──────────────
+  Widget _telefoneComWhatsApp(String label, String telefone) {
+    return Row(
+      children: [
+        Expanded(child: buildField(label, telefone)),
+        if (telefone.replaceAll(RegExp(r'\D'), '').isNotEmpty)
+          IconButton(
+            tooltip: 'Abrir no WhatsApp',
+            icon: FaIcon(FontAwesomeIcons.whatsapp, color: Colors.green.shade600, size: 16),
+            constraints: const BoxConstraints(),
+            padding: EdgeInsets.zero,
+            onPressed: () async {
+              final phone = telefone.replaceAll(RegExp(r'\D'), '');
+              final url = 'https://wa.me/55$phone';
+              if (await canLaunchUrlString(url)) {
+                await launchUrlString(url, mode: LaunchMode.externalApplication);
+              }
+            },
+          ),
+      ],
+    );
+  }
+
+  List<Widget> _blocosIdentificacaoTerceiro(ThirdParty tp) {
+    const roxo = Colors.deepPurple;
+    final valorPago = _currentClaim.resumoValores.porTerceiro[tp.id] ?? 0.0;
+    final qtdLancamentos = _currentClaim.lancamentos
+        .where((l) => l.isAtivo && l.isTerceiro && tp.id.isNotEmpty && l.terceiroId == tp.id)
+        .length;
+
+    return [
+      buildInfoCard(
+        title: 'Proprietário do veículo (CRLV)',
+        icon: Icons.badge_outlined,
+        color: roxo,
+        children: [
+          Row(children: [
+            Expanded(child: buildField('Nome', tp.nome)),
+            Expanded(child: buildField('CPF / CNPJ', tp.cpf)),
+          ]),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: _telefoneComWhatsApp('Telefone', tp.contato)),
+            Expanded(child: buildField('E-mail', tp.email)),
+          ]),
+          if (tp.enderecoTerceiro.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            buildField('Endereço', tp.enderecoTerceiro),
+          ],
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: buildField('Placa', tp.placa)),
+            Expanded(child: buildField('Chassi', tp.chassi)),
+            Expanded(child: buildField('Cor', tp.cor)),
+          ]),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: buildField('Marca', tp.marcaTerceiro)),
+            Expanded(child: buildField('Modelo', tp.modeloTerceiro)),
+          ]),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: buildField('Ano Fab.', tp.anoFabricacaoTerceiro)),
+            Expanded(child: buildField('Ano Mod.', tp.anoModeloTerceiro)),
+          ]),
+          if (tp.numeroSinistroTerceiro.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            buildField('Sinistro Terceiro', tp.numeroSinistroTerceiro),
+          ],
+        ],
+      ),
+      buildInfoCard(
+        title: 'Motorista',
+        icon: Icons.airline_seat_recline_normal,
+        color: roxo,
+        children: [
+          if (tp.motoristaMesmoProprietario) ...[
+            const SelectableText('O motorista é o próprio proprietário.', style: TextStyle(fontSize: 12)),
+            if (tp.cnhMotorista.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              buildField('CNH', tp.cnhMotorista),
+            ],
+          ] else if (!tp.temMotorista)
+            SelectableText('Não informado.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600))
+          else ...[
+            Row(children: [
+              Expanded(child: buildField('Nome', tp.nomeMotorista)),
+              Expanded(child: buildField('CPF', tp.cpfMotorista)),
+              Expanded(child: buildField('CNH', tp.cnhMotorista)),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(child: _telefoneComWhatsApp('Telefone', tp.telefoneMotorista)),
+              Expanded(child: buildField('E-mail', tp.emailMotorista)),
+            ]),
+          ],
+        ],
+      ),
+      if ((tp.nomeContatoTerceiro ?? '').isNotEmpty || (tp.telefoneContatoTerceiro ?? '').isNotEmpty)
+        buildInfoCard(
+          title: 'Contato',
+          icon: Icons.contact_phone_outlined,
+          color: roxo,
+          children: [
+            Row(children: [
+              Expanded(child: buildField('Nome', tp.nomeContatoTerceiro ?? '')),
+              Expanded(child: _telefoneComWhatsApp('Telefone', tp.telefoneContatoTerceiro ?? '')),
+            ]),
+          ],
+        ),
+      if ((tp.registroSeguradoraTerceiro ?? '').isNotEmpty || tp.relato.isNotEmpty)
+        buildInfoCard(
+          title: 'Sinistro do terceiro',
+          icon: Icons.description_outlined,
+          color: roxo,
+          children: [
+            if ((tp.registroSeguradoraTerceiro ?? '').isNotEmpty) ...[
+              const Text('Nº do registro na seguradora do terceiro',
+                  style: TextStyle(fontSize: 11, color: Colors.grey)),
+              SelectableText(
+                tp.registroSeguradoraTerceiro!,
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, backgroundColor: Colors.yellow.shade100),
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (tp.relato.isNotEmpty) buildField('Relato', tp.relato),
+          ],
+        ),
+      buildInfoCard(
+        title: 'Valores pagos a este terceiro',
+        icon: Icons.payments_outlined,
+        color: const Color(0xFF2E7D32),
+        children: [
+          SelectableText(
+            qtdLancamentos == 0
+                ? 'Nenhum lançamento para este terceiro. Use "Novo lançamento" em Valores do Sinistro.'
+                : '${formatarMoedaLancamento(valorPago)} em $qtdLancamentos lançamento(s) — detalhes em Valores do Sinistro.',
+            style: const TextStyle(fontSize: 12),
+          ),
+        ],
+      ),
+    ];
+  }
 
   Widget buildRow(List<Widget> children) {
     return Padding(
@@ -3089,26 +2955,15 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                             Row(
                                               children: [
                                                 Expanded(
-                                                  child: _isEditing
-                                                      ? TextFormField(
-                                                          controller: _valorTotalSinistroController,
-                                                          keyboardType: TextInputType.number,
-                                                          decoration: const InputDecoration(
-                                                            labelText: 'Valor Total do Sinistro',
-                                                            prefixText: 'R\$ ',
-                                                            isDense: true,
-                                                            filled: true,
-                                                          ),
-                                                          onChanged: (v) {
-                                                            final clean = v.replaceAll('.', '').replaceAll(',', '.');
-                                                            _currentClaim.valorTotalSinistro =
-                                                                double.tryParse(clean) ?? 0.0;
-                                                          },
-                                                        )
-                                                      : buildField(
-                                                          'Valor Total do Sinistro',
-                                                          'R\$ ${decimalFormat.format(_currentClaim.valorTotalSinistro)}',
-                                                        ),
+                                                  // Etapa 02: o total é a soma dos lançamentos (segurado +
+                                                  // terceiros) — não se digita mais aqui. Ver "Valores do Sinistro".
+                                                  child: Tooltip(
+                                                    message: 'Soma dos lançamentos. Para alterar, use "Novo lançamento" em Valores do Sinistro.',
+                                                    child: buildField(
+                                                      'Valor Total do Sinistro',
+                                                      formatarMoedaLancamento(_currentClaim.valorTotalCalculado),
+                                                    ),
+                                                  ),
                                                 ),
                                                 const SizedBox(width: 12),
                                                 Expanded(
@@ -4178,149 +4033,8 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                               child: Column(
                                                 crossAxisAlignment: CrossAxisAlignment.start,
                                                 children: [
-                                                  // ── INFORMAÇÕES DO TERCEIRO ──
-                                                  // Linha 1: CPF | Telefone
-                                                  Row(
-                                                    children: [
-                                                      if (tp.cpf.isNotEmpty)
-                                                        Expanded(
-                                                          child: Row(
-                                                            children: [
-                                                              Text('CPF do Terceiro: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                                                              SelectableText(tp.cpf, style: TextStyle(fontSize: 12)),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                      if (tp.contato.isNotEmpty)
-                                                        Expanded(
-                                                          child: Row(
-                                                            children: [
-                                                              Text('Telefone do Terceiro: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                                                              SelectableText(tp.contato, style: TextStyle(fontSize: 12)),
-                                                              const SizedBox(width: 4),
-                                                              IconButton(
-                                                                icon: FaIcon(FontAwesomeIcons.whatsapp, color: Colors.green.shade600, size: 16),
-                                                                constraints: const BoxConstraints(),
-                                                                padding: EdgeInsets.zero,
-                                                                onPressed: () async {
-                                                                  final phone = tp.contato.replaceAll(RegExp(r'\D'), '');
-                                                                  if (phone.isNotEmpty) {
-                                                                    final url = 'https://wa.me/55$phone';
-                                                                    if (await canLaunchUrlString(url)) {
-                                                                      await launchUrlString(url, mode: LaunchMode.externalApplication);
-                                                                    }
-                                                                  }
-                                                                },
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                    ],
-                                                  ),
-                                                  const SizedBox(height: 6),
-
-                                                  // Linha 2: Endereço (largura total)
-                                                  if (tp.enderecoTerceiro.isNotEmpty)
-                                                    Row(
-                                                      children: [
-                                                        Text('Endereço do Terceiro: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                                                        Expanded(child: SelectableText(tp.enderecoTerceiro, style: TextStyle(fontSize: 12))),
-                                                      ],
-                                                    ),
-                                                  const SizedBox(height: 6),
-
-                                                  // Linha 3: Nome Contato | Telefone Contato | Registro Seguradora
-                                                  Row(
-                                                    children: [
-                                                      if (tp.nomeContatoTerceiro?.isNotEmpty ?? false)
-                                                        Expanded(
-                                                          child: Row(
-                                                            children: [
-                                                              Text('Nome do Contato: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                                                              SelectableText(tp.nomeContatoTerceiro!, style: TextStyle(fontSize: 12)),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                      if (tp.telefoneContatoTerceiro?.isNotEmpty ?? false)
-                                                        Expanded(
-                                                          child: Row(
-                                                            children: [
-                                                              Text('Tel. do Contato: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                                                              SelectableText(tp.telefoneContatoTerceiro!, style: TextStyle(fontSize: 12)),
-                                                             IconButton(
-                                                                icon: FaIcon(FontAwesomeIcons.whatsapp, color: Colors.green.shade600, size: 16),
-                                                                constraints: const BoxConstraints(),
-                                                                padding: EdgeInsets.zero,
-                                                                onPressed: () async {
-                                                                  final phone = tp.contato.replaceAll(RegExp(r'\D'), '');
-                                                                  if (phone.isNotEmpty) {
-                                                                    final url = 'https://wa.me/55$phone';
-                                                                    if (await canLaunchUrlString(url)) {
-                                                                      await launchUrlString(url, mode: LaunchMode.externalApplication);
-                                                                    }
-                                                                  }
-                                                                },
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                      if (tp.registroSeguradoraTerceiro?.isNotEmpty ?? false)
-                                                        Expanded(
-                                                          child: Row(
-                                                            children: [
-                                                              Text('Registro da Seguradora: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                                                              SelectableText(
-                                                                tp.registroSeguradoraTerceiro!,
-                                                                style: TextStyle(fontSize: 12, backgroundColor: Colors.yellow.shade100),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                    ],
-                                                  ),
-                                                  const SizedBox(height: 8),
-
-                                                  // ── RELATO (sempre aparece se tiver conteúdo) ──
-                                                  if ((tp.relato ?? '').isNotEmpty) ...[
-                                                    const Text('Relato do Terceiro:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                                                    SelectableText(tp.relato!, style: TextStyle(fontSize: 12)),
-                                                    const SizedBox(height: 8),
-                                                  ],
-                                                  const SizedBox(height: 8),
-                                                  buildInfoCard(
-                                                    title: 'Veículo',
-                                                    icon: Icons.directions_car,
-                                                    color: Colors.deepPurple,
-                                                    children: [
-                                                      Row(
-                                                        children: [
-                                                          Expanded(child: buildField('Placa', tp.placa)),
-                                                          Expanded(child: buildField('Chassi', tp.chassi)),
-                                                          Expanded(child: buildField('Cor', tp.cor)),
-                                                        ],
-                                                      ),
-                                                      const SizedBox(height: 8),
-                                                      Row(
-                                                        children: [
-                                                          Expanded(child: buildField('Marca', tp.marcaTerceiro)),
-                                                          Expanded(child: buildField('Modelo', tp.modeloTerceiro)),
-                                                        ],
-                                                      ),
-                                                      const SizedBox(height: 8),
-                                                      Row(
-                                                        children: [
-                                                          Expanded(
-                                                              child: buildField('Ano Fab.', tp.anoFabricacaoTerceiro)),
-                                                          Expanded(
-                                                              child: buildField('Ano Mod.', tp.anoModeloTerceiro)),
-                                                        ],
-                                                      ),
-                                                      if (tp.numeroSinistroTerceiro.isNotEmpty) ...[
-                                                        const SizedBox(height: 8),
-                                                        buildField('Sinistro Terceiro', tp.numeroSinistroTerceiro),
-                                                      ],
-                                                    ],
-                                                  ),
+                                                  // ── Etapa 02: proprietário / motorista / contato / sinistro / valores ──
+                                                  ..._blocosIdentificacaoTerceiro(tp),
                                                   const SizedBox(height: 8),
                                                   // ✨ CONTATO DO TERCEIRO
 /*
@@ -4444,6 +4158,19 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                       ),
                                   ],
                                 ],
+                              ),
+                            ),
+                            // 💰 VALORES DO SINISTRO (Etapa 02)
+                            const Divider(height: 30),
+                            SectionCard(
+                              title: 'Valores do Sinistro',
+                              icon: Icons.payments_outlined,
+                              color: const Color(0xFF2E7D32),
+                              child: LancamentosSinistroCard(
+                                claim: _currentClaim,
+                                usuarioNome: _nomeUsuarioLogado,
+                                usuarioEmail: _authService.getUserEmail(),
+                                onAbrirAnexo: _abrirAnexoLancamento,
                               ),
                             ),
                             // 🔴 DANOS CORPORAIS

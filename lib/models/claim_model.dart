@@ -11,6 +11,7 @@ import 'package:upgrade_seguros/models/vehicle_model.dart';
 import 'package:upgrade_seguros/models/workshop_model.dart';
 import 'package:upgrade_seguros/models/bodily_injury_model.dart';
 import 'package:upgrade_seguros/models/material_damage_model.dart';
+import 'package:upgrade_seguros/models/lancamento_model.dart';
 
 // Enum para tipos de atendimento
 enum TipoAtendimento {
@@ -82,7 +83,11 @@ class Claim {
   Vehicle? veiculoSelecionado;
   Transport? transporte;
   Machinery? maquinaria;
+  /// Soma dos lançamentos ativos (segurado + terceiros). Sinistros sem
+  /// lançamentos (anteriores à Etapa 02) guardam aqui o valor digitado.
   double valorTotalSinistro;
+  /// Histórico de valores do sinistro (Etapa 02). Ver lancamento_model.dart.
+  List<LancamentoSinistro> lancamentos;
   String clientNome;
   String clientCnpjCpf;
   String numeroSeguradora;
@@ -158,6 +163,7 @@ class Claim {
     this.workshop,
     this.maquinaria,
     this.valorTotalSinistro = 0.0,
+    this.lancamentos = const [],
     required this.clientNome,
     required this.clientCnpjCpf,
     required this.numeroSeguradora,
@@ -200,6 +206,17 @@ class Claim {
     this.horaRecebimentoComunicado,
     this.apoliceId,
   });
+
+  /// Totais por segurado / terceiros a partir dos lançamentos ativos.
+  ResumoValores get resumoValores => ResumoValores.calcular(lancamentos);
+
+  /// Valor digitado antes de existir o histórico (sinistros anteriores à
+  /// Etapa 02). Vira um lançamento no primeiro lançamento novo.
+  double get valorAnteriorAoHistorico => lancamentos.isEmpty ? valorTotalSinistro : 0.0;
+
+  /// Valor total consistente: com lançamentos, é a soma deles.
+  double get valorTotalCalculado =>
+      lancamentos.isEmpty ? valorTotalSinistro : resumoValores.total;
 
   // Helper para verificar se é sinistro
   bool get isSinistro => tipo == 'sinistro';
@@ -262,7 +279,14 @@ class Claim {
       'transporte': transporte?.toMap(),
       'workshop': workshop?.toMap(),
       if (maquinaria != null) 'maquinaria': maquinaria!.toMap(),  // 🆕
-      'valor_total_sinistro': valorTotalSinistro,
+      'valor_total_sinistro': valorTotalCalculado,
+      // Sempre grava a lista (mesmo vazia) para nunca sobrar lançamento antigo
+      // no banco. Sem lançamentos, o valor legado conta como do segurado.
+      'lancamentos': lancamentos
+          .map((l) => l.toMap(codificarData: (d) => Timestamp.fromDate(d)))
+          .toList(),
+      'valor_segurado': lancamentos.isEmpty ? valorTotalSinistro : resumoValores.segurado,
+      'valor_terceiros': resumoValores.terceiros,
       'client_nome': clientNome,
       'client_cnpj_cpf': clientCnpjCpf,
       'numero_seguradora': numeroSeguradora,
@@ -361,6 +385,7 @@ class Claim {
     ? Machinery.fromMap(map['maquinaria'] as Map<String, dynamic>)
     : null,  // 🆕
       valorTotalSinistro: (map['valor_total_sinistro'] ?? 0.0).toDouble(),
+      lancamentos: LancamentoSinistro.listaDoMapa(map['lancamentos']),
       clientNome: map['client_nome'] ?? '',
       clientCnpjCpf: map['client_cnpj_cpf'] ?? '',
       numeroSeguradora: map['numero_seguradora'] ?? '',

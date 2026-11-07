@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Verificador de entregas (fica só no computador, fora do git)
+verificar-entrega.js

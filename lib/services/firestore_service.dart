@@ -543,6 +543,41 @@ class FirestoreService {
     return downloadUrls;
   }
 
+  // Etapa 02 — upload genérico para uma pasta do Storage (usado pelas notas
+  // fiscais / evidências dos lançamentos de valor). Prefixa o nome com a hora
+  // para dois arquivos de mesmo nome (ex.: "nf.pdf") não se sobrescreverem.
+  // Devolve as URLs na mesma ordem dos arquivos recebidos.
+  Future<List<String>> uploadArquivosEmPasta(String pasta, List<PlatformFile> arquivos) async {
+    if (arquivos.isEmpty) return [];
+
+    final urls = <String>[];
+    for (final file in arquivos) {
+      final bytes = file.bytes ?? await File(file.path!).readAsBytes();
+
+      var nome = file.name.trim()
+        .replaceAll(RegExp(r'[#?&%\s/]'), '_')
+        .replaceAll(RegExp(r'_+'), '_');
+      if (nome.length < 3) nome = 'arquivo.pdf';
+      final caminho = '$pasta/${DateTime.now().millisecondsSinceEpoch}_$nome';
+
+      final response = await http.post(
+        Uri.parse(_cloudFunctionUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'file': base64Encode(bytes),
+          'fileName': nome,
+          'filePath': caminho,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Falha no upload de "${file.name}": ${response.statusCode} - ${response.body}');
+      }
+      urls.add((jsonDecode(response.body) as Map<String, dynamic>)['url'] as String);
+    }
+    return urls;
+  }
+
   // FUNÇÃO PARA ARQUIVOS DE RTERCEIROS - uploadArquivosTerceiros
   Future<List<String>> uploadArquivosTerceiros(String numeroSinistro, List<PlatformFile> arquivos) async {
     if (arquivos.isEmpty) return [];

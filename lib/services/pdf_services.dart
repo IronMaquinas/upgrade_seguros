@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import '../models/claim_model.dart';
 import '../models/client_model.dart';
 import '../models/third_party_model.dart';
+import '../models/lancamento_model.dart';
 
 class PdfService {
   // ── Paleta de Cores (conforme projeto) ──────────────────────────────────
@@ -43,8 +44,12 @@ class PdfService {
 
     final fotosDoSinistroGrid = await _buildImageGrid(claim.fotosUrls);
     
+    final resumoValores = claim.resumoValores;
     final terceirosSections = await Future.wait(
-      claim.terceiros.map((tp) => _buildTerceiroSection(tp))
+      claim.terceiros.map((tp) => _buildTerceiroSection(
+            tp,
+            valorPago: tp.id.isEmpty ? 0.0 : (resumoValores.porTerceiro[tp.id] ?? 0.0),
+          ))
     );
 
     pdf.addPage(
@@ -341,7 +346,7 @@ class PdfService {
                         ),
                         pw.SizedBox(height: 4),
                         pw.Text(
-                          'R\$ ${claim.valorTotalSinistro.toStringAsFixed(2)}',
+                          _moeda.format(claim.valorTotalCalculado),
                           style: pw.TextStyle(
                             fontSize: 14,
                             fontWeight: pw.FontWeight.bold,
@@ -469,6 +474,19 @@ class PdfService {
             ),
             pw.SizedBox(height: 12),
             ...terceirosSections,
+            pw.SizedBox(height: 20),
+          ],
+
+          // ═════════════════════════════════════════════════════════════════════════
+          // SEÇÃO 8: VALORES DO SINISTRO (Etapa 02) — totais e histórico
+          // ═════════════════════════════════════════════════════════════════════════
+          if (claim.lancamentos.isNotEmpty || claim.valorTotalSinistro > 0) ...[
+            pw.Text(
+              'Valores do Sinistro',
+              style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold, color: _colorBlue),
+            ),
+            pw.SizedBox(height: 12),
+            _buildValoresSection(claim),
             pw.SizedBox(height: 20),
           ],
 
@@ -881,11 +899,49 @@ class PdfService {
     return rows;
   }
 
-  Future<pw.Widget> _buildTerceiroSection(ThirdParty tp) async {
+  static final NumberFormat _moeda = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$', decimalDigits: 2);
+
+  // Etapa 02: terceiro agrupado por personagem (proprietário / motorista /
+  // contato / sinistro do terceiro) + valor pago a ele.
+  pw.Widget _grupoPdf(String titulo, List<List<String>> pares) {
+    final validos = pares.where((p) => p[1].trim().isNotEmpty).toList();
+    if (validos.isEmpty) return pw.SizedBox();
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(top: 6),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(titulo, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: _colorBlue)),
+          pw.SizedBox(height: 2),
+          pw.Wrap(
+            spacing: 16,
+            runSpacing: 2,
+            children: validos
+                .map((p) => pw.RichText(
+                      text: pw.TextSpan(children: [
+                        pw.TextSpan(text: '${p[0]}: ', style: _labelStyle()),
+                        pw.TextSpan(text: p[1], style: pw.TextStyle(fontSize: 9)),
+                      ]),
+                    ))
+                .toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<pw.Widget> _buildTerceiroSection(ThirdParty tp, {double valorPago = 0.0}) async {
     pw.Widget? fotos;
     if (tp.fotosUrls != null && tp.fotosUrls!.isNotEmpty) {
       fotos = await _buildImageGrid(tp.fotosUrls!);
     }
+
+    final veiculo = [tp.marcaTerceiro, tp.modeloTerceiro, tp.cor]
+        .where((v) => v.trim().isNotEmpty)
+        .join(' ');
+    final anos = [tp.anoFabricacaoTerceiro, tp.anoModeloTerceiro]
+        .where((v) => v.trim().isNotEmpty)
+        .join('/');
 
     return pw.Container(
       decoration: pw.BoxDecoration(
@@ -898,31 +954,170 @@ class PdfService {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Text(
-            tp.nome,
-            style: pw.TextStyle(
-              fontSize: 11,
-              fontWeight: pw.FontWeight.bold,
-              color: _colorBlue,
-            ),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text(
+                tp.nome.isEmpty ? 'Terceiro' : tp.nome,
+                style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: _colorBlue),
+              ),
+              if (valorPago > 0)
+                pw.Text(
+                  'Pago ao terceiro: ${_moeda.format(valorPago)}',
+                  style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: _colorGreen),
+                ),
+            ],
           ),
-          if (tp.contato.isNotEmpty) ...[
-            pw.SizedBox(height: 4),
-            pw.Text(
-              'Contato: ${tp.contato}',
-              style: pw.TextStyle(fontSize: 9, color: _colorGray),
-            ),
-          ],
-          if (tp.veiculo != null) ...[
-            pw.SizedBox(height: 4),
-            pw.Text(
-              'Veículo: ${tp.veiculo!.marca} ${tp.veiculo!.modelo}${tp.veiculo!.placa.isNotEmpty ? " - ${tp.veiculo!.placa}" : ""}',
-              style: pw.TextStyle(fontSize: 9, color: _colorGray),
-            ),
-          ],
+          _grupoPdf('Proprietário do veículo (CRLV)', [
+            ['Nome', tp.nome],
+            ['CPF/CNPJ', tp.cpf],
+            ['Telefone', tp.contato],
+            ['E-mail', tp.email],
+            ['Endereço', tp.enderecoTerceiro],
+            ['Placa', tp.placa],
+            ['Chassi', tp.chassi],
+            ['Veículo', veiculo],
+            ['Ano', anos],
+          ]),
+          if (tp.motoristaMesmoProprietario)
+            _grupoPdf('Motorista', [['Motorista', 'o próprio proprietário'], ['CNH', tp.cnhMotorista]])
+          else
+            _grupoPdf('Motorista', [
+              ['Nome', tp.nomeMotorista],
+              ['CPF', tp.cpfMotorista],
+              ['CNH', tp.cnhMotorista],
+              ['Telefone', tp.telefoneMotorista],
+              ['E-mail', tp.emailMotorista],
+            ]),
+          _grupoPdf('Contato', [
+            ['Nome', tp.nomeContatoTerceiro ?? ''],
+            ['Telefone', tp.telefoneContatoTerceiro ?? ''],
+          ]),
+          _grupoPdf('Sinistro do terceiro', [
+            ['Registro na seguradora', tp.registroSeguradoraTerceiro ?? ''],
+            ['Relato', tp.relato],
+          ]),
           if (fotos != null) ...[
             pw.SizedBox(height: 8),
             fotos,
+          ],
+        ],
+      ),
+    );
+  }
+
+  // Etapa 02: totais + histórico de lançamentos (com notas fiscais).
+  pw.Widget _buildValoresSection(Claim claim) {
+    final resumo = claim.resumoValores;
+    final lista = LancamentoSinistro.ordenar(claim.lancamentos);
+    final dataFmt = DateFormat('dd/MM/yyyy');
+
+    pw.Widget celula(String texto, {bool negrito = false, bool riscado = false, pw.TextAlign? alinhamento, PdfColor? cor}) {
+      return pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+        child: pw.Text(
+          texto,
+          textAlign: alinhamento,
+          style: pw.TextStyle(
+            fontSize: 8,
+            fontWeight: negrito ? pw.FontWeight.bold : pw.FontWeight.normal,
+            decoration: riscado ? pw.TextDecoration.lineThrough : null,
+            color: cor ?? (riscado ? _colorGray : null),
+          ),
+        ),
+      );
+    }
+
+    pw.Widget total(String rotulo, double valor, {bool destaque = false}) {
+      return pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(rotulo, style: _labelStyle()),
+          pw.Text(
+            _moeda.format(valor),
+            style: pw.TextStyle(
+              fontSize: destaque ? 12 : 10,
+              fontWeight: pw.FontWeight.bold,
+              color: destaque ? _colorGreen : null,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return pw.Container(
+      decoration: pw.BoxDecoration(
+        color: PdfColors.white,
+        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+        border: pw.Border.all(color: _colorGrayBorder, width: 1),
+      ),
+      padding: const pw.EdgeInsets.all(12),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              total('Segurado', lista.isEmpty ? claim.valorTotalSinistro : resumo.segurado),
+              total('Terceiros', resumo.terceiros),
+              total('Total do sinistro', claim.valorTotalCalculado, destaque: true),
+            ],
+          ),
+          if (lista.isEmpty) ...[
+            pw.SizedBox(height: 8),
+            pw.Text(
+              'Valor registrado antes do histórico de lançamentos (sem detalhamento).',
+              style: pw.TextStyle(fontSize: 8, color: _colorGray),
+            ),
+          ] else ...[
+            pw.SizedBox(height: 10),
+            pw.Table(
+              border: pw.TableBorder.all(color: _colorGrayBorder, width: 0.5),
+              columnWidths: const {
+                0: pw.FixedColumnWidth(48),
+                1: pw.FlexColumnWidth(1.3),
+                2: pw.FlexColumnWidth(1.3),
+                3: pw.FlexColumnWidth(2.2),
+                4: pw.FixedColumnWidth(62),
+              },
+              children: [
+                pw.TableRow(
+                  decoration: const pw.BoxDecoration(color: _colorGrayLight),
+                  children: [
+                    celula('Data', negrito: true),
+                    celula('Tipo', negrito: true),
+                    celula('A quem', negrito: true),
+                    celula('Descrição / NF / registro', negrito: true),
+                    celula('Valor', negrito: true, alinhamento: pw.TextAlign.right),
+                  ],
+                ),
+                ...lista.map((l) {
+                  final detalhes = <String>[
+                    if (l.descricao.isNotEmpty) l.descricao,
+                    if (l.anexos.isNotEmpty) 'NF/evidências: ${l.anexos.map((a) => a.nome).join(', ')}',
+                    'Registrado por ${l.registradoPor.isEmpty ? '-' : l.registradoPor} em ${dataFmt.format(l.registradoEm)}',
+                    if (l.cancelado)
+                      'CANCELADO por ${l.canceladoPor ?? '-'}'
+                          '${l.canceladoEm != null ? ' em ${dataFmt.format(l.canceladoEm!)}' : ''}'
+                          ': ${l.motivoCancelamento ?? '-'}',
+                  ];
+                  return pw.TableRow(children: [
+                    celula(dataFmt.format(l.data), riscado: l.cancelado),
+                    celula(l.tipo, riscado: l.cancelado),
+                    celula(l.beneficiarioLabel, riscado: l.cancelado),
+                    celula(detalhes.join('\n'), cor: l.cancelado ? _colorGray : null),
+                    celula(_moeda.format(l.valor), riscado: l.cancelado, alinhamento: pw.TextAlign.right),
+                  ]);
+                }),
+              ],
+            ),
+            if (resumo.cancelados > 0) ...[
+              pw.SizedBox(height: 4),
+              pw.Text(
+                'Lançamentos cancelados aparecem riscados e não somam no total.',
+                style: pw.TextStyle(fontSize: 7, color: _colorGray),
+              ),
+            ],
           ],
         ],
       ),

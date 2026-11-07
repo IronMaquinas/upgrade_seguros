@@ -39,6 +39,7 @@ import 'package:upgrade_seguros/services/place_search_delegate.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'package:upgrade_seguros/models/bodily_injury_model.dart';
 import 'package:upgrade_seguros/models/material_damage_model.dart';
+import 'package:upgrade_seguros/models/lancamento_model.dart';
 
  enum RelatoStep {
     situacao,
@@ -167,6 +168,13 @@ class _TerceirosListWidgetState extends State<_TerceirosListWidget> {
         'nomeContatoTerceiro': TextEditingController(text: widget.terceiros[i]['nomeContatoTerceiro'] ?? ''),
         'telefoneContatoTerceiro': TextEditingController(text: widget.terceiros[i]['telefoneContatoTerceiro'] ?? ''),
         'registroSeguradoraTerceiro': TextEditingController(text: widget.terceiros[i]['registroSeguradoraTerceiro'] ?? ''),
+
+        // Etapa 02: motorista
+        'nomeMotorista': TextEditingController(text: widget.terceiros[i]['nomeMotorista'] ?? ''),
+        'cpfMotorista': TextEditingController(text: widget.terceiros[i]['cpfMotorista'] ?? ''),
+        'telefoneMotorista': TextEditingController(text: widget.terceiros[i]['telefoneMotorista'] ?? ''),
+        'emailMotorista': TextEditingController(text: widget.terceiros[i]['emailMotorista'] ?? ''),
+        'cnhMotorista': TextEditingController(text: widget.terceiros[i]['cnhMotorista'] ?? ''),
         
         'relato': TextEditingController(text: widget.terceiros[i]['relato'] ?? ''),
       };
@@ -358,26 +366,27 @@ class _TerceirosListWidgetState extends State<_TerceirosListWidget> {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    // Campos de texto do terceiro
+                    // ── Etapa 02: campos agrupados por personagem ──
+                    _tituloSecao(Icons.badge_outlined, 'Proprietário do veículo', 'conforme o CRLV'),
                     Row(
                       children: [
-                        Expanded (
-                        child: _buildTerceiroField(
-                          label: 'Nome',
-                          controller: ctrls['nome'],
-                          onChanged: (val) => widget.onEditField(index, 'nome', val),
-                        ),
+                        Expanded(
+                          child: _buildTerceiroField(
+                            label: 'Nome do proprietário',
+                            controller: ctrls['nome'],
+                            onChanged: (val) => widget.onEditField(index, 'nome', val),
+                          ),
                         ),
                         const SizedBox(width: 8),
-                        Expanded (
-                        child: _buildTerceiroField(
-                          label: 'CPF',
-                          controller: ctrls['cpf'],
-                          inputFormatters: [BRFormatters.cpfCnpjFormatter],
-                          onChanged: (val) => widget.onEditField(index, 'cpf', val),
+                        Expanded(
+                          child: _buildTerceiroField(
+                            label: 'CPF / CNPJ',
+                            controller: ctrls['cpf'],
+                            inputFormatters: [BRFormatters.cpfCnpjFormatter],
+                            onChanged: (val) => widget.onEditField(index, 'cpf', val),
+                          ),
                         ),
-                        )
-                      ]
+                      ],
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -385,7 +394,7 @@ class _TerceirosListWidgetState extends State<_TerceirosListWidget> {
                         Expanded(
                           child: _buildTerceiroField(
                             label: 'Telefone',
-                            controller: ctrls['contatoSegurado'],
+                            controller: ctrls['contato'],
                             inputFormatters: [_telefoneFormatter],
                             onChanged: (val) => widget.onEditField(index, 'contato', val),
                           ),
@@ -400,7 +409,7 @@ class _TerceirosListWidgetState extends State<_TerceirosListWidget> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    _tituloSecao(Icons.directions_car_outlined, 'Veículo', null),
                     Row(
                       children: [
                         Expanded(
@@ -498,8 +507,92 @@ class _TerceirosListWidgetState extends State<_TerceirosListWidget> {
                         ),
                       ],
                     ),
+
+                    // ── MOTORISTA ──
+                    _tituloSecao(Icons.airline_seat_recline_normal, 'Motorista', 'quem dirigia no momento do sinistro'),
+                    Row(
+                      children: [
+                        Checkbox(
+                          value: terceiro['motoristaMesmoProprietario'] == true,
+                          onChanged: (v) {
+                            setState(() => terceiro['motoristaMesmoProprietario'] = v ?? false);
+                            widget.onEditField(index, 'motoristaMesmoProprietario', v ?? false);
+                          },
+                        ),
+                        const Text('O motorista é o próprio proprietário', style: TextStyle(fontSize: 13)),
+                      ],
+                    ),
                     const SizedBox(height: 8),
-                    // ✨ CONTATO DO TERCEIRO
+                    if (terceiro['motoristaMesmoProprietario'] == true)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildTerceiroField(
+                              label: 'CNH do motorista',
+                              controller: ctrls['cnhMotorista'],
+                              keyboardType: TextInputType.number,
+                              onChanged: (val) => widget.onEditField(index, 'cnhMotorista', val),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Expanded(flex: 2, child: SizedBox()),
+                        ],
+                      )
+                    else ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildTerceiroField(
+                              label: 'Nome do motorista',
+                              controller: ctrls['nomeMotorista'],
+                              onChanged: (val) => widget.onEditField(index, 'nomeMotorista', val),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _buildTerceiroField(
+                              label: 'CPF do motorista',
+                              controller: ctrls['cpfMotorista'],
+                              inputFormatters: [BRFormatters.cpfCnpjFormatter],
+                              onChanged: (val) => widget.onEditField(index, 'cpfMotorista', val),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _buildTerceiroField(
+                              label: 'CNH do motorista',
+                              controller: ctrls['cnhMotorista'],
+                              keyboardType: TextInputType.number,
+                              onChanged: (val) => widget.onEditField(index, 'cnhMotorista', val),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildTerceiroField(
+                              label: 'Telefone do motorista',
+                              controller: ctrls['telefoneMotorista'],
+                              inputFormatters: [_telefoneFormatter],
+                              onChanged: (val) => widget.onEditField(index, 'telefoneMotorista', val),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _buildTerceiroField(
+                              label: 'E-mail do motorista',
+                              controller: ctrls['emailMotorista'],
+                              onChanged: (val) => widget.onEditField(index, 'emailMotorista', val),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+
+                    // ── CONTATO ──
+                    _tituloSecao(Icons.contact_phone_outlined, 'Contato', 'quem a corretora aciona sobre este terceiro'),
                     Row(
                       children: [
                         Expanded(
@@ -518,15 +611,15 @@ class _TerceirosListWidgetState extends State<_TerceirosListWidget> {
                             onChanged: (val) => widget.onEditField(index, 'telefoneContatoTerceiro', val),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                          Expanded(
-                            child: _buildTerceiroField(
-                              label: 'Nº de Registro do Sinistro do Terceiro',
-                              controller: ctrls['registroSeguradoraTerceiro'],
-                              onChanged: (val) => widget.onEditField(index, 'registroSeguradoraTerceiro', val),
-                            ),
-                          ),
                       ],
+                    ),
+
+                    // ── SINISTRO DO TERCEIRO ──
+                    _tituloSecao(Icons.description_outlined, 'Sinistro do terceiro', null),
+                    _buildTerceiroField(
+                      label: 'Nº de Registro do Sinistro do Terceiro',
+                      controller: ctrls['registroSeguradoraTerceiro'],
+                      onChanged: (val) => widget.onEditField(index, 'registroSeguradoraTerceiro', val),
                     ),
                     const SizedBox(height: 8),
                     _buildTerceiroField(
@@ -814,33 +907,85 @@ class _TerceirosListWidgetState extends State<_TerceirosListWidget> {
     );
   }
 
+  // Etapa 02: título de cada grupo do terceiro (proprietário, motorista…).
+  static Widget _tituloSecao(IconData icone, String titulo, String? subtitulo) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10, bottom: 6),
+      child: Row(
+        children: [
+          Icon(icone, size: 16, color: const Color(0xFF6A1B9A)),
+          const SizedBox(width: 6),
+          Text(
+            titulo,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF6A1B9A)),
+          ),
+          if (subtitulo != null) ...[
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                subtitulo,
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // Etapa 03: mesmo visual dos campos da planilha (rótulo em cima, caixa cinza).
   static Widget _buildTerceiroField({
     required String label,
     TextEditingController? controller,
     required Function(String) onChanged,
     int maxLines = 1,
-    List<TextInputFormatter>? inputFormatters, // 👈 NOVO
+    List<TextInputFormatter>? inputFormatters,
     TextInputType? keyboardType,
   }) {
-    return TextField(
-      controller: controller,
-      onChanged: onChanged,
-      maxLines: maxLines,
-      inputFormatters: inputFormatters,
-      textAlign: TextAlign.left,
-      decoration: InputDecoration(
-        labelText: label,
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(4),
-          borderSide: BorderSide(color: Colors.grey.shade300),
+    const roxo = Color(0xFF6A1B9A);
+    final borda = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(6),
+      borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey.shade600,
+            letterSpacing: 0.2,
+          ),
         ),
-      ),
-          );
-        }
-      }
+        const SizedBox(height: 4),
+        TextField(
+          controller: controller,
+          onChanged: onChanged,
+          maxLines: maxLines,
+          keyboardType: keyboardType,
+          inputFormatters: inputFormatters,
+          textAlign: TextAlign.left,
+          style: const TextStyle(fontSize: 13, color: Color(0xFF1A1A2E)),
+          decoration: InputDecoration(
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            filled: true,
+            fillColor: const Color(0xFFF8F9FB),
+            border: borda,
+            enabledBorder: borda,
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: roxo, width: 1.5),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 // ─── Formatter de maiúsculas para placas ────────────────────────────────────
 class _UpperCase extends TextInputFormatter {
@@ -890,6 +1035,9 @@ class _Field {
   final VoidCallback? onTap;
   final bool isTime;
   final bool isCheckbox; 
+  // Etapa 03: linha de título dentro do grupo (ícone + título + subtítulo em `hint`)
+  final bool isHeader;
+  final IconData? headerIcon;
 
   const _Field({
     required this.id,
@@ -911,6 +1059,8 @@ class _Field {
     this.onTap,
     this.isTime = false,
     this.isCheckbox = false,
+    this.isHeader = false,
+    this.headerIcon,
   });
 }
 
@@ -957,6 +1107,8 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
   String? _ramoSelecionado;
   bool _isApplyingMask = false;
   String _nomeUsuarioLogado = 'Desconhecido';
+  // Etapa 02: quando o valor da abertura foi registrado pela 1ª vez.
+  DateTime? _aberturaRegistradaEm;
   String? _selectedApoliceId;
 
   // FUNÇÃO PARA AUTO GERAR RELATO
@@ -1397,10 +1549,17 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
           icon: Icons.directions_car_outlined,
           color: const Color(0xFF2E7D32),
           rows: [
+            // Etapa 03: mesmos títulos com ícone da seção de Terceiros
+            [
+              const _Field(id: '_secao_proprietario', label: 'Proprietário legal', hint: 'conforme o CRLV', isHeader: true, headerIcon: Icons.badge_outlined),
+            ],
             // Linha 1: Proprietário Legal
             [
               const _Field(id: 'nomeCondutor', label: 'Nome do Proprietário Legal', flex: 3),
               _Field(id: 'cpfCondutor', label: 'CPF / CNPJ do Proprietário Legal', keyboard: TextInputType.number, flex: 2, inputFormatters: [BRFormatters.cpfCnpjFormatter]),
+            ],
+            [
+              const _Field(id: '_secao_veiculo', label: 'Veículo', isHeader: true, headerIcon: Icons.directions_car_outlined),
             ],
             // Linha 2: Placa, Marca/Modelo, Cor
             [
@@ -1413,6 +1572,9 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
               const _Field(id: 'chassi', label: 'Chassi', flex: 2),
               const _Field(id: 'ano', label: 'Ano', keyboard: TextInputType.number, flex: 1),
               const _Field(id: 'anoModelo', label: 'Ano Modelo', keyboard: TextInputType.number, flex: 1),
+            ],
+            [
+              const _Field(id: '_secao_motorista', label: 'Motorista', hint: 'quem dirigia no momento do sinistro', isHeader: true, headerIcon: Icons.airline_seat_recline_normal),
             ],
             // Linha 4: Checkbox (usando campo placeholder)
             [
@@ -1428,6 +1590,9 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
               const _Field(id: 'nomeCondutorMotorista', label: 'Nome do Condutor do Veículo', flex: 2),
               _Field(id: 'cpfCondutorMotorista', label: 'CPF / CNPJ do Condutor do Veículo', keyboard: TextInputType.number, flex: 2, inputFormatters: [BRFormatters.cpfCnpjFormatter]),
               _Field(id: 'cnhCondutorMotorista', label: 'CNH do Condutor do Veículo', keyboard: TextInputType.number, flex: 2),
+            ],
+            [
+              const _Field(id: '_secao_contato', label: 'Contato do sinistro', hint: 'quem a corretora aciona sobre o sinistro', isHeader: true, headerIcon: Icons.contact_phone_outlined),
             ],
             // Linha 6: Contato do Sinistro
             [
@@ -2147,17 +2312,30 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
 
       // 🆕 CONVERTER LISTA DE TERCEIROS (Map) EM OBJETOS ThirdParty
       final terceirosObj = _terceiros.map((t) {
+        // Etapa 02: id estável (liga os lançamentos de valor ao terceiro).
+        // Guardado no mapa para os salvamentos automáticos repetirem o mesmo.
+        if ((t['id'] as String? ?? '').isEmpty) t['id'] = ThirdParty.novoId();
+        final mesmoProprietario = t['motoristaMesmoProprietario'] == true;
         return ThirdParty(
+          id: t['id'] as String,
+          motoristaMesmoProprietario: mesmoProprietario,
+          nomeMotorista: mesmoProprietario ? '' : (t['nomeMotorista'] ?? ''),
+          cpfMotorista: mesmoProprietario ? '' : (t['cpfMotorista'] ?? ''),
+          telefoneMotorista: mesmoProprietario ? '' : (t['telefoneMotorista'] ?? ''),
+          emailMotorista: mesmoProprietario ? '' : (t['emailMotorista'] ?? ''),
+          cnhMotorista: t['cnhMotorista'] ?? '',
           nome: t['nome'] ?? '',
           cpf: t['cpf'] ?? '',
           contato: t['contato'] ?? '',
           email: t['email'] ?? '',
           veiculo: Vehicle(
-            chassi: '',
+            chassi: t['chassi'] ?? '',
             marca: t['marca'] ?? '',
             modelo: t['modelo'] ?? '',
             ano: int.tryParse(t['ano'] ?? '0') ?? 0,
             anomodelo: int.tryParse(t['anoModelo'] ?? '0') ?? 0,
+            placa: (t['placa'] ?? '').toUpperCase(),
+            cor: t['cor'] ?? '',
           ),
           relato: t['relato'] ?? '',
           placa: (t['placa'] ?? '').toUpperCase(),
@@ -2225,6 +2403,12 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
         );
       }
 
+      final valorAbertura = () {
+        final raw = _ctrl['valor']!.text;
+        final clean = raw.replaceAll(RegExp(r'[^\d,]'), '');
+        return double.tryParse(clean.replaceAll(',', '.')) ?? 0.0;
+      }();
+
       final novoClaim = Claim(
         idCliente: _cliente?.id ?? '',
         responsavelId: userId,
@@ -2264,11 +2448,25 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
         seguradora: _ctrl['seguradora']!.text.trim(),
         clientNome: _cliente?.nome ?? _ctrl['empresaSegurada']!.text.trim(),
         clientCnpjCpf: _cliente?.cnpjCpf ?? _ctrl['cnpjSegurado']!.text.trim(),
-        valorTotalSinistro: () {
-          final raw = _ctrl['valor']!.text;
-          final clean = raw.replaceAll(RegExp(r'[^\d,]'), '');
-          return double.tryParse(clean.replaceAll(',', '.')) ?? 0.0;
-        }(),
+        valorTotalSinistro: valorAbertura,
+        // Etapa 02: o valor digitado na abertura vira o 1º lançamento do
+        // histórico (segurado). Id fixo para os salvamentos automáticos não
+        // duplicarem; a data de registro é a do primeiro salvamento.
+        lancamentos: valorAbertura > 0
+            ? [
+                LancamentoSinistro(
+                  id: 'abertura',
+                  data: _parseData('dataSinistro'),
+                  tipo: TiposLancamento.abertura,
+                  descricao: 'Valor informado no campo "Valor do Sinistro" ao abrir o sinistro.',
+                  valor: valorAbertura,
+                  origem: OrigemLancamento.abertura,
+                  registradoPor: _nomeUsuarioLogado,
+                  registradoPorEmail: userEmail,
+                  registradoEm: _aberturaRegistradaEm ??= DateTime.now(),
+                ),
+              ]
+            : const [],
         status: (_ctrl['status']?.text ?? '').isNotEmpty ? _ctrl['status']!.text : 'Aberto',
         house: _ramoSelecionado == 'Residencial' ? house : null,
         life: _ramoSelecionado == 'Vidas' ? life : null,
@@ -3017,8 +3215,11 @@ Future<void> _uploadDocumentoMaterialDamage(int danoIndex) async {
       final isProprietario = data['condutorEhProprietario'] ?? true;
       final file = data['crlvFile'];
 
-      _terceiros[index]['nome'] = isProprietario ? (condutor['nome'] ?? '') : '';
-      _terceiros[index]['cpf'] = isProprietario ? (condutor['cpf'] ?? '') : '';
+      // Etapa 02: nome/CPF do CRLV são do PROPRIETÁRIO. A pergunta
+      // "condutor é o proprietário?" agora marca o grupo Motorista.
+      _terceiros[index]['nome'] = condutor['nome'] ?? '';
+      _terceiros[index]['cpf'] = condutor['cpf'] ?? '';
+      _terceiros[index]['motoristaMesmoProprietario'] = isProprietario;
       _terceiros[index]['placa'] = veiculo['placa'] ?? '';
       _terceiros[index]['chassi'] = veiculo['chassi'] ?? '';
       _terceiros[index]['marca'] = veiculo['marca'] ?? '';
@@ -4226,6 +4427,33 @@ class _FieldCell extends StatefulWidget {
     @override
     Widget build(BuildContext context) {
 
+        // Etapa 03: título de seção (mesmo visual dos Terceiros)
+        if (widget.field.isHeader) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Row(
+              children: [
+                Icon(widget.field.headerIcon ?? Icons.label_outline, size: 16, color: widget.groupColor),
+                const SizedBox(width: 6),
+                Text(
+                  widget.field.label,
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: widget.groupColor),
+                ),
+                if (widget.field.hint != null) ...[
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      widget.field.hint!,
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        }
+
         if (widget.field.id == '_checkbox_condutor') {
         final state = context.findAncestorStateOfType<_SpreadsheetClaimScreenState>();
         if (state == null) return const SizedBox();
@@ -4253,7 +4481,7 @@ class _FieldCell extends StatefulWidget {
                     });
                   },
                 ),
-                const Text('O condutor é o proprietário do veículo?'),
+                const Text('O condutor é o proprietário do veículo?', style: TextStyle(fontSize: 13)),
               ],
             ),
           ],

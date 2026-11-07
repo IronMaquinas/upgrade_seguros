@@ -16,3 +16,21 @@ subprojects {
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }
+
+subprojects {
+    afterEvaluate { project ->
+        if (project.plugins.hasPlugin('com.android.library') || project.plugins.hasPlugin('com.android.application')) {
+            if (project.android.namespace == null) {
+                def manifestFile = project.android.sourceSets.main.manifest.srcFile
+                if (manifestFile.exists()) {
+                    def manifestText = manifestFile.text
+                    def matcher = manifestText =~ /package="([^"]*)"/
+                    if (matcher.find()) {
+                        project.android.namespace = matcher.group(1)
+                        println "Auto-set namespace for ${project.name}: ${project.android.namespace}"
+                    }
+                }
+            }
+        }
+    }
+}
