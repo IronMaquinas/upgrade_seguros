@@ -15,6 +15,7 @@ import 'package:upgrade_seguros/utils/formatters.dart';
 import 'package:upgrade_seguros/utils/gatilho.dart';
 import 'package:upgrade_seguros/services/config_service.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:upgrade_seguros/widgets/apolice_visualizacao_dialog.dart';
 import 'package:uuid/uuid.dart';
 import '../models/claim_model.dart';
 import '../models/client_model.dart';
@@ -118,12 +119,14 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     }
   }
 
-  Future<void> _editClient() async {
+  // [apoliceId]: vindo do "Editar" da visualização da apólice (Etapa 08), o
+  // cadastro já abre a edição dessa apólice.
+  Future<void> _editClient({String? apoliceId}) async {
     print('Editando cliente: ${_currentClient!.id}');
     
     final updated = await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ClientFormScreen(clientToEdit: _currentClient!),
+        builder: (_) => ClientFormScreen(clientToEdit: _currentClient!, editarApoliceId: apoliceId),
       ),
     );
 
@@ -535,7 +538,19 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                                       final emoji = _getEmojiRamo(apolice.ramo);
                                       final cor = _getCorRamo(apolice.ramo);
                                       
-                                      return Container(
+                                      // Etapa 08: clicar na apólice abre a visualização.
+                                      return InkWell(
+                                        borderRadius: BorderRadius.circular(12),
+                                        onTap: () async {
+                                          final editar = await mostrarApoliceVisualizacao(
+                                            context,
+                                            apolice: apolice,
+                                            percentualGatilho: _percentualGatilho,
+                                            emojiRamo: emoji,
+                                          );
+                                          if (editar && mounted) _editClient(apoliceId: apolice.id);
+                                        },
+                                        child: Container(
                                         margin: const EdgeInsets.only(bottom: 10),
                                         decoration: BoxDecoration(
                                           border: Border.all(color: Colors.grey.shade200),
@@ -568,7 +583,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                                                       overflow: TextOverflow.ellipsis,
                                                     ),
                                                   ),
-                                                  // Não incluímos botões de editar/excluir aqui (apenas visualização)
+                                                  Icon(Icons.visibility_outlined, size: 18, color: cor.withOpacity(0.7)),
                                                 ],
                                               ),
                                             ),
@@ -836,6 +851,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                                             ),
                                           ],
                                         ),
+                                      ),
                                       );
                                     }).toList(),
                                   ],

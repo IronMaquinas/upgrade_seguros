@@ -2,8 +2,8 @@
 
 > Plataforma web/mobile para corretoras de seguros gerenciarem sinistros, assistências, clientes, tarefas e métricas de desempenho em tempo real.
 
-**Versão do documento:** Etapa 07 (GitHub `c7554c0` = Etapas 01–06, sem a limpeza do git da 06)
-**Última atualização:** 07/11/2026
+**Versão do documento:** Etapa 08 (GitHub `7301670` = Etapas 01–07, ainda sem a limpeza do git da 06)
+**Última atualização:** 08/11/2026
 **Status:** app em uso; ciclo de entregas com verificação por md5 em andamento. Etapa 02: terceiros identificados por personagem (proprietário / motorista / contato) e **histórico de valores do sinistro** (lançamentos com nota fiscal, segurado + terceiros). Pendências de segurança abertas — ver [🔐 Pendências de Segurança](#-pendências-de-segurança).
 
 ---
@@ -138,11 +138,13 @@
 - **CNPJ alfanumérico** (padrão julho/2026)
 - **Validação de duplicata** de CNPJ/CPF
 - **Veículos segurados**: marca / modelo / cor / ano fabricação / ano modelo / placa / chassi + fotos
-- **Ramos de Seguro**: Seleção múltipla com chips visuais (🚗 Veículo · 🏠 Residencial · 🚚 Frota · ⚙️ Máquinas · 💓 Vida · 📦 Transporte)
+- **Ramos de Seguro**: Seleção múltipla com chips visuais (🚗 Veículo · 🏠 Residencial · 🚚 Frota · ⚙️ Máquinas · 💓 Vida · 📦 Transporte · 🚌 Civil Ônibus (RCO) · 🏢 Empresarial)
 - **Vigência de apólice** com alerta de vencimento (badge laranja nos últimos 30 dias)
 - **Score de recomendação**: Bom / Regular / Crítico (baseado em número de sinistros)
 - **NPS Score** acumulado por cliente (−100 a +100)
 - **Valor da apólice** e **valor gatilho**
+- **Apólice clicável** no Detalhes do Cliente e no cadastro: abre a visualização (somente leitura) com "Editar" — componente único `lib/widgets/apolice_visualizacao_dialog.dart` (Etapa 08). No Detalhes, "Editar" abre o cadastro já na edição daquela apólice (depois de "Atualizar", ainda é preciso **salvar o cliente**).
+- **Relatório de clientes (auditoria)** — botão ⬇ na barra da lista de clientes, em CSV (Excel) ou PDF (Etapa 08). Ver [Relatório de clientes](#relatório-de-clientes-auditoria).
 
 ---
 
@@ -236,7 +238,7 @@ O **gatilho** é o valor de sinistros, dentro da vigência da apólice, a partir
 
 - **% padrão:** Configurações → Funcionalidades → *Gatilho padrão da apólice* (padrão **70%**; campo `percentualGatilhoPadrao` em `app_config/config`).
 - **Cadastro da apólice:** valores em R$; ao digitar o valor da apólice, o gatilho é **sugerido** com o % padrão. Se o usuário digitar outro valor, ele passa a valer como "valor do contrato"; apagando o campo, volta a sugestão. O valor salvo fica gravado na apólice.
-- **Visualização:** clicar na apólice (no cadastro do cliente) abre o modal em modo leitura, com botão "Editar".
+- **Visualização:** clicar na apólice (no Detalhes do Cliente ou no cadastro) abre o modal em modo leitura, com botão "Editar" (Etapa 08: componente único `apolice_visualizacao_dialog.dart`).
 - **Uso do gatilho** = soma de `valor_total_sinistro` dos sinistros **ligados à apólice** (`apolice_id`), **ocorridos dentro da vigência** e **não cancelados/negados**, ÷ gatilho efetivo. Mesma regra no Top 10 de risco (Relatórios) e no alerta do "Valor do Sinistro" na abertura.
 - Status: 🔴 > 100% (estourou) · 🟠 ≥ 80% · 🟡 ≥ 60%.
 
@@ -272,6 +274,8 @@ Concluído [dataConclusao = Timestamp.now()] / Cancelado
 - 🟢 Verde — dentro do prazo
 - 🟠 Laranja — ≤15 min restantes
 - 🔴 Vermelho — vencido
+
+**Prazo padrão de encerramento do sinistro, por ramo** (Configurações → SLAs → *Tempo Padrão para Resolução de Sinistros*; preenche o "Dias para Encerramento" da abertura): lista de ramos e padrões em `AppConfig.slaSinistrosPadrao` (`lib/models/config_model.dart`) — Veículo Individual 10 · Frota 7 · **Civil Ônibus (RCO) 7** · Transporte 5 · Máquinas 10 · Residencial 10 · **Empresarial 10** · Vida 10 (RCO e Empresarial entraram na Etapa 08). O que está salvo no Firestore vale; ramo novo aparece com o padrão até ser alterado. Os sinistros gravam o ramo **"Vidas"** e o SLA é salvo como **"Vida"** — `AppConfig.chaveSlaRamo()` faz a ponte.
 
 **Botão "Adicionar Tempo":** rastreado no histórico como `+Xmin adicionados`. Aparece em qualquer status exceto Concluído/Cancelado.
 
@@ -434,6 +438,22 @@ Sistema salva em avaliacoes + atualiza claim + recalcula NPS do cliente
 ### Exportação
 - **PDF** com todas as seções — gerado via `pdf` + `printing`
 
+### Relatório de clientes (auditoria)
+Lista de clientes → botão ⬇ (barra superior) → **Planilha (CSV / Excel)** ou **PDF** (Etapa 08). Exporta os clientes da lista (todos, ou só os da busca), **ordenados pelo valor total das apólices**, com uma linha de TOTAL no final. Regra única em `lib/utils/relatorio_clientes.dart` (teste `test/relatorio_clientes_test.dart`); PDF em `lib/services/relatorio_clientes_pdf.dart`.
+
+| Coluna | Como é calculada |
+|---|---|
+| Valor total das apólices | Soma do "Valor da Apólice" de **todas** as apólices do cliente (vigentes ou não) — o "Total das Apólices" do Detalhes |
+| Qtd. apólices | Todas as apólices cadastradas |
+| Maior apólice (nº e R$) | A de maior valor — serve para achar valor digitado errado |
+| Qtd. sinistros | Todos os sinistros ligados ao cliente (inclusive cancelados) |
+| Valor total utilizado | Soma do valor total dos sinistros **sem Cancelado/Negado** |
+| % da apólice usada | Valor utilizado ÷ valor total das apólices |
+| Qtd. assistências | Todas as assistências ligadas ao cliente |
+
+- CSV com `;` e vírgula decimal, sem separador de milhar e com BOM: abre direto no Excel em português e os números somam. Texto que começa com `= + - @` ganha um apóstrofo (não vira fórmula).
+- Registros sem cliente vinculado (`id_cliente` vazio) não entram.
+
 ---
 
 ## Estrutura de Dados (Firestore)
@@ -560,8 +580,7 @@ Levantadas na revisão da base (07/11/2026). O repositório no GitHub está **p�
 - **Lançamentos só por transação:** gravar o sinistro inteiro (`updateClaim` / `Claim.toMap()`) regrava a lista `lancamentos` com o que está em memória. Hoje só o encerramento faz isso, com o estado atualizado pelo listener. Lançar/cancelar valor **sempre** pelo `LancamentosService` (transação), nunca editando a lista e salvando o claim.
 - **Marca/modelo do terceiro editado antes da Etapa 02:** o diálogo de edição antigo gravava marca, modelo e anos só dentro de `veiculo` (a tela mostrava vazio). O `ThirdParty.fromMap` agora cai para `veiculo` quando o campo próprio está vazio; ao salvar de novo, os dois ficam preenchidos.
 - **Pacote importado sem estar no `pubspec.yaml`:** `latlong2` é importado em `widgets/workshop_widget.dart`, mas só chega como dependência de outro pacote. Compila hoje; quebra se o outro pacote deixar de usá-lo. Corrigir quando a etapa mexer nesse arquivo (o import parece não ser usado — `hide LatLng`).
-- **Import com barra no início:** `screens/client_form_screen.dart` importa `'/widgets/vigencia_date_range_widget.dart'`. Trocar por `package:upgrade_seguros/widgets/...` quando a etapa mexer nesse arquivo.
-- **Valores em moeda na apólice:** ler sempre com `GatilhoApolice.lerMoeda()` (aceita "R$ 1.234,56" com espaço especial). Antes da Etapa 07, o diálogo abria com `120000.1` e o `parseFromMoeda` lia como 1.200.001 se o usuário salvasse sem redigitar — **apólices editadas antes da Etapa 07 podem ter valor/gatilho inflados**: conferir as que parecerem absurdas.
+- **Valores em moeda na apólice:** ler sempre com `GatilhoApolice.lerMoeda()` (aceita "R$ 1.234,56" com espaço especial). Antes da Etapa 07, o diálogo abria com `120000.1` e o `parseFromMoeda` lia como 1.200.001 se o usuário salvasse sem redigitar — **apólices editadas antes da Etapa 07 podem ter valor/gatilho inflados**: conferir as que parecerem absurdas — o relatório de clientes (Etapa 08) ordena por valor e mostra a maior apólice de cada um.
 - **Sinistros sem `apolice_id`** (abertos sem escolher apólice) não entram no uso do gatilho de nenhuma apólice.
 - **Modal "Tipo de Assistência" é um componente só** (Etapa 06): `lib/widgets/assist_tipo_picker.dart` → `mostrarSeletorTipoAssistencia()`, usado pelo Dashboard e pelo botão laranja "Nova Assistência" da lista. Cor padrão das assistências: `corAssistencia` (`Colors.orange.shade600`).
 - **Arquivos auxiliares na raiz/lib:** `ROTEIRO_REFATORACAO_PICKER_RAMO.md` (o picker global já existe em `dashboard_screen.dart` — confirmar que o roteiro foi concluído e apagar) e `lib/readme.dart` (anotações soltas em comentário).
@@ -592,6 +611,8 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 ### O verificador
 - Fica na **raiz do projeto**, ao lado do `pubspec.yaml`, e **fora do git** (está no `.gitignore`). Uma cópia fica no Project do Claude (`claude/verificar-entrega.js`); em conversa nova o Claude parte dessa cópia.
 - Confere por md5 (ignora CRLF e espaço no final) se cada arquivo entregue está idêntico ao testado; imports Dart; pacotes × `pubspec.yaml`; `require` × `functions/package.json`; arquivo entregue fora do git; segredo exposto em arquivo do git.
+- **`.gitignore` (desde a Etapa 08):** conferido pelo **conteúdo** (tem que ter as linhas `verificar-entrega.js`, `node_modules/` e `android/build/`), não por md5 — pode ter outras linhas suas. `node_modules/` ou `android/build/` ainda no git passa a ser ✗.
+- **Arquivos que começam com ponto** (`.gitignore`) ficam escondidos no Finder (mostrar: Cmd+Shift+.). Por isso, desde a Etapa 08, o `.gitignore` não vai no zip: o LEIA-ME traz o comando que acrescenta as linhas.
 
 ---
 
@@ -599,6 +620,7 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 
 | Etapa | Data | Base | O que mudou |
 |---|---|---|---|
+| 08 | 08/11/2026 | `7301670` | **Apólice clicável no Detalhes do Cliente** (visualização com "Editar", que abre o cadastro direto na edição daquela apólice); visualização vira componente único (`apolice_visualizacao_dialog.dart`) usado também no cadastro. **SLA de sinistro para Civil Ônibus (RCO) = 7 e Empresarial = 10** (faltavam na tela e na abertura caía em 10); ramo "Vidas" passa a usar o SLA de "Vida". **Relatório de clientes (auditoria)** em CSV/PDF na lista de clientes, ordenado pelo valor das apólices, com maior apólice e total. **`.gitignore` sem depender do zip:** o verificador confere as linhas e trata `node_modules/`/`android/build/` no git como erro. Testes novos: `relatorio_clientes_test.dart`, `config_sla_test.dart`. |
 | 07 | 07/11/2026 | `c7554c0` | **Gatilho da apólice:** % padrão em Configurações (70%); gatilho efetivo = contrato ou % × valor da apólice (fim do R$ 0,01). Cadastro da apólice com valores em R$, gatilho sugerido e editável, e **correção do bug que inflava valor/gatilho ao salvar sem redigitar**. Apólice clicável abre visualização (modo leitura + "Editar"). **Top 10 de risco revisado:** gatilho efetivo, só sinistros da vigência e não cancelados/negados, % sem casas decimais; abertura do sinistro usa a mesma regra no "uso atual". Dashboard deixa de apontar "Gatilho faltando" quando há valor da apólice. Reaplica a limpeza do git da Etapa 06 (não tinha sido aplicada). |
 | 06 | 07/11/2026 | `c489e4b` | **Botão laranja "Nova Assistência"** de volta na lista de Assistências, abrindo o modal padrão Veicular/Residencial — agora um componente único com o Dashboard (`assist_tipo_picker.dart`). No Dashboard, o "Cancelar" desse modal fechava duas telas (podia fechar o app no Android); agora fecha só o modal. **Limpeza do git:** `node_modules/` (≈15 mil arquivos) e `android/build/` (cache) saem do repositório e entram no `.gitignore`. |
 | 05 | 07/11/2026 | `2c48c4c` | **Filtro de status nas listas de Sinistros e Assistências:** "Em curso" (padrão, inclui Rascunho) · "Todos" (todos mesmo, inclusive Concluído/Cancelado) · cada status. Acabou o "Todos" duplicado em Sinistros. **Carregamento:** abre buscando só o que está em curso; o histórico é baixado quando o filtro pede. Regra única em `lib/utils/filtro_status.dart` + teste `test/filtro_status_test.dart`. |
@@ -682,6 +704,7 @@ apolices: [
 - [x] Anexos logo após o bem segurado na abertura; Veículo Segurado espelhado no detalhe (Etapa 04)
 - [x] Listas com filtro "Em curso" (padrão) e "Todos" de verdade; carregamento só do que está em curso (Etapa 05)
 - [x] Gatilho da apólice com % padrão configurável, sugestão no cadastro, visualização da apólice e Top 10 de risco revisado (Etapa 07)
+- [x] Apólice clicável no Detalhes do Cliente, SLA de RCO/Empresarial e relatório de clientes para auditoria (Etapa 08)
 
 ### 🔐 Segurança (ver [Pendências de Segurança](#-pendências-de-segurança))
 - [ ] 🔴 S1 — Trocar token do Telegram e tirar o arquivo do git
@@ -697,7 +720,7 @@ apolices: [
 - [ ] Relatórios: separar segurado × terceiros nos gráficos de valor/sinistralidade (os dados já existem em `valor_segurado` / `valor_terceiros`)
 - [ ] Danos materiais / corporais com lançamentos próprios (hoje o lançamento é do segurado ou de um terceiro de veículo)
 - [ ] Detalhe do sinistro, próximos passos de harmonia (avaliados na Etapa 04, deixados para depois): mesma ordem de cards da abertura (Anexos em card próprio), modo edição no estilo da planilha (rótulo em cima, caixa cinza), cores/ícones dos cards iguais aos da abertura
-- [x] Tirar `android/build/` e `node_modules/` do git (Etapa 06)
+- [ ] Tirar `android/build/` e `node_modules/` do git (entregue na Etapa 06 e de novo na 07; **aplicar na Etapa 08** — o verificador agora acusa ✗)
 - [ ] Gatilho: avaliar vincular automaticamente à apólice os sinistros antigos sem `apolice_id` (cliente + ramo + data na vigência)
 - [ ] Escala: Dashboard e Relatórios com totais pré-calculados (hoje baixam todos os sinistros e assistências); listas com paginação do histórico se "Todos" ficar lento
 - [ ] **Confirmar estrutura de apólices** com cliente

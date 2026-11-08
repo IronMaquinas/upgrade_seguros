@@ -46,3 +46,6 @@ app.*.map.json
 
 # Verificador de entregas (fica só no computador, fora do git)
 verificar-entrega.js
+
+node_modules/
+android/build/

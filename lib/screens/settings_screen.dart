@@ -1859,6 +1859,8 @@ class _AbaAjustesState extends State<_AbaAjustes> {
     'Máquinas': '⚙️',
     'Residencial': '🏠',
     'Vida': '💓',
+    'Civil Ônibus (RCO)': '🚌', // Etapa 08
+    'Empresarial': '🏢',       // Etapa 08
   };
 
   Widget _buildSlaField({

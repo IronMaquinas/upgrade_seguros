@@ -22,20 +22,39 @@ class AppConfig {
   // traz o valor (padrão 70%).
   double percentualGatilhoPadrao;
 
+  // Etapa 08: SLA de sinistro (dias) por ramo — TODOS os ramos do sistema, na
+  // ordem da tela de Configurações. Ramo novo entra aqui com o seu padrão; quem
+  // já tem o documento salvo recebe o ramo novo com este valor até alterar.
+  static const Map<String, int> slaSinistrosPadrao = {
+    'Veículo Individual': 10,
+    'Frota': 7,
+    'Civil Ônibus (RCO)': 7,
+    'Transporte': 5,
+    'Máquinas': 10,
+    'Residencial': 10,
+    'Empresarial': 10,
+    'Vida': 10,
+  };
+
+  /// Os sinistros gravam o ramo "Vidas"; o SLA sempre foi salvo como "Vida".
+  static String chaveSlaRamo(String ramo) => ramo == 'Vidas' ? 'Vida' : ramo;
+
+  /// Padrões + o que está salvo (o salvo vale). Sempre um mapa alterável.
+  static Map<String, int> mesclarSlaSinistros(Map? salvo) {
+    final resultado = Map<String, int>.from(slaSinistrosPadrao);
+    salvo?.forEach((ramo, dias) {
+      if (ramo is String && dias is num) resultado[chaveSlaRamo(ramo)] = dias.toInt();
+    });
+    return resultado;
+  }
+
   // Construtor principal
   AppConfig({
     required this.id,
     this.slaSinistrosDias = 10,
     this.enableNpsSurvey = true,
     this.slaAsistenciasPorTipo = const {'Veicular': 30, 'Residencial': 60},
-    this.slaSinistrosPorRamo = const {
-      'Veículo Individual': 10,
-      'Frota': 7,
-      'Transporte': 5,
-      'Máquinas': 10,
-      'Residencial': 10,
-      'Vida': 10,
-    },
+    this.slaSinistrosPorRamo = slaSinistrosPadrao,
     // Novos campos com valores padrão
     this.notificacoesAtivas = true,
     this.notificacaoHorarioInicio = "22:00",
@@ -71,16 +90,7 @@ class AppConfig {
       slaAsistenciasPorTipo: Map<String, int>.from(
         map['slaAsistenciasPorTipo'] ?? {'Veicular': 30, 'Residencial': 60},
       ),
-      slaSinistrosPorRamo: Map<String, int>.from(
-        map['slaSinistrosPorRamo'] ?? {
-          'Veículo Individual': 10,
-          'Frota': 7,
-          'Transporte': 5,
-          'Máquinas': 10,
-          'Residencial': 10,
-          'Vida': 10,
-        },
-      ),
+      slaSinistrosPorRamo: mesclarSlaSinistros(map['slaSinistrosPorRamo'] as Map?),
       enableNpsSurvey: map['enableNpsSurvey'] ?? true,
       // Novos campos com fallback
       notificacoesAtivas: map['notificacoesAtivas'] ?? true,

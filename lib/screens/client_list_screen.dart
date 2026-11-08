@@ -1,11 +1,16 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
 import '../models/client_model.dart';
 import '../models/claim_model.dart';
 import '../services/firestore_service.dart';
 import '../services/auth_service.dart';
 import '../screens/client_detail_screen.dart';
 import '../screens/client_form_screen.dart';
+import '../services/relatorio_clientes_pdf.dart';
+import '../utils/relatorio_clientes.dart';
 
 class ClientListScreen extends StatefulWidget {
   const ClientListScreen({super.key, this.onNavigate});
@@ -23,6 +28,7 @@ class _ClientListScreenState extends State<ClientListScreen> {
   List<Client> _clients = [];
   List<Client> _filteredClients = [];
   bool _isLoading = false;
+  bool _exportando = false;
 
   @override
   void initState() {
@@ -230,6 +236,66 @@ class _ClientListScreenState extends State<ClientListScreen> {
     );
   }
 
+  // ─── Etapa 08: relatório de clientes (auditoria) ──────────────────
+  // Exporta os clientes mostrados na lista (todos, ou os da busca), com os
+  // sinistros e assistências de cada um. Regra em lib/utils/relatorio_clientes.dart.
+
+  Future<void> _exportarRelatorio(String formato) async {
+    final clientes = List<Client>.from(_filteredClients);
+    if (clientes.isEmpty) return;
+    setState(() => _exportando = true);
+    try {
+      final atendimentos = await _firestoreService.getAllClaims();
+      final porCliente = <String, List<AtendimentoResumo>>{};
+      for (final c in atendimentos) {
+        if (c.idCliente.isEmpty) continue;
+        porCliente.putIfAbsent(c.idCliente, () => []).add(
+              AtendimentoResumo(tipo: c.tipo, status: c.statusAtual, valor: c.valorTotalSinistro),
+            );
+      }
+
+      final relatorio = RelatorioClientes.montar([
+        for (final cl in clientes)
+          ClienteEntrada(
+            nome: cl.nome,
+            documento: cl.cnpjCpf,
+            apolices: [
+              for (final a in cl.apolices) ApoliceResumo(numero: a.numeroApolice, valor: a.valorApolice),
+            ],
+            atendimentos: porCliente[cl.id] ?? const [],
+          ),
+      ]);
+
+      final data = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      if (formato == 'pdf') {
+        await Printing.sharePdf(
+          bytes: await RelatorioClientesPdf.gerar(relatorio),
+          filename: 'relatorio_clientes_$data.pdf',
+        );
+      } else {
+        // Mesmo caminho do CSV do sinistro (claim_detail): baixa no navegador,
+        // abre o compartilhamento no celular.
+        await Printing.sharePdf(
+          bytes: utf8.encode(relatorio.paraCsv()),
+          filename: 'relatorio_clientes_$data.csv',
+        );
+      }
+      if (mounted && _searchController.text.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Relatório com os ${clientes.length} clientes da busca.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao gerar o relatório: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _exportando = false);
+    }
+  }
+
   // ─── Build ────────────────────────────────────────────────────────
 
   @override
@@ -248,6 +314,36 @@ class _ClientListScreenState extends State<ClientListScreen> {
           ),
         ),
         actions: [
+          if (_exportando)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 14),
+              child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+            )
+          else
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.file_download_outlined),
+              tooltip: 'Exportar relatório de clientes',
+              enabled: _filteredClients.isNotEmpty,
+              onSelected: _exportarRelatorio,
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'csv',
+                  child: ListTile(
+                    leading: Icon(Icons.table_chart_outlined, color: Color(0xFF2E7D32)),
+                    title: Text('Planilha (CSV / Excel)'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'pdf',
+                  child: ListTile(
+                    leading: Icon(Icons.picture_as_pdf_outlined, color: Color(0xFFC62828)),
+                    title: Text('PDF'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              ],
+            ),
           IconButton(
             icon: const Icon(Icons.refresh_outlined),
             onPressed: _fetchClients,

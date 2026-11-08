@@ -58,7 +58,7 @@ class ConfigService {
   Future<void> updateSlaSinistro(String ramo, int dias) async {
     await _ensureConfigExists();
     final config = await getConfig();
-    config.slaSinistrosPorRamo[ramo] = dias;
+    config.slaSinistrosPorRamo[AppConfig.chaveSlaRamo(ramo)] = dias;
     
     await _db.collection(_configCollection).doc(_configDoc).update({
       'slaSinistrosPorRamo': config.slaSinistrosPorRamo,
@@ -85,7 +85,8 @@ class ConfigService {
   // Getter: buscar SLA de sinistro por ramo
   Future<int> getSlaSinistro(String ramo) async {
     final config = await getConfig();
-    return config.slaSinistrosPorRamo[ramo] ?? 10;
+    // Etapa 08: "Vidas" (ramo do sinistro) usa o SLA salvo como "Vida".
+    return config.slaSinistrosPorRamo[AppConfig.chaveSlaRamo(ramo)] ?? 10;
   }
 
   // Atualizar toggle NPS

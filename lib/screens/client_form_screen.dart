@@ -36,11 +36,15 @@ import 'package:pdf/pdf.dart' as PDFLib;
 import 'package:flutter_google_places_sdk/flutter_google_places_sdk.dart' hide LatLng;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../widgets/vigencia_date_range_widget.dart';
+import '../widgets/apolice_visualizacao_dialog.dart';
 
 class ClientFormScreen extends StatefulWidget {
   final Client? clientToEdit;
   final VoidCallback? onSaved;
-  const ClientFormScreen({super.key, this.clientToEdit, this.onSaved});
+  /// Etapa 08: abre direto a edição desta apólice (vindo do "Editar" da
+  /// visualização no Detalhes do Cliente).
+  final String? editarApoliceId;
+  const ClientFormScreen({super.key, this.clientToEdit, this.onSaved, this.editarApoliceId});
 
   @override
   State<ClientFormScreen> createState() => _ClientFormScreenState();
@@ -106,6 +110,18 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
           decimalDigits: 2,
         );
         _vehicles = List.from(client.veiculosSegurados);
+
+        final idx = _apolices.indexWhere((a) => a.id == widget.editarApoliceId);
+        if (widget.editarApoliceId != null && idx != -1) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _addApoliceDialog(
+              clientId: client.id,
+              apoliceToEdit: _apolices[idx],
+              indexToUpdate: idx,
+            );
+          });
+        }
       }
     }
 
@@ -1872,15 +1888,24 @@ Widget build(BuildContext context) {
               final emoji = _getEmojiRamo(apolice.ramo);
               final cor = _getCorRamo(apolice.ramo);
               
-              // Etapa 07: clicar na apólice abre a visualização (sem edição).
+              // Clicar na apólice abre a visualização (componente único, Etapa 08).
               return InkWell(
                 borderRadius: BorderRadius.circular(12),
-                onTap: () => _addApoliceDialog(
-                  clientId: widget.clientToEdit?.id ?? '',
-                  apoliceToEdit: apolice,
-                  indexToUpdate: index,
-                  somenteLeitura: true,
-                ),
+                onTap: () async {
+                  final editar = await mostrarApoliceVisualizacao(
+                    context,
+                    apolice: apolice,
+                    percentualGatilho: _percentualGatilho,
+                    emojiRamo: _getEmojiRamo(apolice.ramo),
+                  );
+                  if (editar && mounted) {
+                    _addApoliceDialog(
+                      clientId: widget.clientToEdit?.id ?? '',
+                      apoliceToEdit: apolice,
+                      indexToUpdate: index,
+                    );
+                  }
+                },
                 child: Container(
                 margin: const EdgeInsets.only(bottom: 10),
                 decoration: BoxDecoration(
@@ -3297,12 +3322,12 @@ Widget build(BuildContext context) {
   //    redigitar, a leitura tirava o ponto e gravava R$ 1.200.001,00);
   //  • o gatilho é sugerido com o % das Configurações enquanto o usuário não
   //    digita o valor do contrato;
-  //  • [somenteLeitura] = visualização (clicar na apólice), com botão "Editar".
+  //  • a visualização (clicar na apólice) fica em lib/widgets/apolice_visualizacao_dialog.dart
+  //    desde a Etapa 08, usada também no Detalhes do Cliente.
   Future<void> _addApoliceDialog({
     required String clientId,
     Apolice? apoliceToEdit,
     int? indexToUpdate,
-    bool somenteLeitura = false,
   }) async {
     final percentual = await ConfigService().getPercentualGatilho();
     if (!mounted) return;
@@ -3346,7 +3371,7 @@ Widget build(BuildContext context) {
                 children: [
                   // CABEÇALHO
                   Text(
-                    somenteLeitura ? 'Apólice' : (isEditing ? 'Editar Apólice' : 'Adicionar Apólice'),
+                    isEditing ? 'Editar Apólice' : 'Adicionar Apólice',
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
@@ -3355,7 +3380,7 @@ Widget build(BuildContext context) {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    somenteLeitura ? 'Dados da apólice e seus bens segurados' : 'Preencha os dados da apólice e seus bens segurados',
+                    'Preencha os dados da apólice e seus bens segurados',
                     style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
                   ),
                   const SizedBox(height: 24),
@@ -3399,11 +3424,9 @@ Widget build(BuildContext context) {
                                   ),
                                 ))
                                 .toList(),
-                            onChanged: somenteLeitura
-                                ? null
-                                : (val) {
-                                    setModalState(() => ramoCtrl.text = val ?? '');
-                                  },
+                            onChanged: (val) {
+                              setModalState(() => ramoCtrl.text = val ?? '');
+                            },
                           ),
                           const SizedBox(height: 12),
 
@@ -3425,7 +3448,6 @@ Widget build(BuildContext context) {
                               return TextField(
                                 controller: textEditingController,
                                 focusNode: focusNode,
-                                readOnly: somenteLeitura,
                                 decoration: InputDecoration(
                                   labelText: 'Seguradora',
                                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -3439,7 +3461,6 @@ Widget build(BuildContext context) {
                           // NÚMERO DA APÓLICE
                           TextField(
                             controller: numeroCtrl,
-                            readOnly: somenteLeitura,
                             decoration: InputDecoration(
                               labelText: 'Número da Apólice',
                               border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -3453,7 +3474,6 @@ Widget build(BuildContext context) {
                               Expanded(
                                 child: TextField(
                                   controller: valorCtrl,
-                                  readOnly: somenteLeitura,
                                   keyboardType: TextInputType.number,
                                   decoration: InputDecoration(
                                     labelText: 'Valor da Apólice',
@@ -3480,14 +3500,13 @@ Widget build(BuildContext context) {
                               Expanded(
                                 child: TextField(
                                   controller: gatilhoCtrl,
-                                  readOnly: somenteLeitura,
                                   keyboardType: TextInputType.number,
                                   decoration: InputDecoration(
                                     labelText: 'Valor do Gatilho',
                                     hintText: 'R\$ 0,00',
                                     helperText: gatilhoDoContrato
                                         ? 'Valor do contrato'
-                                        : '$textoPercentual% do valor da apólice${somenteLeitura ? '' : ' — pode alterar'}',
+                                        : '$textoPercentual% do valor da apólice — pode alterar',
                                     helperMaxLines: 2,
                                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                                   ),
@@ -3529,7 +3548,7 @@ Widget build(BuildContext context) {
                                   trailing: const Icon(Icons.calendar_today, size: 20),
                                   tileColor: Colors.grey.shade50,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  onTap: somenteLeitura ? null : () async {
+                                  onTap: () async {
                                     final picked = await showDatePicker(
                                       context: dialogContext,
                                       initialDate: dataInicio ?? DateTime.now(),
@@ -3563,7 +3582,7 @@ Widget build(BuildContext context) {
                                   trailing: const Icon(Icons.calendar_today, size: 20),
                                   tileColor: Colors.grey.shade50,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  onTap: somenteLeitura ? null : () async {
+                                  onTap: () async {
                                     final picked = await showDatePicker(
                                       context: dialogContext,
                                       initialDate: dataFim ?? DateTime.now(),
@@ -3591,7 +3610,7 @@ Widget build(BuildContext context) {
                                 style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                               ),
                               const Spacer(),
-                              if (!somenteLeitura && ramoCtrl.text.isNotEmpty)
+                              if (ramoCtrl.text.isNotEmpty)
                                 TextButton.icon(
                                   onPressed: () => _addBemDialog(
                                     ramo: ramoCtrl.text,
@@ -3837,8 +3856,7 @@ Widget build(BuildContext context) {
                                           ],
                                         ),
                                       ),
-                                      // Botões de editar/excluir (escondidos na visualização)
-                                      if (!somenteLeitura) ...[
+                                      // Botões de editar/excluir
                                       IconButton(
                                         icon: const Icon(Icons.edit, size: 16, color: Colors.blue),
                                         onPressed: () {
@@ -3864,7 +3882,6 @@ Widget build(BuildContext context) {
                                           setModalState(() => bensSegurados.removeAt(idx));
                                         },
                                       ),
-                                      ],
                                     ],
                                   ),
                                 );
@@ -3878,35 +3895,6 @@ Widget build(BuildContext context) {
                   const SizedBox(height: 24),
 
                   // BOTÕES
-                  if (somenteLeitura)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
-                            child: const Text('Fechar'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              _addApoliceDialog(
-                                clientId: clientId,
-                                apoliceToEdit: apoliceToEdit,
-                                indexToUpdate: indexToUpdate,
-                              );
-                            },
-                            icon: const Icon(Icons.edit_outlined, size: 18),
-                            label: const Text('Editar'),
-                            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
-                          ),
-                        ),
-                      ],
-                    )
-                  else
                   Row(
                     children: [
                       Expanded(
