@@ -1,11 +1,17 @@
 // screens/task_list_screen.dart
+import 'dart:convert';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
 import 'package:upgrade_seguros/services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../screens/assist_detail_screen.dart';
 import '../screens/claim_detail_screen.dart';
+import '../services/tarefas_pdf.dart';
+import '../utils/tarefas.dart';
+import '../widgets/botao_com_texto.dart';
 
 class TaskListScreen extends StatefulWidget {
   const TaskListScreen({super.key});
@@ -29,6 +35,11 @@ class _TaskListScreenState extends State<TaskListScreen> {
 
   final List<String> _statusOptions = ['Todas', 'Aberta', 'Pendente', 'Concluída'];
   final List<String> _prazoOptions = ['Todos', 'No prazo', 'Fora do prazo'];
+
+  // Etapa 10: ordenação e exportação
+  static const _ordemOptions = ['Mais recente', 'Mais antiga'];
+  bool _maisRecentePrimeiro = true;
+  bool _exportando = false;
 
   // Filtro de Funcionário
   String? _selectedFuncionarioId;
@@ -147,13 +158,13 @@ class _TaskListScreenState extends State<TaskListScreen> {
             _selectedStatus == 'Todas' ||
             task['status'] == _selectedStatus;
 
-        // Filtro prazo (mantido)
-        final prazo = task['prazo'] as DateTime?;
-        final atrasada = prazo?.isBefore(DateTime.now()) ?? false;
+        // Filtro prazo — Etapa 10: regra única (lib/utils/tarefas.dart). Concluída
+        // conta pela data de conclusão; antes, toda tarefa com prazo vencido
+        // (inclusive as concluídas no prazo) caía em "Fora do prazo".
+        final situacao = Tarefas.situacaoPrazo(_resumo(task));
         final matchesPrazo = _selectedPrazoFilter == null ||
             _selectedPrazoFilter == 'Todos' ||
-            (_selectedPrazoFilter == 'No prazo' && !atrasada) ||
-            (_selectedPrazoFilter == 'Fora do prazo' && atrasada);
+            situacao == _selectedPrazoFilter;
 
         // ── Filtro por Funcionário ──
         bool matchesFuncionario = true;
@@ -193,7 +204,77 @@ class _TaskListScreenState extends State<TaskListScreen> {
 
         return matchesSearch && matchesStatus && matchesPrazo && matchesFuncionario;
       }).toList();
+
+      // Etapa 10: "Mais recente" / "Mais antiga" pela data de criação (ou prazo).
+      _filteredTasks.sort((a, b) {
+        final da = (a['criadoEm'] as DateTime?) ?? (a['prazo'] as DateTime?);
+        final db = (b['criadoEm'] as DateTime?) ?? (b['prazo'] as DateTime?);
+        if (da == null && db == null) return 0;
+        if (da == null) return 1;
+        if (db == null) return -1;
+        return _maisRecentePrimeiro ? db.compareTo(da) : da.compareTo(db);
+      });
     });
+  }
+
+  // ─── Etapa 10: exportar agrupado por funcionário ──────────────────
+
+  TarefaResumo _resumo(Map<String, dynamic> task) => TarefaResumo(
+        id: task['taskId'] as String? ?? '',
+        descricao: task['descricao'] as String? ?? '',
+        status: task['status'] as String? ?? 'Pendente',
+        prazo: task['prazo'] as DateTime?,
+        criadoEm: task['criadoEm'] as DateTime?,
+        concluidaEm: task['concluidaEm'] as DateTime?,
+        responsavelId: task['responsavelId'] as String? ?? '',
+        responsavelEmail: task['responsavelEmail'] as String? ?? '',
+        numeroAtendimento: task['numeroSinistro'] as String? ?? '',
+        clienteNome: task['clientNome'] as String? ?? '',
+      );
+
+  Future<void> _exportar(String formato) async {
+    if (_filteredTasks.isEmpty) return;
+    setState(() => _exportando = true);
+    try {
+      final funcionarios = [
+        for (final f in _funcionarios)
+          Funcionario(id: f['id'] as String? ?? '', nome: f['nome'] as String? ?? '', email: f['email'] as String? ?? ''),
+      ];
+      final grupos = Tarefas.porFuncionario(_filteredTasks.map(_resumo).toList(), funcionarios);
+      String? nomeFuncionario;
+      for (final f in _funcionarios) {
+        if (f['id'] == _selectedFuncionarioId) nomeFuncionario = f['nome'] as String?;
+      }
+      final filtros = [
+        if (_selectedStatus != null) 'Status: $_selectedStatus',
+        if (_selectedPrazoFilter != null) 'Prazo: $_selectedPrazoFilter',
+        if (nomeFuncionario != null) 'Funcionário: $nomeFuncionario',
+        if (_searchController.text.trim().isNotEmpty) 'Busca: "${_searchController.text.trim()}"',
+      ].join(' · ');
+      final data = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      if (formato == 'pdf') {
+        await Printing.sharePdf(
+          bytes: await TarefasPdf.gerar(grupos, maisRecentePrimeiro: _maisRecentePrimeiro, filtro: filtros),
+          filename: 'tarefas_por_funcionario_$data.pdf',
+        );
+      } else {
+        await Printing.sharePdf(
+          bytes: utf8.encode(Tarefas.paraCsv(grupos, maisRecentePrimeiro: _maisRecentePrimeiro)),
+          filename: 'tarefas_por_funcionario_$data.csv',
+        );
+      }
+      if (mounted && filtros.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Exportadas ${_filteredTasks.length} tarefa(s) — $filtros.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao exportar: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _exportando = false);
+    }
   }
 
   // ─── Helpers de UI ────────────────────────────────────────────────
@@ -224,9 +305,14 @@ class _TaskListScreenState extends State<TaskListScreen> {
     }
   }
 
-  Color _getPrazoColor(DateTime? prazo, String status) {
+  Color _getPrazoColor(DateTime? prazo, String status, {String? situacao}) {
     if (prazo == null) return Colors.grey;
-    if (status == 'Concluída') return Colors.green.shade400;
+    if (status == 'Concluída') {
+      // Etapa 10: concluída fora do prazo fica vermelha; sem data, cinza.
+      if (situacao == Tarefas.foraDoPrazo) return Colors.red.shade400;
+      if (situacao == Tarefas.semDataConclusao) return Colors.grey;
+      return Colors.green.shade400;
+    }
 
     final agora = DateTime.now();
     final diferenca = prazo.difference(agora);
@@ -331,6 +417,8 @@ class _TaskListScreenState extends State<TaskListScreen> {
     final numeroSinistro = task['numeroSinistro'] as String?;
     final descricao = task['descricao'] as String? ?? 'Sem descrição';
     final clientNome = task['clientNome'] as String? ?? 'Cliente não informado';
+    final concluidaEm = task['concluidaEm'] as DateTime?;
+    final situacao = Tarefas.situacaoPrazo(_resumo(task));
 
     return Card(
       elevation: 3,
@@ -419,12 +507,14 @@ class _TaskListScreenState extends State<TaskListScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                prazo != null ? _dateFormat.format(prazo) : 'Prazo não definido',
+                (prazo != null ? 'Prazo: ${_dateFormat.format(prazo)}' : 'Prazo não definido') +
+                    (concluidaEm != null ? '  ·  Concluída em ${_dateFormat.format(concluidaEm)}' : ''),
                 style: TextStyle(
                   fontSize: 12,
-                  color: _getPrazoColor(prazo, status),
+                  color: _getPrazoColor(prazo, status, situacao: situacao),
                   fontWeight: FontWeight.bold,
                 ),
+                overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 10),
               Row(
@@ -438,8 +528,11 @@ class _TaskListScreenState extends State<TaskListScreen> {
                     ),
                   ),
                   const Spacer(),
-                  if (prazo != null && prazo.isBefore(DateTime.now()) && status != 'Concluída')
-                    const Icon(Icons.warning, color: Colors.red, size: 20),
+                  if (situacao == Tarefas.foraDoPrazo)
+                    Tooltip(
+                      message: status == 'Concluída' ? 'Concluída fora do prazo' : 'Atrasada',
+                      child: const Icon(Icons.warning, color: Colors.red, size: 20),
+                    ),
                 ],
               ),
             ],
@@ -467,6 +560,39 @@ class _TaskListScreenState extends State<TaskListScreen> {
           ),
         ),
         actions: [
+          if (_exportando)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 14),
+              child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+            )
+          else
+            PopupMenuButton<String>(
+              tooltip: 'Exportar as tarefas da lista, agrupadas por funcionário',
+              enabled: _filteredTasks.isNotEmpty,
+              onSelected: _exportar,
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'csv',
+                  child: ListTile(
+                    leading: Icon(Icons.table_chart_outlined, color: Color(0xFF2E7D32)),
+                    title: Text('Planilha (CSV / Excel)'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'pdf',
+                  child: ListTile(
+                    leading: Icon(Icons.picture_as_pdf_outlined, color: Color(0xFFC62828)),
+                    title: Text('PDF'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              ],
+              child: BotaoComTexto(
+                icone: Icons.file_download_outlined,
+                texto: MediaQuery.of(context).size.width < 600 ? 'Exportar' : 'Exportar por funcionário',
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh_outlined),
             onPressed: _loadTasks,
@@ -540,6 +666,20 @@ class _TaskListScreenState extends State<TaskListScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: _buildFuncionarioDropdown(),
+                    ),
+                    const SizedBox(width: 8),
+                    // Etapa 10: ordenação
+                    Expanded(
+                      child: _buildFilterDropdown<String>(
+                        value: _maisRecentePrimeiro ? 'Mais recente' : 'Mais antiga',
+                        items: _ordemOptions,
+                        hint: 'Ordenar',
+                        icon: Icons.sort,
+                        onChanged: (val) {
+                          _maisRecentePrimeiro = val != 'Mais antiga';
+                          _filterTasks();
+                        },
+                      ),
                     ),
                   ],
                 ),

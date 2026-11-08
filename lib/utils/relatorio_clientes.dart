@@ -12,6 +12,9 @@
 //   • Valor utilizado = soma do valor total dos sinistros, SEM Cancelado/Negado
 //     (mesma regra do gatilho, Etapa 07).
 //   • % usada = valor utilizado ÷ valor total das apólices.
+// Etapa 10: + recomendação e uso do gatilho (regra de recomendacao_cliente.dart,
+// calculados pela tela) e os dados de contato (contato, telefone, e-mail), para
+// a corretora agir sobre o filtro escolhido na lista (ex.: "Não recomendado").
 
 class ApoliceResumo {
   final String numero;
@@ -32,11 +35,22 @@ class ClienteEntrada {
   final String documento;
   final List<ApoliceResumo> apolices;
   final List<AtendimentoResumo> atendimentos;
+  // Etapa 10
+  final String recomendacao;
+  final double? usoGatilho; // null = sem apólice vigente com valor
+  final String contato;
+  final String telefone;
+  final String email;
   const ClienteEntrada({
     required this.nome,
     required this.documento,
     required this.apolices,
     required this.atendimentos,
+    this.recomendacao = '',
+    this.usoGatilho,
+    this.contato = '',
+    this.telefone = '',
+    this.email = '',
   });
 }
 
@@ -50,6 +64,11 @@ class LinhaRelatorioCliente {
   final int qtdSinistros;
   final double valorUtilizado;
   final int qtdAssistencias;
+  final String recomendacao;
+  final double? usoGatilho;
+  final String contato;
+  final String telefone;
+  final String email;
 
   const LinhaRelatorioCliente({
     required this.nome,
@@ -61,6 +80,11 @@ class LinhaRelatorioCliente {
     required this.qtdSinistros,
     required this.valorUtilizado,
     required this.qtdAssistencias,
+    this.recomendacao = '',
+    this.usoGatilho,
+    this.contato = '',
+    this.telefone = '',
+    this.email = '',
   });
 
   /// null quando o cliente não tem valor de apólice (não dá para calcular).
@@ -92,6 +116,11 @@ class RelatorioClientes {
             .where((s) => !statusQueNaoContam.contains(s.status))
             .fold(0.0, (s, a) => s + a.valor),
         qtdAssistencias: c.atendimentos.where((a) => a.tipo == 'assistencia').length,
+        recomendacao: c.recomendacao,
+        usoGatilho: c.usoGatilho,
+        contato: c.contato.trim(),
+        telefone: c.telefone.trim(),
+        email: c.email.trim(),
       );
     }).toList()
       ..sort((a, b) {
@@ -115,6 +144,11 @@ class RelatorioClientes {
   static const cabecalho = [
     'Cliente',
     'CNPJ/CPF',
+    'Recomendação',
+    'Uso do gatilho (%)',
+    'Contato',
+    'Telefone',
+    'E-mail',
     'Valor total das apólices (R\$)',
     'Qtd. apólices',
     'Maior apólice (nº)',
@@ -134,6 +168,11 @@ class RelatorioClientes {
       linha([
         l.nome,
         l.documento,
+        l.recomendacao,
+        l.usoGatilho == null ? '' : numeroCsv(l.usoGatilho!),
+        l.contato,
+        l.telefone,
+        l.email,
         numeroCsv(l.valorApolices),
         '${l.qtdApolices}',
         l.maiorApoliceNumero,
@@ -146,6 +185,11 @@ class RelatorioClientes {
     }
     linha([
       'TOTAL (${linhas.length} clientes)',
+      '',
+      '',
+      '',
+      '',
+      '',
       '',
       numeroCsv(totalApolices),
       '$totalQtdApolices',

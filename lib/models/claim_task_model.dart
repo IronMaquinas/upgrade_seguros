@@ -14,6 +14,9 @@ class ClaimTask {
 
   DateTime criadoEm;
 
+  /// Etapa 10: quando foi concluída (gravado a partir da Etapa 10).
+  DateTime? concluidaEm;
+
   ClaimTask({
     this.id = '',
     required this.descricao,
@@ -24,6 +27,7 @@ class ClaimTask {
     required this.responsavelId,
     required this.responsavelEmail,
     required this.criadoEm,
+    this.concluidaEm,
   });
 
   Map<String, dynamic> toMap() {
@@ -36,6 +40,7 @@ class ClaimTask {
       'responsavelId': responsavelId,
       'responsavelEmail': responsavelEmail,
       'criado_em': Timestamp.fromDate(criadoEm),
+      if (concluidaEm != null) 'concluida_em': Timestamp.fromDate(concluidaEm!),
     };
   }
 
@@ -50,6 +55,7 @@ class ClaimTask {
       responsavelId: map['responsavelId'] ?? '',
       responsavelEmail: map['responsavelEmail'] ?? '',
       criadoEm: (map['criado_em'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      concluidaEm: (map['concluida_em'] as Timestamp?)?.toDate(),
     );
   }
 }

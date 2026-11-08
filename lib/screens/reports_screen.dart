@@ -20,6 +20,8 @@ import 'package:upgrade_seguros/services/pdf_report_service.dart';
 import '../models/report_data.dart';
 import 'package:upgrade_seguros/widgets/top_clients_widgets.dart';
 import 'package:upgrade_seguros/widgets/employees_performance_widgets.dart';
+import 'package:upgrade_seguros/widgets/tarefas_funcionarios_card.dart';
+import 'package:upgrade_seguros/utils/tarefas.dart';
 
 // ─── Helper para converter datas (Timestamp ou String) ───────────────────────
 DateTime _parseDate(dynamic value) {
@@ -74,6 +76,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   Map<String, String> _funcionarioNomes = {};
   Map<String, String> _funcionarioIdNomes = {};
+  // Etapa 10: tarefas por funcionário
+  List<Funcionario> _funcionariosLista = [];
+  List<TarefaResumo> _tarefas = [];
 
   List<Claim> _sinistros = [];
   List<Client> _allClients = [];
@@ -131,6 +136,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
     _load();
   }
 
+  // Etapa 10: tarefas criadas no período (ou com prazo no período, se a tarefa
+  // antiga não tiver data de criação). Mesma janela dos sinistros.
+  List<TarefaResumo> _tarefasDoPeriodo() {
+    if (_dataInicio == null || _dataFim == null) return _tarefas;
+    final fim = _dataFim!.add(const Duration(days: 1));
+    return _tarefas.where((t) {
+      final d = t.dataReferencia;
+      return d != null && !d.isBefore(_dataInicio!) && d.isBefore(fim);
+    }).toList();
+  }
+
   Future<void> _carregarNomesFuncionarios() async {
     try {
       final users = await _firestoreService.getFuncionarios();
@@ -146,6 +162,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
           _funcionarioIdNomes[id] = nome ?? email ?? 'Sem nome';
         }
       }
+      _funcionariosLista = [
+        for (final doc in users)
+          Funcionario(
+            id: doc.id,
+            nome: ((doc.data() as Map<String, dynamic>)['nome'] as String?) ??
+                ((doc.data() as Map<String, dynamic>)['email'] as String?) ?? 'Sem nome',
+            email: ((doc.data() as Map<String, dynamic>)['email'] as String?) ?? '',
+          ),
+      ];
     } catch (e) {
       print('Erro ao carregar nomes dos funcionários: $e');
     }
@@ -982,6 +1007,12 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
       }
 
       await _carregarNomesFuncionarios();
+      // Etapa 10: tarefas (para "Tarefas por Funcionário")
+      try {
+        _tarefas = await _firestoreService.getTarefasResumo();
+      } catch (e) {
+        debugPrint('Erro ao carregar tarefas: $e');
+      }
       if (mounted) setState(() {});
 
     } catch (e) {
@@ -3268,6 +3299,11 @@ Widget _buildContratosAnualChart() {
                           EmployeesPerformanceWidgets.buildFuncionariosAssistencias(
                             assistenciasFiltradas,
                             _funcionarioIdNomes,
+                          ),
+                          const SizedBox(height: 16),
+                          TarefasFuncionariosCard(
+                            grupos: Tarefas.porFuncionario(_tarefasDoPeriodo(), _funcionariosLista),
+                            agora: DateTime.now(),
                           ),
                           const SizedBox(height: 28),
  

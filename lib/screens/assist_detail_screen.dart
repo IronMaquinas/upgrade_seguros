@@ -761,6 +761,7 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                     if (statusAtual != 'Concluída') {
                       await doc.reference.update({
                         'status': 'Concluída',
+                        'concluida_em': FieldValue.serverTimestamp(), // Etapa 10
                         'motivoConclusao': 'Reagendado — nova data: ${DateFormat('dd/MM/yyyy').format(novaData!)}',
                       });
                     }

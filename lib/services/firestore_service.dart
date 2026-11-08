@@ -15,6 +15,7 @@ import '../models/client_model.dart';
 import '../models/claim_model.dart';
 import 'config_service.dart';
 import 'recomendacao_service.dart';
+import '../utils/tarefas.dart';
 import '../models/vehicle_model.dart';
 import '../models/claim_task_model.dart';
 import '../models/third_party_model.dart'; // Adicionado, se estiver faltando
@@ -418,7 +419,30 @@ class FirestoreService {
   Future<void> updateTaskStatus(String taskId, String newStatus) async {
     await getTasksCollection().doc(taskId).update({
       'status': newStatus,
+      // Etapa 10: data de conclusão, para "no prazo / fora do prazo".
+      'concluida_em': newStatus == 'Concluída' ? FieldValue.serverTimestamp() : FieldValue.delete(),
     });
+  }
+
+  // Etapa 10: tarefas para os Relatórios (só os campos do resumo, sem buscar
+  // os sinistros/assistências de cada uma).
+  Future<List<TarefaResumo>> getTarefasResumo() async {
+    final snapshot = await getTasksCollection().get();
+    return snapshot.docs.map((doc) {
+      final d = doc.data();
+      return TarefaResumo(
+        id: doc.id,
+        descricao: d['descricao'] as String? ?? '',
+        status: d['status'] as String? ?? 'Pendente',
+        prazo: (d['prazo'] as Timestamp?)?.toDate(),
+        criadoEm: (d['criado_em'] as Timestamp?)?.toDate(),
+        concluidaEm: (d['concluida_em'] as Timestamp?)?.toDate(),
+        responsavelId: d['responsavelId'] as String? ?? '',
+        responsavelEmail: d['responsavelEmail'] as String? ?? '',
+        numeroAtendimento: d['numeroSinistro'] as String? ?? '',
+        clienteNome: d['clientNome'] as String? ?? '',
+      );
+    }).toList();
   }
 
   // ✅ NOVO: Atualiza uma tarefa na coleção de nível superior
@@ -1382,8 +1406,10 @@ class FirestoreService {
         'status': data['status'],
         'prazo': (data['prazo'] as Timestamp).toDate(),
         'criadoEm': (data['criado_em'] as Timestamp?)?.toDate(),
+        'concluidaEm': (data['concluida_em'] as Timestamp?)?.toDate(), // Etapa 10
         'claimId': claimId,
         'responsavelEmail': data['responsavelEmail'] ?? '',
+        'responsavelId': data['responsavelId'] ?? '', // Etapa 10: o filtro por funcionário já usava, mas não vinha
         'clientNome': claimData['client_nome'] ?? '',
         'clientCnpjCpf': claimData['client_cnpj_cpf'] ?? '',
         'numeroSinistro': claimData['numero_sinistro'] ?? '',

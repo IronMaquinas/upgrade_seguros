@@ -72,8 +72,8 @@ void main() {
       ]).paraCsv();
       final linhas = csv.split('\r\n');
       expect(linhas[0].startsWith('﻿Cliente;CNPJ/CPF;'), isTrue);
-      expect(linhas[1], 'A;00.000.000/0001-00;1234567,89;1;AP-A-0;1234567,89;1;1000,50;0,08;0');
-      expect(linhas[2].startsWith('TOTAL (1 clientes);;1234567,89;1;;;1;1000,50;'), isTrue);
+      expect(linhas[1], 'A;00.000.000/0001-00;;;;;;1234567,89;1;AP-A-0;1234567,89;1;1000,50;0,08;0');
+      expect(linhas[2].startsWith('TOTAL (1 clientes);;;;;;;1234567,89;1;;;1;1000,50;'), isTrue);
     });
 
     test('protege ponto e vírgula, aspas e fórmula', () {
@@ -82,5 +82,25 @@ void main() {
       ]).paraCsv();
       expect(csv.split('\r\n')[1].startsWith('"Silva; ""Filhos""";\'=1+1;'), isTrue);
     });
+  });
+
+  test('Etapa 10: recomendação, uso do gatilho e contato vão para o CSV', () {
+    final csv = RelatorioClientes.montar([
+      const ClienteEntrada(
+        nome: 'IURY',
+        documento: '04.156.577/0001-48',
+        apolices: [ApoliceResumo(numero: 'X', valor: 1000)],
+        atendimentos: [],
+        recomendacao: 'Não recomendado',
+        usoGatilho: 283.4,
+        contato: 'Iury',
+        telefone: '(27) 99999-0000',
+        email: 'iury@ex.com',
+      ),
+      const ClienteEntrada(nome: 'SEM', documento: '', apolices: [], atendimentos: [], recomendacao: 'Sem apólice vigente'),
+    ]).paraCsv();
+    final linhas = csv.split('\r\n');
+    expect(linhas[1].startsWith('IURY;04.156.577/0001-48;Não recomendado;283,40;Iury;(27) 99999-0000;iury@ex.com;1000,00;'), isTrue);
+    expect(linhas[2].startsWith('SEM;;Sem apólice vigente;;;;;0,00;0;'), isTrue);
   });
 }

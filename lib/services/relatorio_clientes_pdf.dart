@@ -19,12 +19,15 @@ class RelatorioClientesPdf {
 
   static String _p(double? v) => v == null ? '-' : '${_pct.format(v)}%';
 
-  static Future<Uint8List> gerar(RelatorioClientes r, {DateTime? geradoEm}) async {
+  /// [filtro]: descrição do filtro da lista (ex.: "Recomendação: Não recomendado"), no cabeçalho.
+  static Future<Uint8List> gerar(RelatorioClientes r, {DateTime? geradoEm, String? filtro}) async {
     final quando = DateFormat('dd/MM/yyyy HH:mm').format(geradoEm ?? DateTime.now());
     final doc = pw.Document(title: 'Relatório de clientes', author: 'Upgrade Seguros');
 
     const titulos = [
       'Cliente',
+      'Recomendação',
+      'Contato',
       'Valor total das apólices',
       'Apólices',
       'Maior apólice',
@@ -34,16 +37,18 @@ class RelatorioClientesPdf {
       'Assist.',
     ];
     const larguras = <int, pw.TableColumnWidth>{
-      0: pw.FlexColumnWidth(3.2),
-      1: pw.FlexColumnWidth(1.6),
-      2: pw.FlexColumnWidth(0.8),
-      3: pw.FlexColumnWidth(2.0),
-      4: pw.FlexColumnWidth(0.8),
-      5: pw.FlexColumnWidth(1.6),
-      6: pw.FlexColumnWidth(0.9),
-      7: pw.FlexColumnWidth(0.8),
+      0: pw.FlexColumnWidth(2.6),
+      1: pw.FlexColumnWidth(1.4),
+      2: pw.FlexColumnWidth(2.4),
+      3: pw.FlexColumnWidth(1.5),
+      4: pw.FlexColumnWidth(0.7),
+      5: pw.FlexColumnWidth(1.8),
+      6: pw.FlexColumnWidth(0.7),
+      7: pw.FlexColumnWidth(1.5),
+      8: pw.FlexColumnWidth(0.8),
+      9: pw.FlexColumnWidth(0.7),
     };
-    const direita = {1, 2, 4, 5, 6, 7};
+    const direita = {3, 4, 6, 7, 8, 9};
 
     pw.Widget celula(String t, int col, {bool negrito = false, PdfColor? cor}) => pw.Padding(
           padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3),
@@ -51,7 +56,7 @@ class RelatorioClientesPdf {
             t,
             textAlign: direita.contains(col) ? pw.TextAlign.right : pw.TextAlign.left,
             style: pw.TextStyle(
-              fontSize: 7.5,
+              fontSize: 7,
               fontWeight: negrito ? pw.FontWeight.bold : pw.FontWeight.normal,
               color: cor,
             ),
@@ -74,6 +79,8 @@ class RelatorioClientesPdf {
           return linha(
             [
               l.documento.isEmpty ? l.nome : '${l.nome}\n${l.documento}',
+              l.usoGatilho == null ? l.recomendacao : '${l.recomendacao}\n${_p(l.usoGatilho)} do gatilho',
+              [l.contato, l.telefone, l.email].where((s) => s.isNotEmpty).join('\n'),
               _moeda.format(l.valorApolices),
               '${l.qtdApolices}',
               l.qtdApolices == 0 ? '-' : '${l.maiorApoliceNumero}\n${_moeda.format(l.maiorApoliceValor)}',
@@ -88,6 +95,8 @@ class RelatorioClientesPdf {
       linha(
         [
           'TOTAL (${r.linhas.length} clientes)',
+          '',
+          '',
           _moeda.format(r.totalApolices),
           '${r.totalQtdApolices}',
           '',
@@ -110,7 +119,9 @@ class RelatorioClientesPdf {
           children: [
             pw.Text('Relatório de clientes',
                 style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: _azul)),
-            pw.Text('Gerado em $quando - ordenado pelo valor total das apólices',
+            pw.Text(
+                'Gerado em $quando - ordenado pelo valor total das apólices'
+                '${filtro == null || filtro.isEmpty ? '' : ' - $filtro'}',
                 style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700)),
             pw.SizedBox(height: 8),
           ],

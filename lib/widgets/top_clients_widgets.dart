@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../models/client_model.dart';
 import '../models/claim_model.dart';
 import '../utils/gatilho.dart';
+import '../services/recomendacao_service.dart';
 
 class TopClientsWidgets {
   static final _fmtCurrency = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
@@ -354,20 +355,18 @@ class TopClientsWidgets {
     }) {
       if (clientes.isEmpty) return const SizedBox.shrink();
 
-      // 1️⃣ Agrupar sinistros por idApolice
-      final claimsPorApolice = <String, List<Claim>>{};
+      // Etapa 10: mesma regra da recomendação do cliente
+      // (lib/utils/recomendacao_cliente.dart): só apólices vigentes, sinistros da
+      // vigência sem Cancelado/Negado, sinistro sem vínculo ligado pela apólice do
+      // mesmo ramo cuja vigência cobre a data, e vale a pior apólice do cliente.
+      final claimsPorCliente = <String, List<Claim>>{};
       for (final claim in claims) {
-        final idApolice = claim.apoliceId;
-        if (idApolice != null && idApolice.isNotEmpty) {
-          claimsPorApolice.putIfAbsent(idApolice, () => []).add(claim);
-        }
+        claimsPorCliente.putIfAbsent(claim.idCliente, () => []).add(claim);
       }
 
-      // 2️⃣ Calcular o percentual máximo de uso do gatilho para cada cliente
       final List<({
         Client cliente,
         double percentual,
-        String apoliceId,
         double valorGatilho,
         double gasto,
         String ramo,
@@ -375,51 +374,16 @@ class TopClientsWidgets {
       })> riscos = [];
 
       for (final cliente in clientes) {
-        double maxPercentual = 0.0;
-        String? apoliceIdMax;
-        double gatilhoMax = 0.0;
-        double gastoMax = 0.0;
-        String ramoMax = '';
-        String numeroApoliceMax = '';
-
-        for (final apolice in cliente.apolices) {
-          final gatilho = apolice.gatilhoEfetivo(percentualGatilho);
-          if (gatilho <= 0) continue; // sem gatilho e sem valor da apólice
-
-          // Soma dos sinistros dessa apólice dentro da vigência (sem cancelados/negados)
-          final claimsApolice = (claimsPorApolice[apolice.id] ?? []).where((c) => GatilhoApolice.sinistroConta(
-                dataOcorrencia: c.dataOcorrencia,
-                status: c.statusAtual,
-                inicioVigencia: apolice.dataInicio,
-                fimVigencia: apolice.dataFim,
-              ));
-          final gastoTotal = claimsApolice.fold<double>(
-            0.0,
-            (sum, claim) => sum + claim.valorTotalSinistro,
-          );
-
-          final percentual = GatilhoApolice.usoPercentual(gastoTotal, gatilho);
-          if (percentual > maxPercentual) {
-            maxPercentual = percentual;
-            apoliceIdMax = apolice.id;
-            gatilhoMax = gatilho;
-            gastoMax = gastoTotal;
-            ramoMax = apolice.ramo;
-            numeroApoliceMax = apolice.numeroApolice;
-          }
-        }
-
-        if (maxPercentual > 0 && apoliceIdMax != null) {
-          riscos.add((
-            cliente: cliente,
-            percentual: maxPercentual,
-            apoliceId: apoliceIdMax,
-            valorGatilho: gatilhoMax,
-            gasto: gastoMax,
-            ramo: ramoMax,
-            numeroApolice: numeroApoliceMax,
-          ));
-        }
+        final r = recomendarCliente(cliente, claimsPorCliente[cliente.id] ?? const [], percentualGatilho);
+        if (r.gatilho <= 0 || r.usoGatilho <= 0) continue;
+        riscos.add((
+          cliente: cliente,
+          percentual: r.usoGatilho,
+          valorGatilho: r.gatilho,
+          gasto: r.gasto,
+          ramo: r.apoliceRamo ?? '',
+          numeroApolice: r.apoliceNumero ?? '',
+        ));
       }
 
       // 3️⃣ Ordenar por maior percentual e pegar os 10 primeiros
@@ -652,16 +616,16 @@ class TopClientsWidgets {
     late Color color;
 
     if (percentual > 100) {
-      status = '🔴 CRÍTICO - Gatilho Estourou';
+      status = '🔴 Não recomendado — gatilho estourou';
       color = const Color(0xFFC62828);
     } else if (percentual >= 80) {
-      status = '⚠️ ALTO - Acima de 80% do gatilho';
+      status = '🟠 Atenção — acima de 80% do gatilho';
       color = const Color(0xFFE65100);
     } else if (percentual >= 60) {
-      status = '⚠️ MODERADO - Acima de 60% do gatilho';
+      status = '🟡 Regular — acima de 60% do gatilho';
       color = const Color(0xFFFFA500);
     } else {
-      status = '✅ NORMAL - Abaixo de 60% do gatilho';
+      status = '🟢 Ótimo — abaixo de 60% do gatilho';
       color = const Color(0xFF2E7D32);
     }
 

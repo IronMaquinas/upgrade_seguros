@@ -12,7 +12,9 @@ import '../services/config_service.dart';
 import '../services/recomendacao_service.dart';
 import '../services/relatorio_clientes_pdf.dart';
 import '../utils/relatorio_clientes.dart';
+import '../widgets/botao_com_texto.dart';
 import '../widgets/recomendacao_chip.dart';
+import '../utils/recomendacao_cliente.dart';
 
 class ClientListScreen extends StatefulWidget {
   const ClientListScreen({super.key, this.onNavigate});
@@ -31,6 +33,19 @@ class _ClientListScreenState extends State<ClientListScreen> {
   List<Client> _filteredClients = [];
   bool _isLoading = false;
   bool _exportando = false;
+
+  // Etapa 10: filtro por recomendação (null = todas) e o resultado completo de
+  // cada cliente (uso do gatilho vai para o relatório).
+  String? _filtroRecomendacao;
+  final Map<String, ResultadoRecomendacao> _recomendacoes = {};
+  static const _ordemRecomendacoes = [
+    RecomendacaoCliente.naoRecomendado,
+    RecomendacaoCliente.atencao,
+    RecomendacaoCliente.regular,
+    RecomendacaoCliente.otimo,
+    RecomendacaoCliente.semApoliceVigente,
+    RecomendacaoCliente.apoliceSemValor,
+  ];
 
   @override
   void initState() {
@@ -65,17 +80,18 @@ class _ClientListScreenState extends State<ClientListScreen> {
       final claims = await _firestoreService.getClaims();
       final percentualGatilho = await ConfigService().getPercentualGatilho();
 
+      _recomendacoes.clear();
       for (var client in clients) {
         final clientClaims = claims.where((claim) => claim.idCliente == client.id).toList();
         // Etapa 09: regra única (uso do gatilho da pior apólice vigente).
-        client.recomendacaoManutencao = recomendarCliente(client, clientClaims, percentualGatilho).rotulo;
+        final resultado = recomendarCliente(client, clientClaims, percentualGatilho);
+        _recomendacoes[client.id] = resultado;
+        client.recomendacaoManutencao = resultado.rotulo;
         client.totalSinistrosAcionados = clientClaims.length;
       }
 
-      setState(() {
-        _clients = clients;
-        _filteredClients = clients;
-      });
+      setState(() => _clients = clients);
+      _filterClients(); // mantém busca e filtro de recomendação ao atualizar
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Erro ao carregar clientes: $e')),
@@ -101,7 +117,10 @@ class _ClientListScreenState extends State<ClientListScreen> {
         //   print('✅ Match por telefone: ${client.nome} - $telefoneDigits');
         // }
 
-        return nomeMatch || cpfMatch || telefoneMatch;
+        final recomendacaoMatch =
+            _filtroRecomendacao == null || client.recomendacaoManutencao == _filtroRecomendacao;
+
+        return (nomeMatch || cpfMatch || telefoneMatch) && recomendacaoMatch;
       }).toList();
     });
   }
@@ -236,26 +255,37 @@ class _ClientListScreenState extends State<ClientListScreen> {
               for (final a in cl.apolices) ApoliceResumo(numero: a.numeroApolice, valor: a.valorApolice),
             ],
             atendimentos: porCliente[cl.id] ?? const [],
+            // Etapa 10: recomendação + contato, para agir sobre o filtro escolhido
+            recomendacao: cl.recomendacaoManutencao,
+            usoGatilho: (_recomendacoes[cl.id]?.gatilho ?? 0) > 0 ? _recomendacoes[cl.id]!.usoGatilho : null,
+            contato: cl.contato,
+            telefone: cl.contatoTelefone,
+            email: cl.email,
           ),
       ]);
 
       final data = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final filtros = [
+        if (_filtroRecomendacao != null) 'Recomendação: $_filtroRecomendacao',
+        if (_searchController.text.trim().isNotEmpty) 'Busca: "${_searchController.text.trim()}"',
+      ].join(' · ');
+      final sufixo = _filtroRecomendacao == null ? '' : '_${_slug(_filtroRecomendacao!)}';
       if (formato == 'pdf') {
         await Printing.sharePdf(
-          bytes: await RelatorioClientesPdf.gerar(relatorio),
-          filename: 'relatorio_clientes_$data.pdf',
+          bytes: await RelatorioClientesPdf.gerar(relatorio, filtro: filtros),
+          filename: 'relatorio_clientes${sufixo}_$data.pdf',
         );
       } else {
         // Mesmo caminho do CSV do sinistro (claim_detail): baixa no navegador,
         // abre o compartilhamento no celular.
         await Printing.sharePdf(
           bytes: utf8.encode(relatorio.paraCsv()),
-          filename: 'relatorio_clientes_$data.csv',
+          filename: 'relatorio_clientes${sufixo}_$data.csv',
         );
       }
-      if (mounted && _searchController.text.isNotEmpty) {
+      if (mounted && filtros.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Relatório com os ${clientes.length} clientes da busca.')),
+          SnackBar(content: Text('Relatório com ${clientes.length} cliente(s) — $filtros.')),
         );
       }
     } catch (e) {
@@ -267,6 +297,58 @@ class _ClientListScreenState extends State<ClientListScreen> {
     } finally {
       if (mounted) setState(() => _exportando = false);
     }
+  }
+
+  /// "Não recomendado" → "nao-recomendado" (nome do arquivo).
+  static String _slug(String s) {
+    const de = 'áàâãéêíóôõúçÁÀÂÃÉÊÍÓÔÕÚÇ';
+    const para = 'aaaaeeiooouc' 'AAAAEEIOOOUC';
+    final b = StringBuffer();
+    for (final ch in s.split('')) {
+      final i = de.indexOf(ch);
+      b.write(i >= 0 ? para[i] : ch);
+    }
+    return b.toString().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-|-$'), '');
+  }
+
+  // Etapa 10: chips de recomendação (com a quantidade de clientes de cada uma).
+  Widget _buildFiltroRecomendacao() {
+    final contagem = <String, int>{};
+    for (final c in _clients) {
+      contagem[c.recomendacaoManutencao] = (contagem[c.recomendacaoManutencao] ?? 0) + 1;
+    }
+    Widget chip(String? rotulo, String texto) {
+      final selecionado = _filtroRecomendacao == rotulo;
+      return Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: ChoiceChip(
+          label: Text(texto, style: const TextStyle(fontSize: 12)),
+          selected: selecionado,
+          visualDensity: VisualDensity.compact,
+          backgroundColor: rotulo == null ? Colors.white : corFundoRecomendacao(rotulo).withOpacity(0.5),
+          selectedColor: rotulo == null ? Colors.blue.shade100 : corFundoRecomendacao(rotulo),
+          labelStyle: TextStyle(
+            color: rotulo == null ? Colors.black87 : corTextoRecomendacao(rotulo),
+            fontWeight: selecionado ? FontWeight.bold : FontWeight.normal,
+          ),
+          onSelected: (_) {
+            _filtroRecomendacao = rotulo;
+            _filterClients();
+          },
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          chip(null, 'Todas (${_clients.length})'),
+          for (final r in _ordemRecomendacoes)
+            if ((contagem[r] ?? 0) > 0 || _filtroRecomendacao == r) chip(r, '$r (${contagem[r] ?? 0})'),
+        ],
+      ),
+    );
   }
 
   // ─── Build ────────────────────────────────────────────────────────
@@ -298,7 +380,7 @@ class _ClientListScreenState extends State<ClientListScreen> {
               enabled: _filteredClients.isNotEmpty,
               onSelected: _exportarRelatorio,
               // Etapa 09: texto junto do ícone, para o usuário saber o que é.
-              child: _BotaoComTexto(
+              child: BotaoComTexto(
                 icone: Icons.file_download_outlined,
                 texto: MediaQuery.of(context).size.width < 600 ? 'Exportar' : 'Exportar relatório',
               ),
@@ -328,10 +410,13 @@ class _ClientListScreenState extends State<ClientListScreen> {
           ),
         ],
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(70.0),
+          preferredSize: const Size.fromHeight(112.0),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-            child: TextField(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+            TextField(
               controller: _searchController,
               decoration: InputDecoration(
                 hintText: 'Buscar por Nome, CPF/CNPJ ou Telefone',
@@ -349,6 +434,10 @@ class _ClientListScreenState extends State<ClientListScreen> {
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
             ),
+            const SizedBox(height: 6),
+            _buildFiltroRecomendacao(),
+              ],
+            ),
           ),
         ),
       ),
@@ -361,7 +450,7 @@ class _ClientListScreenState extends State<ClientListScreen> {
           if (_filteredClients.isEmpty) {
             return Center(
               child: Text(
-                _searchController.text.isEmpty
+                _searchController.text.isEmpty && _filtroRecomendacao == null
                     ? 'Nenhum cliente cadastrado.'
                     : 'Nenhum cliente encontrado com os filtros aplicados.',
                 style: const TextStyle(fontSize: 16),
@@ -415,36 +504,6 @@ class _ClientListScreenState extends State<ClientListScreen> {
         tooltip: 'Cadastrar novo cliente',
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
-      ),
-    );
-  }
-}
-
-/// Etapa 09: ícone + texto na barra superior (o PopupMenuButton cuida do clique).
-class _BotaoComTexto extends StatelessWidget {
-  final IconData icone;
-  final String texto;
-  const _BotaoComTexto({required this.icone, required this.texto});
-
-  @override
-  Widget build(BuildContext context) {
-    final cor = IconTheme.of(context).color ?? const Color(0xFF1A1A2E);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: cor.withOpacity(0.35)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icone, size: 20, color: cor),
-            const SizedBox(width: 6),
-            Text(texto, style: TextStyle(color: cor, fontSize: 14, fontWeight: FontWeight.w500)),
-          ],
-        ),
       ),
     );
   }

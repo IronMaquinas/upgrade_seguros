@@ -381,8 +381,14 @@ class _TaskListWidgetState extends State<TaskListWidget> {
                               }
 
                               final currentUser = FirebaseAuth.instance.currentUser;
-                              final responsavelEmail = currentUser?.email ?? '';
-                              final responsavelId = currentUser?.uid ?? '';
+                              // Etapa 10: ao EDITAR, o responsável continua o mesmo (antes
+                              // passava para quem editou — distorcia "tarefas por funcionário").
+                              final dadosAtuais = (taskDoc?.data() as Map<String, dynamic>?) ?? const {};
+                              final emailAtual = (dadosAtuais['responsavelEmail'] as String?) ?? '';
+                              final idAtual = (dadosAtuais['responsavelId'] as String?) ?? '';
+                              final manterResponsavel = isEditing && (emailAtual.isNotEmpty || idAtual.isNotEmpty);
+                              final responsavelEmail = manterResponsavel ? emailAtual : (currentUser?.email ?? '');
+                              final responsavelId = manterResponsavel ? idAtual : (currentUser?.uid ?? '');
 
                               final data = {
                                 'descricao': descricaoController.text,
@@ -391,6 +397,11 @@ class _TaskListWidgetState extends State<TaskListWidget> {
                                 'claimId': widget.sinistroId,
                                 'responsavelEmail': responsavelEmail,
                                 'responsavelId': responsavelId,
+                                // Etapa 10: data de conclusão (no prazo / fora do prazo)
+                                if (statusValue == 'Concluída' && rawStatus != 'Concluída')
+                                  'concluida_em': FieldValue.serverTimestamp(),
+                                if (isEditing && statusValue != 'Concluída' && rawStatus == 'Concluída')
+                                  'concluida_em': FieldValue.delete(),
                                 if (!isEditing) ...{
                                   'criado_em': FieldValue.serverTimestamp(),
                                   'numeroSinistro': widget.numeroSinistro,
