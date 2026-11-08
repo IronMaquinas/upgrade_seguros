@@ -2,7 +2,7 @@
 
 > Plataforma web/mobile para corretoras de seguros gerenciarem sinistros, assistências, clientes, tarefas e métricas de desempenho em tempo real.
 
-**Versão do documento:** Etapa 10 (GitHub `44f5c8f` = Etapas 01–09)
+**Versão do documento:** Etapa 11 (GitHub `9159bd1` = Etapas 01–10)
 **Última atualização:** 08/11/2026
 **Status:** app em uso; ciclo de entregas com verificação por md5 em andamento. Etapa 02: terceiros identificados por personagem (proprietário / motorista / contato) e **histórico de valores do sinistro** (lançamentos com nota fiscal, segurado + terceiros). Pendências de segurança abertas — ver [🔐 Pendências de Segurança](#-pendências-de-segurança).
 
@@ -226,6 +226,11 @@ Sinistros e Assistências usam a mesma regra (Etapa 05, `lib/utils/filtro_status
 
 **Carregamento:** a tela abre buscando no Firestore **só o que está em curso** (`where status_atual not-in finalizados`, sem `orderBy` → não precisa de índice composto; a ordenação é feita no app). O histórico só é baixado quando o filtro pede ("Todos" ou um status finalizado), com o aviso "Carregando histórico…", e fica em memória enquanto a tela estiver aberta.
 
+### Busca da lista de Sinistros (Etapa 11)
+A busca procura em: nº do sinistro, nº na seguradora, segurado (nome, CPF/CNPJ), placa, **proprietário (CRLV) e condutor do veículo segurado** (nome e CPF; motorista do transporte), **contato do segurado** (contato do sinistro e contato no local, nome e telefone) e, em cada **terceiro**: proprietário (nome, CPF, telefone, e-mail, placa), motorista (nome, telefone), contato (nome, telefone), **registro na seguradora do terceiro** e nº do sinistro do terceiro.
+- Regra em `lib/utils/busca.dart` (teste `test/busca_test.dart`): sem diferença de maiúscula/acento; várias palavras em qualquer ordem; a partir de 4 dígitos compara só os números (telefone com ou sem máscara, CPF, registro).
+- A busca vale para o que está carregado: com o filtro "Em curso", sinistros finalizados só aparecem trocando para "Todos".
+
 ---
 
 ## Gatilho da apólice
@@ -397,7 +402,7 @@ Sistema salva em avaliacoes + atualiza claim + recalcula NPS do cliente
 ### KPIs Executivos
 - Total de sinistros no período
 - Valor total em sinistros (R$)
-- Sinistralidade (%)
+- Sinistralidade (%) — sinistros do período ÷ soma das apólices vigentes hoje (ainda a conta antiga; ver roadmap)
 - Tempo médio de resolução (dias)
 - **🆕 NPS (Satisfação da Carteira)** — média das avaliações com status colorido (Verde ≥70, Laranja 50-70, Vermelho <50)
 
@@ -445,7 +450,7 @@ Sistema salva em avaliacoes + atualiza claim + recalcula NPS do cliente
 - 📈 **NPS Mensal** (Janeiro → Hoje)
 - 📊 **Sinistros Mensais** (contagem)
 - 🚗 **Assistências Mensais** (contagem)
-- 📉 **Sinistralidade Mensal** (%)
+- 📉 **Sinistralidade Mensal** (%) — Etapa 11: duas linhas, **mensal** e **acumulado no ano**, e a linha tracejada do **gatilho** (% das Configurações). Sinistralidade = sinistros **ocorridos** (sem Cancelado/Negado) ÷ **prêmio ganho** (cada apólice "ganha" seu valor proporcional aos dias de vigência dentro do mês). Regra em `lib/utils/sinistralidade.dart` (teste `test/sinistralidade_test.dart`). Antes dividia os sinistros do mês pela soma **anual** das apólices vigentes hoje (≈ 1/12 do real, e com o denominador inflado pelos valores errados de apólice), por isso o gráfico ficava no zero.
 - ✅ **SLA Compliance Sinistros Mensais** (% dentro de 10 dias)
 - ✅ **SLA Compliance Assistências Mensais** (% conforme prazo)
 - 💰 **Valor Apólices Mensais** (R$ mil)
@@ -471,7 +476,7 @@ Sistema salva em avaliacoes + atualiza claim + recalcula NPS do cliente
 - **PDF** com todas as seções — gerado via `pdf` + `printing`
 
 ### Relatório de clientes (auditoria)
-Lista de clientes → filtro por **recomendação** (chips com a quantidade de cada uma, Etapa 10) → botão **Exportar relatório** (barra superior) → **Planilha (CSV / Excel)** ou **PDF** (Etapa 08). Exporta os clientes da lista (todos, ou só os da busca), **ordenados pelo valor total das apólices**, com uma linha de TOTAL no final. Regra única em `lib/utils/relatorio_clientes.dart` (teste `test/relatorio_clientes_test.dart`); PDF em `lib/services/relatorio_clientes_pdf.dart`.
+Lista de clientes → filtro por **recomendação** (seletor ao lado da busca, com a cor e a quantidade de cada uma — Etapa 10, visual da Etapa 11) → botão **Exportar relatório** (barra superior) → **Planilha (CSV / Excel)** ou **PDF** (Etapa 08). Exporta os clientes da lista (todos, ou só os da busca), **ordenados pelo valor total das apólices**, com uma linha de TOTAL no final. Regra única em `lib/utils/relatorio_clientes.dart` (teste `test/relatorio_clientes_test.dart`); PDF em `lib/services/relatorio_clientes_pdf.dart`.
 
 | Coluna | Como é calculada |
 |---|---|
@@ -655,6 +660,7 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 
 | Etapa | Data | Base | O que mudou |
 |---|---|---|---|
+| 11 | 08/11/2026 | `9159bd1` | **Busca de Sinistros** também por terceiros (proprietário, motorista, contato, registro na seguradora deles), proprietário/condutor do veículo segurado e contato do segurado; sem acento, várias palavras, telefone sem máscara (`lib/utils/busca.dart`). **Filtro de recomendação** da lista de clientes vira seletor no padrão dos filtros de Sinistros, ao lado da busca. **Sinistralidade Mensal** recalculada (sinistros ocorridos ÷ prêmio ganho), com linha acumulada e linha do gatilho (`lib/utils/sinistralidade.dart`). Testes novos: `busca_test.dart`, `sinistralidade_test.dart`. |
 | 10 | 08/11/2026 | `44f5c8f` | **Top 10 de risco** com a regra da recomendação (vigentes, sem vínculo por ramo + data) e os mesmos nomes. **Lista de clientes:** filtro por recomendação ligado à exportação, que passa a trazer recomendação, uso do gatilho e contato (nome, telefone, e-mail). **Tarefas:** ordenar Mais recente/Mais antiga; exportar agrupado por funcionário (CSV/PDF); `concluida_em` gravado ao concluir; "no prazo / fora do prazo" pela regra única (antes concluída no prazo com data vencida contava como fora); editar não troca mais o responsável; o filtro por funcionário pelo id passou a funcionar (o campo não vinha na lista). **Relatórios:** Tarefas por Funcionário (abertas, concluídas %, no prazo × fora). Testes novos: `tarefas_test.dart` (+1 em `relatorio_clientes_test.dart`). |
 | 09 | 08/11/2026 | `4d14169` | **Recomendação do cliente unificada pelo uso do gatilho** (pior apólice vigente; faixas 60/80/100%; sinistros sem vínculo ligados por ramo + data; "Sem apólice vigente" e "Apólice sem valor" em cinza; Detalhes mostra uso do gatilho e % do valor da apólice). Substitui 4 contas diferentes. Botões com texto: **"Exportar relatório"** na lista de clientes e **"Importar contrato (PDF)"** no cadastro. Teste novo: `recomendacao_cliente_test.dart`. |
 | 08 | 08/11/2026 | `7301670` | **Apólice clicável no Detalhes do Cliente** (visualização com "Editar", que abre o cadastro direto na edição daquela apólice); visualização vira componente único (`apolice_visualizacao_dialog.dart`) usado também no cadastro. **SLA de sinistro para Civil Ônibus (RCO) = 7 e Empresarial = 10** (faltavam na tela e na abertura caía em 10); ramo "Vidas" passa a usar o SLA de "Vida". **Relatório de clientes (auditoria)** em CSV/PDF na lista de clientes, ordenado pelo valor das apólices, com maior apólice e total. **`.gitignore` sem depender do zip:** o verificador confere as linhas e trata `node_modules/`/`android/build/` no git como erro. Testes novos: `relatorio_clientes_test.dart`, `config_sla_test.dart`. |
@@ -744,6 +750,8 @@ apolices: [
 - [x] Apólice clicável no Detalhes do Cliente, SLA de RCO/Empresarial e relatório de clientes para auditoria (Etapa 08)
 - [x] Recomendação do cliente unificada pelo uso do gatilho; botões "Exportar relatório" e "Importar contrato" com texto (Etapa 09)
 - [x] Top 10 de risco pela recomendação; filtro por recomendação + exportação com contato; tarefas com ordenação, exportação por funcionário, data de conclusão e prazo; tarefas por funcionário nos Relatórios (Etapa 10)
+- [x] Busca ampla de sinistros; filtro de recomendação no padrão visual; sinistralidade mensal por prêmio ganho (Etapa 11)
+- [ ] KPI "Sinistralidade (%)" do topo dos Relatórios e sinistralidade por seguradora com a mesma regra (prêmio ganho no período)
 
 ### 🔐 Segurança (ver [Pendências de Segurança](#-pendências-de-segurança))
 - [ ] 🔴 S1 — Trocar token do Telegram e tirar o arquivo do git

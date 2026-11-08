@@ -311,43 +311,67 @@ class _ClientListScreenState extends State<ClientListScreen> {
     return b.toString().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-|-$'), '');
   }
 
-  // Etapa 10: chips de recomendação (com a quantidade de clientes de cada uma).
+  // Etapa 10/11: filtro por recomendação. Na Etapa 11 os chips viraram um
+  // seletor no mesmo estilo dos filtros da lista de Sinistros (contorno cinza,
+  // ícone à esquerda), ao lado da busca, com a cor e a quantidade de cada uma.
   Widget _buildFiltroRecomendacao() {
     final contagem = <String, int>{};
     for (final c in _clients) {
       contagem[c.recomendacaoManutencao] = (contagem[c.recomendacaoManutencao] ?? 0) + 1;
     }
-    Widget chip(String? rotulo, String texto) {
-      final selecionado = _filtroRecomendacao == rotulo;
-      return Padding(
-        padding: const EdgeInsets.only(right: 6),
-        child: ChoiceChip(
-          label: Text(texto, style: const TextStyle(fontSize: 12)),
-          selected: selecionado,
-          visualDensity: VisualDensity.compact,
-          backgroundColor: rotulo == null ? Colors.white : corFundoRecomendacao(rotulo).withOpacity(0.5),
-          selectedColor: rotulo == null ? Colors.blue.shade100 : corFundoRecomendacao(rotulo),
-          labelStyle: TextStyle(
-            color: rotulo == null ? Colors.black87 : corTextoRecomendacao(rotulo),
-            fontWeight: selecionado ? FontWeight.bold : FontWeight.normal,
+    final opcoes = <String?>[
+      null,
+      for (final r in _ordemRecomendacoes)
+        if ((contagem[r] ?? 0) > 0 || _filtroRecomendacao == r) r,
+    ];
+
+    Widget item(String? rotulo) {
+      final qtd = rotulo == null ? _clients.length : (contagem[rotulo] ?? 0);
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: rotulo == null ? Colors.grey.shade400 : corTextoRecomendacao(rotulo),
+            ),
           ),
-          onSelected: (_) {
-            _filtroRecomendacao = rotulo;
-            _filterClients();
-          },
-        ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              '${rotulo ?? 'Todas as recomendações'} ($qtd)',
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       );
     }
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          chip(null, 'Todas (${_clients.length})'),
-          for (final r in _ordemRecomendacoes)
-            if ((contagem[r] ?? 0) > 0 || _filtroRecomendacao == r) chip(r, '$r (${contagem[r] ?? 0})'),
-        ],
+    return DropdownButtonFormField<String?>(
+      value: _filtroRecomendacao,
+      isDense: true,
+      isExpanded: true,
+      decoration: InputDecoration(
+        prefixIcon: Icon(Icons.verified_outlined, size: 18, color: Colors.grey.shade600),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8.0),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8.0),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
+        ),
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
       ),
+      items: [for (final o in opcoes) DropdownMenuItem<String?>(value: o, child: item(o))],
+      onChanged: (val) {
+        _filtroRecomendacao = val;
+        _filterClients();
+      },
     );
   }
 
@@ -410,34 +434,44 @@ class _ClientListScreenState extends State<ClientListScreen> {
           ),
         ],
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(112.0),
+          preferredSize: Size.fromHeight(MediaQuery.of(context).size.width < 700 ? 112.0 : 64.0),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-            TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Buscar por Nome, CPF/CNPJ ou Telefone',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8.0),
-                  borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
+            child: Builder(builder: (context) {
+              final busca = TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Buscar por Nome, CPF/CNPJ ou Telefone',
+                  prefixIcon: const Icon(Icons.search),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8.0),
+                    borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8.0),
+                    borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
+                  ),
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8.0),
-                  borderSide: BorderSide(color: Colors.grey.shade300, width: 0.8),
-                ),
-                filled: true,
-                fillColor: Colors.white,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              ),
-            ),
-            const SizedBox(height: 6),
-            _buildFiltroRecomendacao(),
-              ],
-            ),
+              );
+              // Etapa 11: busca + recomendação na mesma linha (como Sinistros);
+              // em tela estreita, um embaixo do outro.
+              if (MediaQuery.of(context).size.width < 700) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [busca, const SizedBox(height: 6), _buildFiltroRecomendacao()],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: busca),
+                  const SizedBox(width: 8),
+                  SizedBox(width: 300, child: _buildFiltroRecomendacao()),
+                ],
+              );
+            }),
           ),
         ),
       ),

@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:upgrade_seguros/services/auth_service.dart';
 import '../models/claim_model.dart';
 import '../services/firestore_service.dart';
+import '../utils/busca.dart';
 import '../utils/filtro_status.dart';
 import '../screens/claim_detail_screen.dart';
 import '../screens/spreadsheet_claim_screen.dart';
@@ -245,12 +246,10 @@ class ClaimListScreenState extends State<ClaimListScreen> {
     setState(() {
       _filteredClaims = _claims.where((claim) {
         // ── Busca textual ──
-        final matchesSearch = query.isEmpty ||
-            claim.numeroSinistro.toLowerCase().contains(query) ||
-            claim.numeroSeguradora.toLowerCase().contains(query) ||
-            claim.clientNome.toLowerCase().contains(query) ||
-            claim.clientCnpjCpf.toLowerCase().contains(query) ||
-            _getPlacasParaBusca(claim).toLowerCase().contains(query);
+        // Etapa 11: também terceiros, proprietário/condutor do segurado e
+        // contatos; sem acento, várias palavras e telefone sem máscara
+        // (lib/utils/busca.dart).
+        final matchesSearch = query.isEmpty || Busca.corresponde(query, _camposParaBusca(claim));
 
         // ── Filtro Status ──
         // Etapa 05: null = "Em curso"; "Todos" = todos mesmo.
@@ -498,6 +497,44 @@ class ClaimListScreenState extends State<ClaimListScreen> {
         });
       },
     );
+  }
+
+  // Etapa 11: tudo o que a busca da lista de sinistros enxerga.
+  List<String?> _camposParaBusca(Claim claim) {
+    final v = claim.veiculoSelecionado;
+    return [
+      // sinistro e segurado (já existiam)
+      claim.numeroSinistro,
+      claim.numeroSeguradora,
+      claim.clientNome,
+      claim.clientCnpjCpf,
+      _getPlacasParaBusca(claim),
+      // proprietário (CRLV) e condutor do veículo segurado
+      v?.nomeCondutor,
+      v?.cpfCondutor,
+      v?.nomeCondutorMotorista,
+      v?.cpfCondutorMotorista,
+      claim.transporte?.nomeMotorista,
+      // contato do segurado (contato do sinistro e contato no local)
+      claim.nomeContatoSinistro,
+      claim.telefoneContatoSinistro,
+      claim.nomeContato,
+      claim.telefoneContatoLocal,
+      // terceiros: proprietário, motorista, contato, registro na seguradora deles
+      for (final tp in claim.terceiros) ...[
+        tp.nome,
+        tp.cpf,
+        tp.contato,
+        tp.email,
+        tp.placa,
+        tp.nomeMotorista,
+        tp.telefoneMotorista,
+        tp.nomeContatoTerceiro,
+        tp.telefoneContatoTerceiro,
+        tp.registroSeguradoraTerceiro,
+        tp.numeroSinistroTerceiro,
+      ],
+    ];
   }
 
   String _getPlacasParaBusca(Claim claim) {
@@ -898,7 +935,7 @@ class ClaimListScreenState extends State<ClaimListScreen> {
                       child: TextField(
                         controller: _searchController,
                         decoration: InputDecoration(
-                          hintText: 'Buscar por Nome, CPF, CNPJ, N° Sinistro ou Placa',
+                          hintText: 'Buscar por nome, CPF/CNPJ, nº, placa, terceiro, condutor ou telefone',
                           prefixIcon: const Icon(Icons.search),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8.0),

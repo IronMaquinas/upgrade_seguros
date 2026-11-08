@@ -22,6 +22,7 @@ import 'package:upgrade_seguros/widgets/top_clients_widgets.dart';
 import 'package:upgrade_seguros/widgets/employees_performance_widgets.dart';
 import 'package:upgrade_seguros/widgets/tarefas_funcionarios_card.dart';
 import 'package:upgrade_seguros/utils/tarefas.dart';
+import 'package:upgrade_seguros/utils/sinistralidade.dart';
 
 // ─── Helper para converter datas (Timestamp ou String) ───────────────────────
 DateTime _parseDate(dynamic value) {
@@ -79,6 +80,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // Etapa 10: tarefas por funcionário
   List<Funcionario> _funcionariosLista = [];
   List<TarefaResumo> _tarefas = [];
+  // Etapa 11: sinistralidade mensal e acumulada do ano (prêmio ganho)
+  List<MesSinistralidade> _sinistralidadeAno = [];
 
   List<Claim> _sinistros = [];
   List<Client> _allClients = [];
@@ -771,6 +774,24 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
       final Map<int, int> contratosAtivosPoMes = {};
       final ativasInicioMes = <int, int>{};
 
+      // Etapa 11: sinistralidade = sinistros ocorridos ÷ prêmio ganho
+      // (lib/utils/sinistralidade.dart). Antes: sinistros do mês ÷ soma ANUAL
+      // das apólices vigentes hoje — ficava perto de zero.
+      _sinistralidadeAno = Sinistralidade.doAno(
+        ano: now.year,
+        hoje: now,
+        apolices: [
+          for (final c in allClients)
+            for (final a in c.apolices)
+              ApoliceSinistralidade(inicio: a.dataInicio, fim: a.dataFim, valor: a.valorApolice),
+        ],
+        sinistros: [
+          for (final c in allClaims)
+            if (c.tipo != 'assistencia')
+              SinistroSinistralidade(dataOcorrencia: c.dataOcorrencia, status: c.statusAtual, valor: c.valorTotalSinistro),
+        ],
+      );
+
       for (int mes = 1; mes <= 12; mes++) {
         final mesInicio = DateTime(now.year, mes, 1);
         final mesFim = mes == 12
@@ -809,13 +830,9 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
         }).toList();
         assistenciasPoMes[mes] = assistenciasMes.length;
 
-        // 4. SINISTRALIDADE MENSAL
-        if (sinistrosMes.isNotEmpty) {
-          final totalValorMes = sinistrosMes.fold<double>(0, (s, c) => s + c.valorTotalSinistro);
-          sinistralidadePoMes[mes] = (totalValorMes / totalApolices) * 100;
-        } else {
-          sinistralidadePoMes[mes] = 0.0;
-        }
+        // 4. SINISTRALIDADE MENSAL — Etapa 11: calculada acima (_sinistralidadeAno)
+        final mesSin = _sinistralidadeAno.where((x) => x.mes == mes);
+        sinistralidadePoMes[mes] = mesSin.isEmpty ? 0.0 : (mesSin.first.mensal ?? 0.0);
 
         // 5. CONTRATOS ATIVOS MENSAIS + 11. TAXA DE RETENÇÃO
         for (int mes = 1; mes <= 12; mes++) {
@@ -2253,49 +2270,63 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
   }
 
   // ── SINISTRALIDADE MENSAL PARA GRÁFICO ANUAL
+  // Etapa 11: duas linhas — mensal (laranja) e acumulado no ano (azul) — e a
+  // linha tracejada do gatilho (% das Configurações) para comparar.
   Widget _buildSinistralidadeAnualChart() {
-    if (_data == null || _data!.sinistralidadePoMes.isEmpty) {
-      return const SizedBox();
-    }
-    
-    final data = _data!.sinistralidadePoMes;
-    final spots = <FlSpot>[];
-    double maxValor = 100.0;  // Valor padrão
-    
-    for (int mes = 1; mes <= 12; mes++) {
-      final valor = data[mes] ?? 0.0;
-      
-      // 🔥 Garante que o valor é válido
-      if (valor.isFinite && valor >= 0) {
-        spots.add(FlSpot(mes.toDouble(), valor));
-        if (valor > maxValor) maxValor = valor;
-      } else {
-        spots.add(FlSpot(mes.toDouble(), 0.0));
-      }
-    }
-    
-    // Se todos os valores são 0, mostra mensagem
-    if (spots.every((s) => s.y == 0)) {
+    const corMensal = Color(0xFFF57C00);
+    const corAcumulado = Color(0xFF1565C0);
+    final meses = _sinistralidadeAno;
+
+    final spotsMensal = <FlSpot>[
+      for (final m in meses)
+        if (m.mensal != null) FlSpot(m.mes.toDouble(), m.mensal!),
+    ];
+    final spotsAcumulado = <FlSpot>[
+      for (final m in meses)
+        if (m.acumulado != null) FlSpot(m.mes.toDouble(), m.acumulado!),
+    ];
+
+    final caixa = BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: Colors.grey.shade200),
+    );
+
+    if (spotsMensal.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.shade200),
-        ),
-        child: const Center(
-          child: Text('Sem dados de sinistralidade para este período'),
-        ),
+        decoration: caixa,
+        child: const Center(child: Text('Sem apólices vigentes com valor neste ano para calcular a sinistralidade')),
       );
     }
 
+    final gatilho = _percentualGatilho;
+    var maxValor = gatilho;
+    for (final s in [...spotsMensal, ...spotsAcumulado]) {
+      if (s.y > maxValor) maxValor = s.y;
+    }
+    final ultimo = meses.lastWhere((m) => m.acumulado != null, orElse: () => meses.last);
+    final fmt = NumberFormat.currency(locale: 'pt_BR', symbol: r'R$', decimalDigits: 0);
+
+    Widget legenda(Color cor, String texto, {bool tracejado = false}) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 18,
+              height: 3,
+              decoration: BoxDecoration(
+                color: tracejado ? null : cor,
+                border: tracejado ? Border(top: BorderSide(color: cor, width: 2)) : null,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(texto, style: const TextStyle(fontSize: 11)),
+          ],
+        );
+
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
+      decoration: caixa,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2303,7 +2334,24 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
             '📉 Sinistralidade Mensal - Ano ${DateTime.now().year} (%)',
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 4),
+          Text(
+            'Sinistros ocorridos (sem cancelados/negados) ÷ prêmio ganho no período. '
+            'Acumulado até ${_nomeMes(ultimo.mes)}: ${(ultimo.acumulado ?? 0).toStringAsFixed(1)}% '
+            '(${fmt.format(ultimo.sinistrosAcumulados)} ÷ ${fmt.format(ultimo.premioAcumulado)})',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 16,
+            runSpacing: 4,
+            children: [
+              legenda(corMensal, 'Mensal'),
+              legenda(corAcumulado, 'Acumulado no ano'),
+              legenda(Colors.red.shade400, 'Gatilho (${gatilho.toStringAsFixed(0)}%)', tracejado: true),
+            ],
+          ),
+          const SizedBox(height: 16),
           SizedBox(
             height: 300,
             child: LineChart(
@@ -2316,11 +2364,11 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
                     tooltipMargin: 8,
                     getTooltipItems: (touchedSpots) {
                       return touchedSpots.map((spot) {
-                        final valor = _formatarValorTooltip(spot.y, 'percentual');
+                        final acumulado = spot.barIndex == 1;
                         return LineTooltipItem(
-                          valor,
-                          const TextStyle(
-                            color: Color(0xFFF57C00),
+                          '${acumulado ? 'Acumulado' : 'Mês'}: ${_formatarValorTooltip(spot.y, 'percentual')}',
+                          TextStyle(
+                            color: acumulado ? corAcumulado : corMensal,
                             fontWeight: FontWeight.bold,
                             fontSize: 12,
                           ),
@@ -2330,24 +2378,33 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
                   ),
                 ),
                 gridData: const FlGridData(show: true),
+                extraLinesData: ExtraLinesData(
+                  horizontalLines: [
+                    HorizontalLine(
+                      y: gatilho,
+                      color: Colors.red.shade400,
+                      strokeWidth: 1.5,
+                      dashArray: [6, 4],
+                    ),
+                  ],
+                ),
                 titlesData: FlTitlesData(
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
                       interval: 1.0,
                       getTitlesWidget: (value, meta) {
-                        const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-                                      'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
                         final mes = value.toInt();
-                        return mes >= 1 && mes <= 12 
-                          ? Text(meses[mes - 1], style: const TextStyle(fontSize: 10))
-                          : const SizedBox();
+                        return mes >= 1 && mes <= 12
+                            ? Text(_nomeMes(mes), style: const TextStyle(fontSize: 10))
+                            : const SizedBox();
                       },
                     ),
                   ),
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
+                      reservedSize: 44,
                       getTitlesWidget: (value, meta) {
                         return Text('${value.toStringAsFixed(0)}%', style: const TextStyle(fontSize: 10));
                       },
@@ -2358,19 +2415,28 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
                 ),
                 lineBarsData: [
                   LineChartBarData(
-                    spots: spots,
+                    spots: spotsMensal,
                     isCurved: false,
-                    color: const Color(0xFFF57C00),
+                    color: corMensal,
                     barWidth: 3,
                     dotData: const FlDotData(show: true),
                     belowBarData: BarAreaData(
                       show: true,
-                      color: const Color(0xFFF57C00).withOpacity(0.1),
+                      color: corMensal.withOpacity(0.1),
                     ),
                   ),
+                  LineChartBarData(
+                    spots: spotsAcumulado,
+                    isCurved: false,
+                    color: corAcumulado,
+                    barWidth: 2.5,
+                    dotData: const FlDotData(show: true),
+                  ),
                 ],
+                minX: 1,
+                maxX: 12,
                 minY: 0,
-                maxY: (maxValor * 1.2).clamp(0, double.infinity),  // 20% acima do máximo
+                maxY: maxValor * 1.2, // 20% acima do maior valor (ou do gatilho)
                 borderData: FlBorderData(show: true),
               ),
             ),
@@ -2379,6 +2445,9 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
       ),
     );
   }
+
+  static String _nomeMes(int mes) =>
+      const ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'][mes - 1];
 
   // ── CONTRATOS ATIVOS MENSAIS
 Widget _buildContratosAnualChart() {
