@@ -16,6 +16,9 @@ import 'package:upgrade_seguros/utils/gatilho.dart';
 import 'package:upgrade_seguros/services/config_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:upgrade_seguros/widgets/apolice_visualizacao_dialog.dart';
+import 'package:upgrade_seguros/widgets/recomendacao_chip.dart';
+import 'package:upgrade_seguros/services/recomendacao_service.dart';
+import 'package:upgrade_seguros/utils/recomendacao_cliente.dart';
 import 'package:uuid/uuid.dart';
 import '../models/claim_model.dart';
 import '../models/client_model.dart';
@@ -49,18 +52,9 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     List<Claim> _clientSinistros = [];
     List<Claim> _clientAssistencias = [];
 
-    String calcularRecomendacaoManutencao(double valorApoliceTotal, List<Claim> claims) {
-    final totalSinistros = claims.fold<double>(0.0, (sum, claim) => sum + claim.valorTotalSinistro);
-    
-    if (valorApoliceTotal <= 0) return 'Não recomendado';
-    
-    final percentual = totalSinistros / valorApoliceTotal;
-    
-    if (percentual < 0.5) return 'Ótimo';
-    else if (percentual < 0.75) return 'Regular';
-    else if (percentual < 1.0) return 'Atenção';
-    else return 'Não recomendado';
-  }
+    // Etapa 09: recomendação pela regra única (lib/utils/recomendacao_cliente.dart).
+    ResultadoRecomendacao get _recomendacao =>
+        recomendarCliente(_currentClient!, _clientSinistros, _percentualGatilho);
 
   int get _totalSinistros => _clientSinistros.length;
   int get _totalAssistencias => _clientAssistencias.length;
@@ -399,11 +393,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    // Procure por:
-    final recomendacao = calcularRecomendacaoManutencao(
-      _currentClient?.valorTotalApolicesAtivas ?? 0,  // Valor total de apólices ativas
-      _clientClaims,
-    );
+    final recomendacao = _recomendacao;
 
     final client = _currentClient!;
 
@@ -506,23 +496,14 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                               Row(
                                 children: [
                                   const Text('Recomendação: ', style: TextStyle(fontWeight: FontWeight.bold)),
-                                  Chip(
-                                    label: Text(recomendacao),
-                                    backgroundColor: recomendacao == 'Ótimo'
-                                        ? Colors.green.shade100
-                                        : recomendacao == 'Regular'
-                                            ? Colors.amber.shade100
-                                            : recomendacao == 'Atenção'
-                                                ? Colors.orange.shade100
-                                                : Colors.red.shade100,
-                                    labelStyle: TextStyle(
-                                      color: recomendacao == 'Ótimo'
-                                          ? Colors.green.shade900
-                                          : recomendacao == 'Regular'
-                                              ? Colors.amber.shade900
-                                              : recomendacao == 'Atenção'
-                                                  ? Colors.orange.shade900
-                                                  : Colors.red.shade900,
+                                  RecomendacaoChip(recomendacao.rotulo),
+                                  const SizedBox(width: 12),
+                                  // Etapa 09: de onde vem a recomendação (uso do gatilho ×
+                                  // valor da apólice, ou falta de apólice vigente).
+                                  Expanded(
+                                    child: Text(
+                                      recomendacao.explicacao,
+                                      style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                                     ),
                                   ),
                                 ],

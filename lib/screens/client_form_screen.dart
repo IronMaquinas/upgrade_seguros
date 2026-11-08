@@ -1340,15 +1340,10 @@ Future<bool> _mostrarDialogoClienteExistente(Client cliente, ContratoDTO contrat
 
       final totalSinistros = widget.clientToEdit?.totalSinistrosAcionados ?? 0;
 
-      // Calcular recomendação
-      String recomendacao;
-      if (totalSinistros >= 5) {
-        recomendacao = 'Crítico';
-      } else if (totalSinistros >= 3) {
-        recomendacao = 'Regular';
-      } else {
-        recomendacao = 'Bom';
-      }
+      // Etapa 09: a recomendação não é mais calculada aqui (era pela quantidade
+      // de sinistros, com outros rótulos). As telas calculam pela regra única
+      // (lib/utils/recomendacao_cliente.dart) e o encerramento do sinistro grava.
+      final recomendacao = widget.clientToEdit?.recomendacaoManutencao ?? 'Sem apólice vigente';
 
       // 🆕 VALIDAÇÃO: Verificar duplicata de CNPJ/CPF
       final cnpjCpfNormalizado = _normalizarCnpjCpf(_cpfCnpjController.text);
@@ -1605,11 +1600,28 @@ Widget build(BuildContext context) {
       appBar: AppBar(
         title: Text(widget.clientToEdit == null ? 'Novo Cliente' : 'Editar Cliente'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.upload_file),
-            onPressed: _importarContrato,
-            tooltip: 'Importar Contrato (PDF)',
+          // Etapa 09: texto junto do ícone — os usuários esqueciam que a opção existe.
+          Builder(
+            builder: (ctx) {
+              final cor = IconTheme.of(ctx).color ?? Colors.black87;
+              final estreito = MediaQuery.of(ctx).size.width < 600;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: OutlinedButton.icon(
+                  onPressed: _importarContrato,
+                  icon: const Icon(Icons.upload_file, size: 20),
+                  label: Text(estreito ? 'Importar contrato' : 'Importar contrato (PDF)'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: cor,
+                    side: BorderSide(color: cor.withOpacity(0.45)),
+                    shape: const StadiumBorder(),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                  ),
+                ),
+              );
+            },
           ),
+          const SizedBox(width: 4),
           IconButton(
             icon: const Icon(Icons.close),
             onPressed: () async {

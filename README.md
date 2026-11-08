@@ -2,7 +2,7 @@
 
 > Plataforma web/mobile para corretoras de seguros gerenciarem sinistros, assistências, clientes, tarefas e métricas de desempenho em tempo real.
 
-**Versão do documento:** Etapa 08 (GitHub `7301670` = Etapas 01–07, ainda sem a limpeza do git da 06)
+**Versão do documento:** Etapa 09 (GitHub `4d14169` = Etapas 01–08)
 **Última atualização:** 08/11/2026
 **Status:** app em uso; ciclo de entregas com verificação por md5 em andamento. Etapa 02: terceiros identificados por personagem (proprietário / motorista / contato) e **histórico de valores do sinistro** (lançamentos com nota fiscal, segurado + terceiros). Pendências de segurança abertas — ver [🔐 Pendências de Segurança](#-pendências-de-segurança).
 
@@ -140,11 +140,12 @@
 - **Veículos segurados**: marca / modelo / cor / ano fabricação / ano modelo / placa / chassi + fotos
 - **Ramos de Seguro**: Seleção múltipla com chips visuais (🚗 Veículo · 🏠 Residencial · 🚚 Frota · ⚙️ Máquinas · 💓 Vida · 📦 Transporte · 🚌 Civil Ônibus (RCO) · 🏢 Empresarial)
 - **Vigência de apólice** com alerta de vencimento (badge laranja nos últimos 30 dias)
-- **Score de recomendação**: Bom / Regular / Crítico (baseado em número de sinistros)
+- **Recomendação do cliente**: Ótimo / Regular / Atenção / Não recomendado pelo **uso do gatilho** da pior apólice vigente; selo cinza "Sem apólice vigente" / "Apólice sem valor" (Etapa 09). Ver [Recomendação do cliente](#recomendação-do-cliente)
 - **NPS Score** acumulado por cliente (−100 a +100)
 - **Valor da apólice** e **valor gatilho**
 - **Apólice clicável** no Detalhes do Cliente e no cadastro: abre a visualização (somente leitura) com "Editar" — componente único `lib/widgets/apolice_visualizacao_dialog.dart` (Etapa 08). No Detalhes, "Editar" abre o cadastro já na edição daquela apólice (depois de "Atualizar", ainda é preciso **salvar o cliente**).
-- **Relatório de clientes (auditoria)** — botão ⬇ na barra da lista de clientes, em CSV (Excel) ou PDF (Etapa 08). Ver [Relatório de clientes](#relatório-de-clientes-auditoria).
+- **Importar contrato (PDF)** — botão com texto na barra do cadastro (antes só ícone; Etapa 09).
+- **Relatório de clientes (auditoria)** — botão "Exportar relatório" na barra da lista de clientes, em CSV (Excel) ou PDF (Etapa 08). Ver [Relatório de clientes](#relatório-de-clientes-auditoria).
 
 ---
 
@@ -241,6 +242,26 @@ O **gatilho** é o valor de sinistros, dentro da vigência da apólice, a partir
 - **Visualização:** clicar na apólice (no Detalhes do Cliente ou no cadastro) abre o modal em modo leitura, com botão "Editar" (Etapa 08: componente único `apolice_visualizacao_dialog.dart`).
 - **Uso do gatilho** = soma de `valor_total_sinistro` dos sinistros **ligados à apólice** (`apolice_id`), **ocorridos dentro da vigência** e **não cancelados/negados**, ÷ gatilho efetivo. Mesma regra no Top 10 de risco (Relatórios) e no alerta do "Valor do Sinistro" na abertura.
 - Status: 🔴 > 100% (estourou) · 🟠 ≥ 80% · 🟡 ≥ 60%.
+
+---
+
+## Recomendação do cliente
+
+Regra única em `lib/utils/recomendacao_cliente.dart` (Etapa 09; teste `test/recomendacao_cliente_test.dart`), usada pela lista de clientes, pelo Detalhes do Cliente e pelo encerramento do sinistro (que grava `recomendacao_manutencao`). Ponte com os modelos: `lib/services/recomendacao_service.dart`; selo e cores: `lib/widgets/recomendacao_chip.dart`.
+
+1. Só contam as apólices **vigentes hoje** (início ≤ hoje ≤ fim). Nenhuma → **Sem apólice vigente** (cinza). Vigente sem valor e sem gatilho → **Apólice sem valor** (cinza).
+2. Para cada apólice vigente: **uso do gatilho** = sinistros da vigência, sem Cancelado/Negado ÷ gatilho efetivo (mesma regra do [Gatilho da apólice](#gatilho-da-apólice)). Sinistro **sem vínculo** com apólice (ou ligado a apólice apagada) conta na apólice do **mesmo ramo** cuja vigência cobre a data — só no cálculo, nada é gravado. "Vidas" (sinistro) = "Vida" (apólice).
+3. Vale a **pior** apólice do cliente:
+
+| Uso do gatilho | Recomendação |
+|---|---|
+| < 60% | 🟢 Ótimo |
+| 60% a < 80% | 🟡 Regular |
+| 80% a 100% | 🟠 Atenção |
+| > 100% | 🔴 Não recomendado |
+
+- Acima do gatilho e acima do próprio **valor da apólice** são ambos "Não recomendado"; o Detalhes do Cliente mostra ao lado do selo os dois números (ex.: "Uso do gatilho: 283% · 198% do valor da apólice (Frota 31.69…) — acima do valor da apólice").
+- Antes da Etapa 09 havia 4 contas diferentes (lista e detalhe: todos os sinistros ÷ 100% das apólices vigentes; salvar cliente: quantidade de sinistros; encerrar sinistro: outra faixa e outros rótulos) e cliente sem apólice vigente aparecia "Não recomendado" mesmo sem sinistros.
 
 ---
 
@@ -439,7 +460,7 @@ Sistema salva em avaliacoes + atualiza claim + recalcula NPS do cliente
 - **PDF** com todas as seções — gerado via `pdf` + `printing`
 
 ### Relatório de clientes (auditoria)
-Lista de clientes → botão ⬇ (barra superior) → **Planilha (CSV / Excel)** ou **PDF** (Etapa 08). Exporta os clientes da lista (todos, ou só os da busca), **ordenados pelo valor total das apólices**, com uma linha de TOTAL no final. Regra única em `lib/utils/relatorio_clientes.dart` (teste `test/relatorio_clientes_test.dart`); PDF em `lib/services/relatorio_clientes_pdf.dart`.
+Lista de clientes → botão **Exportar relatório** (barra superior) → **Planilha (CSV / Excel)** ou **PDF** (Etapa 08). Exporta os clientes da lista (todos, ou só os da busca), **ordenados pelo valor total das apólices**, com uma linha de TOTAL no final. Regra única em `lib/utils/relatorio_clientes.dart` (teste `test/relatorio_clientes_test.dart`); PDF em `lib/services/relatorio_clientes_pdf.dart`.
 
 | Coluna | Como é calculada |
 |---|---|
@@ -581,7 +602,7 @@ Levantadas na revisão da base (07/11/2026). O repositório no GitHub está **p�
 - **Marca/modelo do terceiro editado antes da Etapa 02:** o diálogo de edição antigo gravava marca, modelo e anos só dentro de `veiculo` (a tela mostrava vazio). O `ThirdParty.fromMap` agora cai para `veiculo` quando o campo próprio está vazio; ao salvar de novo, os dois ficam preenchidos.
 - **Pacote importado sem estar no `pubspec.yaml`:** `latlong2` é importado em `widgets/workshop_widget.dart`, mas só chega como dependência de outro pacote. Compila hoje; quebra se o outro pacote deixar de usá-lo. Corrigir quando a etapa mexer nesse arquivo (o import parece não ser usado — `hide LatLng`).
 - **Valores em moeda na apólice:** ler sempre com `GatilhoApolice.lerMoeda()` (aceita "R$ 1.234,56" com espaço especial). Antes da Etapa 07, o diálogo abria com `120000.1` e o `parseFromMoeda` lia como 1.200.001 se o usuário salvasse sem redigitar — **apólices editadas antes da Etapa 07 podem ter valor/gatilho inflados**: conferir as que parecerem absurdas — o relatório de clientes (Etapa 08) ordena por valor e mostra a maior apólice de cada um.
-- **Sinistros sem `apolice_id`** (abertos sem escolher apólice) não entram no uso do gatilho de nenhuma apólice.
+- **Sinistros sem `apolice_id`** (abertos sem escolher apólice) não entram no Top 10 de risco nem no "uso atual" da abertura. A **recomendação do cliente** (Etapa 09) já os liga por ramo + data — por isso um cliente pode aparecer "Não recomendado" com uso menor no Top 10. Alinhar o Top 10 à mesma regra está no roadmap.
 - **Modal "Tipo de Assistência" é um componente só** (Etapa 06): `lib/widgets/assist_tipo_picker.dart` → `mostrarSeletorTipoAssistencia()`, usado pelo Dashboard e pelo botão laranja "Nova Assistência" da lista. Cor padrão das assistências: `corAssistencia` (`Colors.orange.shade600`).
 - **Arquivos auxiliares na raiz/lib:** `ROTEIRO_REFATORACAO_PICKER_RAMO.md` (o picker global já existe em `dashboard_screen.dart` — confirmar que o roteiro foi concluído e apagar) e `lib/readme.dart` (anotações soltas em comentário).
 
@@ -620,6 +641,7 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 
 | Etapa | Data | Base | O que mudou |
 |---|---|---|---|
+| 09 | 08/11/2026 | `4d14169` | **Recomendação do cliente unificada pelo uso do gatilho** (pior apólice vigente; faixas 60/80/100%; sinistros sem vínculo ligados por ramo + data; "Sem apólice vigente" e "Apólice sem valor" em cinza; Detalhes mostra uso do gatilho e % do valor da apólice). Substitui 4 contas diferentes. Botões com texto: **"Exportar relatório"** na lista de clientes e **"Importar contrato (PDF)"** no cadastro. Teste novo: `recomendacao_cliente_test.dart`. |
 | 08 | 08/11/2026 | `7301670` | **Apólice clicável no Detalhes do Cliente** (visualização com "Editar", que abre o cadastro direto na edição daquela apólice); visualização vira componente único (`apolice_visualizacao_dialog.dart`) usado também no cadastro. **SLA de sinistro para Civil Ônibus (RCO) = 7 e Empresarial = 10** (faltavam na tela e na abertura caía em 10); ramo "Vidas" passa a usar o SLA de "Vida". **Relatório de clientes (auditoria)** em CSV/PDF na lista de clientes, ordenado pelo valor das apólices, com maior apólice e total. **`.gitignore` sem depender do zip:** o verificador confere as linhas e trata `node_modules/`/`android/build/` no git como erro. Testes novos: `relatorio_clientes_test.dart`, `config_sla_test.dart`. |
 | 07 | 07/11/2026 | `c7554c0` | **Gatilho da apólice:** % padrão em Configurações (70%); gatilho efetivo = contrato ou % × valor da apólice (fim do R$ 0,01). Cadastro da apólice com valores em R$, gatilho sugerido e editável, e **correção do bug que inflava valor/gatilho ao salvar sem redigitar**. Apólice clicável abre visualização (modo leitura + "Editar"). **Top 10 de risco revisado:** gatilho efetivo, só sinistros da vigência e não cancelados/negados, % sem casas decimais; abertura do sinistro usa a mesma regra no "uso atual". Dashboard deixa de apontar "Gatilho faltando" quando há valor da apólice. Reaplica a limpeza do git da Etapa 06 (não tinha sido aplicada). |
 | 06 | 07/11/2026 | `c489e4b` | **Botão laranja "Nova Assistência"** de volta na lista de Assistências, abrindo o modal padrão Veicular/Residencial — agora um componente único com o Dashboard (`assist_tipo_picker.dart`). No Dashboard, o "Cancelar" desse modal fechava duas telas (podia fechar o app no Android); agora fecha só o modal. **Limpeza do git:** `node_modules/` (≈15 mil arquivos) e `android/build/` (cache) saem do repositório e entram no `.gitignore`. |
@@ -705,6 +727,7 @@ apolices: [
 - [x] Listas com filtro "Em curso" (padrão) e "Todos" de verdade; carregamento só do que está em curso (Etapa 05)
 - [x] Gatilho da apólice com % padrão configurável, sugestão no cadastro, visualização da apólice e Top 10 de risco revisado (Etapa 07)
 - [x] Apólice clicável no Detalhes do Cliente, SLA de RCO/Empresarial e relatório de clientes para auditoria (Etapa 08)
+- [x] Recomendação do cliente unificada pelo uso do gatilho; botões "Exportar relatório" e "Importar contrato" com texto (Etapa 09)
 
 ### 🔐 Segurança (ver [Pendências de Segurança](#-pendências-de-segurança))
 - [ ] 🔴 S1 — Trocar token do Telegram e tirar o arquivo do git
@@ -720,8 +743,9 @@ apolices: [
 - [ ] Relatórios: separar segurado × terceiros nos gráficos de valor/sinistralidade (os dados já existem em `valor_segurado` / `valor_terceiros`)
 - [ ] Danos materiais / corporais com lançamentos próprios (hoje o lançamento é do segurado ou de um terceiro de veículo)
 - [ ] Detalhe do sinistro, próximos passos de harmonia (avaliados na Etapa 04, deixados para depois): mesma ordem de cards da abertura (Anexos em card próprio), modo edição no estilo da planilha (rótulo em cima, caixa cinza), cores/ícones dos cards iguais aos da abertura
-- [ ] Tirar `android/build/` e `node_modules/` do git (entregue na Etapa 06 e de novo na 07; **aplicar na Etapa 08** — o verificador agora acusa ✗)
-- [ ] Gatilho: avaliar vincular automaticamente à apólice os sinistros antigos sem `apolice_id` (cliente + ramo + data na vigência)
+- [x] Tirar `android/build/` e `node_modules/` do git (aplicado na Etapa 08)
+- [ ] Gatilho: vincular de vez (gravar `apolice_id`) os sinistros antigos sem vínculo — a recomendação (Etapa 09) já liga por ramo + data só no cálculo; o Top 10 de risco ainda não
+- [ ] Card da lista de clientes: "Vigência" mostra o fim da apólice que vence primeiro, mesmo já vencida — mostrar a da apólice vigente
 - [ ] Escala: Dashboard e Relatórios com totais pré-calculados (hoje baixam todos os sinistros e assistências); listas com paginação do histórico se "Todos" ficar lento
 - [ ] **Confirmar estrutura de apólices** com cliente
 - [ ] **Testar SLA** com dados novos

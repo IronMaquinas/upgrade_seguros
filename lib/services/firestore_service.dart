@@ -13,6 +13,8 @@ import 'package:upgrade_seguros/models/workshop_model.dart';
 import 'package:uuid/uuid.dart';
 import '../models/client_model.dart';
 import '../models/claim_model.dart';
+import 'config_service.dart';
+import 'recomendacao_service.dart';
 import '../models/vehicle_model.dart';
 import '../models/claim_task_model.dart';
 import '../models/third_party_model.dart'; // Adicionado, se estiver faltando
@@ -1392,37 +1394,24 @@ class FirestoreService {
   }
   
   // --- AJUSTES E ATUALIZAÇÕES ---
+  // Etapa 09: grava a recomendação pela regra única (uso do gatilho da pior
+  // apólice vigente — lib/utils/recomendacao_cliente.dart). Chamado ao encerrar
+  // um sinistro. As telas recalculam ao abrir; o campo gravado é só referência.
   Future<void> atualizarRecomendacaoManutencao(String clientId) async {
     final clientDoc = await getClientesCollection().doc(clientId).get();
     if (!clientDoc.exists) throw Exception('Cliente não encontrado.');
 
     final client = Client.fromMap(clientDoc.data()!)..id = clientDoc.id;
-    final valorApoliceTotal = client.valorTotalApolicesAtivas;  // ← MUDA
-    if (valorApoliceTotal <= 0) return;
-
     final sinistrosSnapshot = await getSinistrosCollection()
         .where('id_cliente', isEqualTo: clientId)
         .get();
-
-    double soma = sinistrosSnapshot.docs.fold<double>(
-      0.0,
-      (total, doc) => total + (doc.data()['valor_total_sinistro'] ?? 0.0).toDouble(),
-    );
-
-    final percentual = soma / valorApoliceTotal;  // ← MUDA
-    String recomendacao;
-    if (percentual >= 1.0) {
-      recomendacao = 'Crítico';
-    } else if (percentual >= 0.75) {
-      recomendacao = 'Atenção';
-    } else if (percentual >= 0.5) {
-      recomendacao = 'Bom';
-    } else {
-      recomendacao = 'Ótimo';
-    }
+    final sinistros = sinistrosSnapshot.docs
+        .map((doc) => Claim.fromMap(doc.data())..id = doc.id)
+        .toList();
+    final percentual = await ConfigService().getPercentualGatilho();
 
     await getClientesCollection().doc(clientId).update({
-      'recomendacao_manutencao': recomendacao,
+      'recomendacao_manutencao': recomendarCliente(client, sinistros, percentual).rotulo,
     });
   }
 

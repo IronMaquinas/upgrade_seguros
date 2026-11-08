@@ -4,13 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import '../models/client_model.dart';
-import '../models/claim_model.dart';
 import '../services/firestore_service.dart';
 import '../services/auth_service.dart';
 import '../screens/client_detail_screen.dart';
 import '../screens/client_form_screen.dart';
+import '../services/config_service.dart';
+import '../services/recomendacao_service.dart';
 import '../services/relatorio_clientes_pdf.dart';
 import '../utils/relatorio_clientes.dart';
+import '../widgets/recomendacao_chip.dart';
 
 class ClientListScreen extends StatefulWidget {
   const ClientListScreen({super.key, this.onNavigate});
@@ -61,13 +63,12 @@ class _ClientListScreenState extends State<ClientListScreen> {
     try {
       final clients = await _firestoreService.getClients(userId);
       final claims = await _firestoreService.getClaims();
+      final percentualGatilho = await ConfigService().getPercentualGatilho();
 
       for (var client in clients) {
         final clientClaims = claims.where((claim) => claim.idCliente == client.id).toList();
-        client.recomendacaoManutencao = calcularRecomendacaoManutencao(
-          client.valorTotalApolicesAtivas,
-          clientClaims,
-        );
+        // Etapa 09: regra única (uso do gatilho da pior apólice vigente).
+        client.recomendacaoManutencao = recomendarCliente(client, clientClaims, percentualGatilho).rotulo;
         client.totalSinistrosAcionados = clientClaims.length;
       }
 
@@ -107,36 +108,8 @@ class _ClientListScreenState extends State<ClientListScreen> {
 
   // ─── Helpers de UI ────────────────────────────────────────────────
 
-  String calcularRecomendacaoManutencao(double valorApolice, List<Claim> claims) {
-    final totalSinistros = claims.fold<double>(0.0, (sum, c) => sum + c.valorTotalSinistro);
-    if (valorApolice <= 0) return 'Não recomendado';
-
-    final percentual = totalSinistros / valorApolice;
-    if (percentual < 0.5) return 'Ótimo';
-    if (percentual >= 0.5 && percentual < 0.75) return 'Regular';
-    if (percentual >= 0.75 && percentual < 1.0) return 'Atenção';
-    return 'Não recomendado';
-  }
-
-  Color _getRecommendationColor(String recommendation) {
-    switch (recommendation) {
-      case 'Ótimo': return Colors.green.shade100;
-      case 'Regular': return Colors.amber.shade100;
-      case 'Atenção': return Colors.orange.shade100;
-      case 'Não recomendado': return Colors.red.shade100;
-      default: return Colors.grey.shade100;
-    }
-  }
-
-  Color _getRecommendationTextColor(String recommendation) {
-    switch (recommendation) {
-      case 'Ótimo': return Colors.green.shade900;
-      case 'Regular': return Colors.amber.shade900;
-      case 'Atenção': return Colors.orange.shade900;
-      case 'Não recomendado': return Colors.red.shade900;
-      default: return Colors.grey.shade900;
-    }
-  }
+  // Etapa 09: a recomendação e as cores do selo vêm de
+  // lib/services/recomendacao_service.dart e lib/widgets/recomendacao_chip.dart.
 
   // ─── Widgets de Card ─────────────────────────────────────────────
 
@@ -222,9 +195,9 @@ class _ClientListScreenState extends State<ClientListScreen> {
                     client.recomendacaoManutencao,
                     style: const TextStyle(fontSize: 12),
                   ),
-                  backgroundColor: _getRecommendationColor(client.recomendacaoManutencao),
+                  backgroundColor: corFundoRecomendacao(client.recomendacaoManutencao),
                   labelStyle: TextStyle(
-                    color: _getRecommendationTextColor(client.recomendacaoManutencao),
+                    color: corTextoRecomendacao(client.recomendacaoManutencao),
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -321,10 +294,14 @@ class _ClientListScreenState extends State<ClientListScreen> {
             )
           else
             PopupMenuButton<String>(
-              icon: const Icon(Icons.file_download_outlined),
-              tooltip: 'Exportar relatório de clientes',
+              tooltip: 'Exportar relatório de clientes (CSV ou PDF)',
               enabled: _filteredClients.isNotEmpty,
               onSelected: _exportarRelatorio,
+              // Etapa 09: texto junto do ícone, para o usuário saber o que é.
+              child: _BotaoComTexto(
+                icone: Icons.file_download_outlined,
+                texto: MediaQuery.of(context).size.width < 600 ? 'Exportar' : 'Exportar relatório',
+              ),
               itemBuilder: (_) => const [
                 PopupMenuItem(
                   value: 'csv',
@@ -438,6 +415,36 @@ class _ClientListScreenState extends State<ClientListScreen> {
         tooltip: 'Cadastrar novo cliente',
         backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
+      ),
+    );
+  }
+}
+
+/// Etapa 09: ícone + texto na barra superior (o PopupMenuButton cuida do clique).
+class _BotaoComTexto extends StatelessWidget {
+  final IconData icone;
+  final String texto;
+  const _BotaoComTexto({required this.icone, required this.texto});
+
+  @override
+  Widget build(BuildContext context) {
+    final cor = IconTheme.of(context).color ?? const Color(0xFF1A1A2E);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: cor.withOpacity(0.35)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icone, size: 20, color: cor),
+            const SizedBox(width: 6),
+            Text(texto, style: TextStyle(color: cor, fontSize: 14, fontWeight: FontWeight.w500)),
+          ],
+        ),
       ),
     );
   }
