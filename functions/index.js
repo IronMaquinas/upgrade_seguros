@@ -82,6 +82,9 @@ exports.uploadFile = functions.https.onRequest(async (request, response) => {
 const { verificarAssistenciasAtradasTelegram } = require("./notificacoes-telegram");
 exports.verificarAssistenciasAtradasTelegram = verificarAssistenciasAtradasTelegram;
 
+// Etapa 12: converte vídeos dos sinistros para MP4 720p depois do envio
+exports.converterVideo = require('./converter-video').converterVideo;
+
 // ✅ ✅ ✅ ADICIONE ESTA NOVA FUNÇÃO
 exports.deleteFiles = functions.https.onRequest(async (request, response) => {
   cors(request, response, async () => {

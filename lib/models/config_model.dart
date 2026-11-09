@@ -1,5 +1,6 @@
 // lib/models/config_model.dart
 import '../utils/gatilho.dart';
+import '../utils/videos.dart';
 
 class AppConfig {
   String id; // sempre 'config'
@@ -22,6 +23,10 @@ class AppConfig {
   // traz o valor (padrão 70%).
   double percentualGatilhoPadrao;
 
+  // Etapa 12: limites de vídeo do sinistro (pensados para variar por plano)
+  int videoMaxMb;
+  int videosPorSinistro;
+
   // Etapa 08: SLA de sinistro (dias) por ramo — TODOS os ramos do sistema, na
   // ordem da tela de Configurações. Ramo novo entra aqui com o seu padrão; quem
   // já tem o documento salvo recebe o ramo novo com este valor até alterar.
@@ -35,6 +40,9 @@ class AppConfig {
     'Empresarial': 10,
     'Vida': 10,
   };
+
+  /// Etapa 12
+  LimitesVideo get limitesVideo => LimitesVideo(maxMb: videoMaxMb, maxPorSinistro: videosPorSinistro);
 
   /// Os sinistros gravam o ramo "Vidas"; o SLA sempre foi salvo como "Vida".
   static String chaveSlaRamo(String ramo) => ramo == 'Vidas' ? 'Vida' : ramo;
@@ -63,6 +71,8 @@ class AppConfig {
     this.notificacaoAtrasoMinimo = 30,
     this.notificacaoTelegramChatIds = const [],
     this.percentualGatilhoPadrao = 70.0,
+    this.videoMaxMb = LimitesVideo.padraoMaxMb,
+    this.videosPorSinistro = LimitesVideo.padraoMaxPorSinistro,
   });
 
   Map<String, dynamic> toMap() {
@@ -80,6 +90,8 @@ class AppConfig {
       'notificacaoAtrasoMinimo': notificacaoAtrasoMinimo,
       'notificacaoTelegramChatIds': notificacaoTelegramChatIds,
       'percentualGatilhoPadrao': percentualGatilhoPadrao,
+      'videoMaxMb': videoMaxMb,
+      'videosPorSinistro': videosPorSinistro,
     };
   }
 
@@ -102,6 +114,8 @@ class AppConfig {
         map['notificacaoTelegramChatIds'] ?? [],
       ),
       percentualGatilhoPadrao: GatilhoApolice.normalizarPercentual(map['percentualGatilhoPadrao'] as num?),
+      videoMaxMb: LimitesVideo.normalizarMb(map['videoMaxMb'] as num?),
+      videosPorSinistro: LimitesVideo.normalizarQuantidade(map['videosPorSinistro'] as num?),
     );
   }
 }

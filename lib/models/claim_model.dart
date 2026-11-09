@@ -12,6 +12,7 @@ import 'package:upgrade_seguros/models/workshop_model.dart';
 import 'package:upgrade_seguros/models/bodily_injury_model.dart';
 import 'package:upgrade_seguros/models/material_damage_model.dart';
 import 'package:upgrade_seguros/models/lancamento_model.dart';
+import 'package:upgrade_seguros/utils/videos.dart';
 
 // Enum para tipos de atendimento
 enum TipoAtendimento {
@@ -75,6 +76,8 @@ class Claim {
   DateTime? dataPrevisaoConclusao;
   List<String> fotosUrls;
   List<String> arquivosLaudosUrls;
+  /// Etapa 12: vídeos do sinistro (lib/utils/videos.dart)
+  List<VideoAnexo> videos;
   List<Map<String, dynamic>> historicoStatus;
   List<Map<String, dynamic>> anotacoes;
   List<ThirdParty> terceiros;
@@ -153,6 +156,7 @@ class Claim {
     required this.dataUltimaAtualizacao,
     this.fotosUrls = const [],
     this.arquivosLaudosUrls = const [],
+    this.videos = const [],
     this.historicoStatus = const [],
     this.anotacoes = const [],
     this.terceiros = const [],
@@ -270,6 +274,7 @@ class Claim {
       'data_previsao_conclusao': dataPrevisaoConclusao,
       'fotos_urls': fotosUrls,
       'arquivos_laudos_urls': arquivosLaudosUrls,
+      'videos': videos.map((v) => v.toMap()).toList(),
       'historico_status': historicoStatus,
       'anotacoes': anotacoes,
       'terceiros': terceiros.map((tp) => tp.toMap()).toList(),
@@ -359,6 +364,7 @@ class Claim {
       arquivosLaudosUrls: (map['arquivos_laudos_urls'] as List<dynamic>?)
               ?.map((url) => url.toString())
               .toList() ?? [],
+      videos: VideoAnexo.listaDe(map['videos']),
       historicoStatus: (map['historico_status'] as List<dynamic>?)
               ?.map((s) => s as Map<String, dynamic>)
               .toList() ?? [],

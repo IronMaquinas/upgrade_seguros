@@ -2,6 +2,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/config_model.dart';
 import '../utils/gatilho.dart';
+import '../utils/videos.dart';
 
 class ConfigService {
   final _db = FirebaseFirestore.instance;
@@ -52,6 +53,17 @@ class ConfigService {
       'percentualGatilhoPadrao': valor,
     });
     _percentualGatilhoCache = valor;
+  }
+
+  // Etapa 12: limites de vídeo do sinistro
+  Future<LimitesVideo> getLimitesVideo() async => (await getConfig()).limitesVideo;
+
+  Future<void> updateLimitesVideo({required int maxMb, required int porSinistro}) async {
+    await _ensureConfigExists();
+    await _db.collection(_configCollection).doc(_configDoc).update({
+      'videoMaxMb': LimitesVideo.normalizarMb(maxMb),
+      'videosPorSinistro': LimitesVideo.normalizarQuantidade(porSinistro),
+    });
   }
 
   // Atualizar SLA Sinistros

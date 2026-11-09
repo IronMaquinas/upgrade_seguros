@@ -29,6 +29,9 @@ import 'package:upgrade_seguros/utils/formatters.dart';
 import 'package:upgrade_seguros/widgets/notes_widget.dart';
 import 'package:upgrade_seguros/widgets/task_list_widget.dart';
 import 'package:upgrade_seguros/widgets/workshop_widget.dart';
+import 'package:upgrade_seguros/widgets/videos_sinistro.dart';
+import 'package:upgrade_seguros/services/config_service.dart';
+import 'package:upgrade_seguros/utils/videos.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import '../models/client_model.dart';
@@ -116,6 +119,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
   static const STATUS_CONCLUIDA = 'Concluída';
 
   String _nomeUsuarioLogado = 'Desconhecido'; 
+  LimitesVideo _limitesVideo = const LimitesVideo(); // Etapa 12
 
   bool _isStatusExterno(String status) {
     return [
@@ -173,6 +177,9 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     _loadClient();
     _listenToClaimUpdates();
     _loadNomeUsuario();
+    ConfigService().getLimitesVideo().then((l) {
+      if (mounted) setState(() => _limitesVideo = l);
+    }).catchError((_) {});
     _currentTerceiros = List.from(_currentClaim.terceiros); // Inicializa a lista
     _valorTotalSinistroController = TextEditingController(
     text: _currentClaim.valorTotalSinistro.toStringAsFixed(2));
@@ -1021,9 +1028,12 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
         );
       }).toList();
 
+      // Etapa 12: mesma compressão das outras telas (1024 px, JPG 50).
+      // Antes a foto subia no tamanho original.
+      final comprimidas = await ImageService().compressImages(xfiles);
       final urls = await _firestoreService.uploadSinistroFotos(
         _currentClaim.numeroSinistro,
-        xfiles,
+        comprimidas,
       );
 
       if (urls.isNotEmpty) {
@@ -3824,6 +3834,22 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                       icon: const Icon(Icons.add_a_photo),
                                       label: const Text('Adicionar Foto'),
                                     ),
+                                  const SizedBox(height: 16),
+
+                                  // 🎬 VÍDEOS — Etapa 12: tocam numa janela sobre esta tela.
+                                  GaleriaVideosSinistro(
+                                    documento: _currentClaim.id.isEmpty
+                                        ? null
+                                        : _firestoreService.getSinistrosCollection().doc(_currentClaim.id),
+                                    numeroSinistro: _currentClaim.numeroSinistro,
+                                    videos: _currentClaim.videos,
+                                    limites: _limitesVideo,
+                                    editando: _isEditing,
+                                    enviadoPor: _nomeUsuarioLogado != 'Desconhecido'
+                                        ? _nomeUsuarioLogado
+                                        : _authService.getUserEmail(),
+                                    onAlterado: (lista) => setState(() => _currentClaim.videos = lista),
+                                  ),
                                   const SizedBox(height: 16),
 
                                   // 📎 ARQUIVOS

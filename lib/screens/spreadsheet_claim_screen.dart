@@ -40,6 +40,9 @@ import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'package:upgrade_seguros/models/bodily_injury_model.dart';
 import 'package:upgrade_seguros/models/material_damage_model.dart';
 import 'package:upgrade_seguros/models/lancamento_model.dart';
+import 'package:upgrade_seguros/services/video_service.dart';
+import 'package:upgrade_seguros/utils/videos.dart';
+import 'package:upgrade_seguros/widgets/videos_sinistro.dart';
 import 'package:upgrade_seguros/utils/gatilho.dart';
 
  enum RelatoStep {
@@ -1230,6 +1233,16 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
     'Laudos / Boletins': false,
   };
   bool _isUploadingAnexos = false;
+
+  // Etapa 12: arquivo já enviado → URL. Antes, todo salvamento (inclusive o
+  // automático, a cada edição) comprimia e enviava as fotos de novo com nome
+  // novo, criando cópias no Storage. Agora cada arquivo sobe uma vez só.
+  final Map<XFile, String> _urlAnexoEnviado = {};
+
+  // Etapa 12: vídeos do sinistro
+  final List<VideoSelecionado> _videosPendentes = [];
+  final List<VideoAnexo> _videosEnviados = [];
+  final Map<VideoSelecionado, double> _progressoVideos = {};
   String _ramoSelecionadoLabel = 'Novo Sinistro';
   bool _usarHoje = false;
   bool _usarHojeAviso = false;
@@ -2509,6 +2522,10 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
           ];
         }
 
+        // Etapa 12: vídeos (envio direto ao Storage, com progresso)
+        await _enviarVideosPendentes(_numeroSinistroGerado!);
+        novoClaim.videos = List.of(_videosEnviados);
+
         await _firestoreService
             .getSinistrosCollection()
             .doc(_currentClaimId)
@@ -2533,6 +2550,10 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
             ...?anexosUrls['Laudos / Boletins'],
           ];
         }
+
+        // Etapa 12: vídeos (envio direto ao Storage, com progresso)
+        await _enviarVideosPendentes(_numeroSinistroGerado!);
+        novoClaim.videos = List.of(_videosEnviados);
 
         await _firestoreService
             .getSinistrosCollection()
@@ -2657,42 +2678,94 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
       if (entry.value.isEmpty) continue;
 
       final categoria = entry.key;
-      final arquivos = entry.value;
       final isImagem = categoria == 'Fotos do Sinistro';
+      // Etapa 12: só sobe o que ainda não foi enviado (ver _urlAnexoEnviado).
+      final arquivos = entry.value.where((xf) => !_urlAnexoEnviado.containsKey(xf)).toList();
 
       if (isImagem) {
-        final comprimidas = await ImageService().compressImages(arquivos);
-        final fUrls = await _firestoreService.uploadSinistroFotos(
-            numeroSinistro, comprimidas);
-        urls[categoria] = fUrls;
+        for (final xf in arquivos) {
+          final comprimida = await ImageService().compressImages([xf]);
+          final fUrls = await _firestoreService.uploadSinistroFotos(numeroSinistro, comprimida);
+          if (fUrls.isNotEmpty) _urlAnexoEnviado[xf] = fUrls.first;
+        }
       } else {
         // Usa os PlatformFile originais (com bytes no web) se disponíveis;
         // caso contrário, monta sem bytes (mobile com path válido)
-        final platformFiles = _platformFiles[categoria] ??
-          await Future.wait(arquivos.map((xf) async {
+        for (final xf in arquivos) {
+          PlatformFile? pf;
+          for (final f in _platformFiles[categoria] ?? const <PlatformFile>[]) {
+            if (f.name == xf.name) pf = f;
+          }
+          if (pf == null) {
             if (kIsWeb) {
               final bytes = await xf.readAsBytes();
-              return PlatformFile(
-                name: xf.name,
-                size: bytes.length,
-                bytes: bytes,
-              );
+              pf = PlatformFile(name: xf.name, size: bytes.length, bytes: bytes);
             } else {
-              return PlatformFile(
-                name: xf.name,
-                path: xf.path,
-                size: 0,
-              );
+              pf = PlatformFile(name: xf.name, path: xf.path, size: 0);
             }
-          }));
-        if (platformFiles.isNotEmpty) {
-          final dUrls = await _firestoreService.uploadArquivosLaudos(
-              numeroSinistro, platformFiles);
-          urls[categoria] = dUrls;
+          }
+          final dUrls = await _firestoreService.uploadArquivosLaudos(numeroSinistro, [pf]);
+          if (dUrls.isNotEmpty) _urlAnexoEnviado[xf] = dUrls.first;
         }
       }
+      urls[categoria] = [
+        for (final xf in entry.value)
+          if (_urlAnexoEnviado[xf] != null) _urlAnexoEnviado[xf]!,
+      ];
     }
     return urls;
+  }
+
+  // ── Etapa 12: vídeos ────────────────────────────────────────────────────
+  Future<void> _escolherVideos() async {
+    final escolhidos = await escolherVideos(
+      context,
+      limites: _config.limitesVideo,
+      jaExistentes: _videosEnviados.length + _videosPendentes.length,
+    );
+    if (escolhidos.isEmpty) return;
+    setState(() => _videosPendentes.addAll(escolhidos));
+    _scheduleAutosave(); // sobe no próximo salvamento (se o sinistro já foi salvo)
+  }
+
+  Future<void> _enviarVideosPendentes(String numeroSinistro) async {
+    if (_videosPendentes.isEmpty) return;
+    final servico = VideoService();
+    for (final v in List.of(_videosPendentes)) {
+      if (mounted) setState(() => _progressoVideos[v] = 0);
+      try {
+        final anexo = await servico.enviar(
+          numeroSinistro: numeroSinistro,
+          video: v,
+          enviadoPor: _nomeUsuarioLogado != 'Desconhecido' ? _nomeUsuarioLogado : _authService.getUserEmail(),
+          aoProgredir: (p) {
+            if (mounted) setState(() => _progressoVideos[v] = p);
+          },
+        );
+        if (mounted) {
+          setState(() {
+            _videosEnviados.add(anexo);
+            _videosPendentes.remove(v);
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Erro ao enviar o vídeo ${v.nome}: $e')),
+          );
+        }
+      } finally {
+        _progressoVideos.remove(v);
+      }
+    }
+  }
+
+  Future<void> _removerVideoEnviado(VideoAnexo v) async {
+    try {
+      await VideoService().excluirArquivo(v);
+    } catch (_) {}
+    setState(() => _videosEnviados.remove(v));
+    _scheduleAutosave();
   }
 
   // Verifica se é imagem pelo nome do arquivo
@@ -4019,6 +4092,16 @@ Future<void> _uploadDocumentoMaterialDamage(int danoIndex) async {
               onDragExited: (cat, val) =>
                   setState(() => _dragOver[cat] = val),
               isImageFile: _isImageFile,
+              // Etapa 12: bloco de vídeos dentro de "Anexos e Documentos"
+              videos: PainelVideosAbertura(
+                enviados: _videosEnviados,
+                pendentes: _videosPendentes,
+                progresso: _progressoVideos,
+                limites: _config.limitesVideo,
+                onAdicionar: _escolherVideos,
+                onRemoverPendente: (v) => setState(() => _videosPendentes.remove(v)),
+                onRemoverEnviado: _removerVideoEnviado,
+              ),
             )),
 
             const SizedBox(height: 24),
@@ -5298,8 +5381,11 @@ class _AnexosCard extends StatelessWidget {
     required this.isImageFile,
     required this.expanded,
     required this.onToggle,
+    this.videos,
   });
 
+  /// Etapa 12: bloco "Vídeos do Sinistro" (mostrado depois das categorias).
+  final Widget? videos;
   final Map<String, List<XFile>> anexos;
   final Map<String, bool> dragOver;
   final bool isUploading;
@@ -5409,7 +5495,7 @@ class _AnexosCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
-                children: anexos.keys.map((categoria) {
+                children: <Widget>[...anexos.keys.map((categoria) {
                   final arquivos = anexos[categoria]!;
                   final isDragging = dragOver[categoria] ?? false;
                   final icon = _categoryIcons[categoria] ??
@@ -5545,7 +5631,9 @@ class _AnexosCard extends StatelessWidget {
                       ],
                     ),
                   );
-                }).toList(),
+                }),
+                  if (videos != null) videos!,
+                ],
               ),
             ),
           ],

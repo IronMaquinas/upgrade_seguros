@@ -16,6 +16,7 @@ import '../models/claim_model.dart';
 import 'config_service.dart';
 import 'recomendacao_service.dart';
 import '../utils/tarefas.dart';
+import '../utils/videos.dart';
 import '../models/vehicle_model.dart';
 import '../models/claim_task_model.dart';
 import '../models/third_party_model.dart'; // Adicionado, se estiver faltando
@@ -232,6 +233,11 @@ class FirestoreService {
       for (String url in arquivosUrls) {
         final path = _extractFilePathFromUrl(url);
         if (path != null) filePaths.add(path);
+      }
+
+      // ✅ Vídeos (Etapa 12) — o caminho já vem gravado no registro
+      for (final video in VideoAnexo.listaDe(claimData['videos'])) {
+        if (video.caminho.isNotEmpty) filePaths.add(video.caminho);
       }
 
       // ✅ Documentos de terceiros

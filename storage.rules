@@ -1,8 +1,20 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    // Fotos, documentos e laudos (como antes: só quem está logado).
+    // Etapa 12: vídeo só pode ser enviado para a pasta videos/ (regra abaixo).
     match /{allPaths=**} {
-      allow read, write: if request.auth != null;
+      allow read, delete: if request.auth != null;
+      allow create, update: if request.auth != null
+        && !request.resource.contentType.matches('video/.*');
+    }
+
+    // Etapa 12: vídeos dos sinistros — só vídeo e até 100 MB (teto de qualquer
+    // plano; o limite do plano, hoje 20 MB, é conferido no app).
+    match /videos/{todos=**} {
+      allow create, update: if request.auth != null
+        && request.resource.contentType.matches('video/.*')
+        && request.resource.size < 100 * 1024 * 1024;
     }
   }
 }

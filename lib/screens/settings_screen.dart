@@ -15,6 +15,7 @@ import 'package:upgrade_seguros/services/employee_service.dart';
 import 'package:upgrade_seguros/services/firestore_service.dart';
 import 'package:upgrade_seguros/utils/formatters.dart';
 import 'package:upgrade_seguros/utils/gatilho.dart';
+import 'package:upgrade_seguros/utils/videos.dart';
 import '../models/seguradora_model.dart';
 import '../services/seguradora_service.dart';
 import 'package:upgrade_seguros/models/pdf_signature_model.dart';
@@ -937,6 +938,10 @@ class _AbaAjustesState extends State<_AbaAjustes> {
   // Etapa 07: % padrão do gatilho da apólice
   final TextEditingController _percentualGatilhoController = TextEditingController();
   bool _salvandoPercentualGatilho = false;
+  // Etapa 12: limites de vídeo
+  final TextEditingController _videoMaxMbController = TextEditingController();
+  final TextEditingController _videosPorSinistroController = TextEditingController();
+  bool _salvandoLimitesVideo = false;
 
   final _corretoraService = CorretoraService();
   Corretora? _corretora;
@@ -961,6 +966,8 @@ class _AbaAjustesState extends State<_AbaAjustes> {
     _seguradoraTelefoneController.dispose();
     _seguradoraEmailController.dispose();
     _percentualGatilhoController.dispose();
+    _videoMaxMbController.dispose();
+    _videosPorSinistroController.dispose();
     super.dispose();
   }  
 
@@ -1421,6 +1428,8 @@ class _AbaAjustesState extends State<_AbaAjustes> {
     setState(() {
       _config = config;
       _percentualGatilhoController.text = GatilhoApolice.formatarPercentual(config.percentualGatilhoPadrao);
+      _videoMaxMbController.text = '${config.videoMaxMb}';
+      _videosPorSinistroController.text = '${config.videosPorSinistro}';
       _loading = false;
     });
   }
@@ -1453,6 +1462,34 @@ class _AbaAjustesState extends State<_AbaAjustes> {
       }
     } finally {
       if (mounted) setState(() => _salvandoPercentualGatilho = false);
+    }
+  }
+
+  // Etapa 12: salva os limites de vídeo do sinistro.
+  Future<void> _salvarLimitesVideo() async {
+    final mbValor = int.tryParse(_videoMaxMbController.text.trim());
+    final qtd = int.tryParse(_videosPorSinistroController.text.trim());
+    if (mbValor == null || mbValor < 1 || mbValor > LimitesVideo.tetoMb || qtd == null || qtd < 1 || qtd > 50) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tamanho entre 1 e ${LimitesVideo.tetoMb} MB e quantidade entre 1 e 50.')),
+      );
+      return;
+    }
+    setState(() => _salvandoLimitesVideo = true);
+    try {
+      await _configService.updateLimitesVideo(maxMb: mbValor, porSinistro: qtd);
+      final config = await _configService.getConfig();
+      if (!mounted) return;
+      setState(() => _config = config);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('✅ Vídeos: até $mbValor MB cada, $qtd por sinistro')),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _salvandoLimitesVideo = false);
     }
   }
 
@@ -1628,6 +1665,74 @@ class _AbaAjustesState extends State<_AbaAjustes> {
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.check_circle, color: Color(0xFF2E7D32)),
                   onPressed: _salvandoPercentualGatilho ? null : _salvarPercentualGatilho,
+                ),
+              ],
+            ),
+          ),
+
+          // Etapa 12: limites de vídeo do sinistro
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('🎬 Vídeos do sinistro', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Tamanho máximo de cada vídeo e quantos vídeos cada sinistro pode ter. O vídeo do WhatsApp '
+                        'tem até 16 MB. Depois do envio, o vídeo é convertido para 720p (fica menor).',
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 90,
+                  child: TextField(
+                    controller: _videoMaxMbController,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      suffixText: 'MB',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onSubmitted: (_) => _salvarLimitesVideo(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 100,
+                  child: TextField(
+                    controller: _videosPorSinistroController,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      suffixText: 'vídeos',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onSubmitted: (_) => _salvarLimitesVideo(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: 'Salvar',
+                  icon: _salvandoLimitesVideo
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.check_circle, color: Color(0xFF2E7D32)),
+                  onPressed: _salvandoLimitesVideo ? null : _salvarLimitesVideo,
                 ),
               ],
             ),

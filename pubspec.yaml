@@ -40,6 +40,7 @@ dependencies:
   local_auth: ^2.3.0
   flutter_secure_storage: ^9.2.4
   url_launcher: ^6.3.2
+  video_player: ^2.9.2  # Etapa 12: tocar os vídeos do sinistro dentro da tela
   font_awesome_flutter: ^10.8.0
   file_picker: ^10.2.0
   printing: ^5.11.0

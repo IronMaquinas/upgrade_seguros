@@ -2,7 +2,7 @@
 
 > Plataforma web/mobile para corretoras de seguros gerenciarem sinistros, assistências, clientes, tarefas e métricas de desempenho em tempo real.
 
-**Versão do documento:** Etapa 11 (GitHub `9159bd1` = Etapas 01–10)
+**Versão do documento:** Etapa 12 (GitHub `c348350` = Etapas 01–11)
 **Última atualização:** 08/11/2026
 **Status:** app em uso; ciclo de entregas com verificação por md5 em andamento. Etapa 02: terceiros identificados por personagem (proprietário / motorista / contato) e **histórico de valores do sinistro** (lançamentos com nota fiscal, segurado + terceiros). Pendências de segurança abertas — ver [🔐 Pendências de Segurança](#-pendências-de-segurança).
 
@@ -341,14 +341,27 @@ Concluído [dataConclusao = Timestamp.now()] / Cancelado
 
 | Categoria | Formatos | Compressão |
 |---|---|---|
-| Fotos da Ocorrência | JPG, PNG, GIF, WEBP | Sim (quality 50, maxWidth 1024) — mobile e web |
+| Fotos da Ocorrência | JPG, PNG, GIF, WEBP | Sim (quality 50, maxWidth 1024) — mobile e web; no detalhe do sinistro desde a Etapa 12 |
 | Documentos / Laudos | PDF, DOC, DOCX, qualquer | Não |
+| **Vídeos do Sinistro** (Etapa 12) | MP4, MOV, M4V, 3GP, WEBM | No servidor: MP4 720p H.264 (Cloud Function `converterVideo`) |
 
 - Upload via clique ou **drag & drop**
 - Sanitização de nome (remove `# ? & % espaços`)
 - Armazenamento: Firebase Storage
 - Paths: `assistencias/{numero}/fotos/` e `/laudos/`
 - Web: compressão via pacote `image` (sem dependência de flutter_image_compress)
+- **Abertura do sinistro (Etapa 12):** cada anexo sobe **uma vez só** (`_urlAnexoEnviado`). Antes, todo salvamento — inclusive o automático a cada edição — comprimia e enviava as fotos de novo com nome novo, duplicando arquivos no Storage.
+
+### Vídeos do sinistro (Etapa 12)
+- **Onde:** abertura (dentro de "Anexos e Documentos", bloco "Vídeos do Sinistro") e detalhe ("Vídeos da Ocorrência", no modo edição para adicionar/excluir).
+- **Limites** (Configurações → "🎬 Vídeos do sinistro", em `app_config/config`): `videoMaxMb` (padrão **20 MB** — o vídeo do WhatsApp tem até 16 MB) e `videosPorSinistro` (padrão **5**). Pensados para variar por plano. Teto absoluto de 100 MB nas regras do Storage.
+- **Envio direto ao Storage** pelo SDK (`lib/services/video_service.dart`), com progresso — a Function `uploadFile` (base64 por HTTP) tem limite de ~10 MB e não serve para vídeo. Bucket explícito `upgrade-seguros.firebasestorage.app` (`Videos.bucket`): o `firebase_options.dart` ainda tem o nome antigo `appspot.com`.
+- **Caminho:** `videos/sinistros/{nº}/{data}_{nome}`. Registro no sinistro: campo `videos` = lista de `{url, caminho, nome, tamanho_bytes, enviado_em, enviado_por}` (`VideoAnexo`, `lib/utils/videos.dart`). O tamanho fica guardado para a futura medição por plano.
+- **Conversão:** `functions/converter-video.js` (gatilho de Storage, 2 GiB, 9 min) converte para MP4 720p (lado menor ≤ 720 px, CRF 28, AAC 96k, faststart) e grava por cima mantendo o token — o link salvo continua valendo. Marca `convertido=sim|falhou`. Se o original já é MP4 e a conversão não ficar menor, mantém o original. Resolve o .mov (HEVC) do iPhone, que não toca no Chrome.
+- **Assistir:** `video_player` numa janela sobre a tela (play/pausa, barra de tempo, som). Na abertura, toca o arquivo local antes de enviar. `lib/widgets/videos_sinistro.dart`.
+- **No detalhe**, adicionar/excluir grava direto no documento (`arrayUnion`/`arrayRemove`) e exclui o arquivo do Storage. Excluir o sinistro apaga os vídeos.
+- **Arquivamento:** `storage-lifecycle.json` — vídeos com mais de 180 dias vão para **Coldline** (ativar uma vez com `gcloud storage buckets update gs://upgrade-seguros.firebasestorage.app --lifecycle-file=storage-lifecycle.json` ou pelo console do Cloud Storage → bucket → Ciclo de vida).
+- **Regras do Storage** (`storage.rules`): vídeo só na pasta `videos/`, só logado, até 100 MB; demais pastas como antes.
 
 ---
 
@@ -583,6 +596,7 @@ Lista de clientes → filtro por **recomendação** (seletor ao lado da busca, c
 |---|---|---|
 | `uploadFile` | HTTP | Recebe base64, salva no Storage, retorna URL pública |
 | `deleteFiles` | HTTP | Remove array de paths do Storage |
+| `converterVideo` | Storage (arquivo finalizado em `videos/`) | Etapa 12: converte para MP4 720p no mesmo caminho (ffmpeg-static) |
 | `verificarAssistenciasAtradasTelegram` | Agendada (a cada 10 min) | Lê `app_config/config` e avisa no Telegram as assistências com SLA atrasado, respeitando horário configurado |
 
 > Storage URLs são públicas (`makePublic()`). Para produção com dados sensíveis, considerar URLs assinadas com expiração (ver Pendências de Segurança, item S6).
@@ -660,6 +674,7 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 
 | Etapa | Data | Base | O que mudou |
 |---|---|---|---|
+| 12 | 08/11/2026 | `c348350` | **Vídeos do sinistro** na abertura e no detalhe: limites configuráveis (20 MB, 5 por sinistro), envio direto ao Storage com progresso, player na própria tela, conversão para MP4 720p no servidor (`converterVideo`), arquivamento em Coldline depois de 180 dias, regras do Storage para vídeo. **Fotos:** abertura não envia mais as mesmas fotos a cada salvamento automático (duplicava no Storage); foto adicionada no detalhe passa a ser comprimida. Teste novo: `videos_test.dart`. Pacotes novos: `video_player` (app), `ffmpeg-static` (Functions). |
 | 11 | 08/11/2026 | `9159bd1` | **Busca de Sinistros** também por terceiros (proprietário, motorista, contato, registro na seguradora deles), proprietário/condutor do veículo segurado e contato do segurado; sem acento, várias palavras, telefone sem máscara (`lib/utils/busca.dart`). **Filtro de recomendação** da lista de clientes vira seletor no padrão dos filtros de Sinistros, ao lado da busca. **Sinistralidade Mensal** recalculada (sinistros ocorridos ÷ prêmio ganho), com linha acumulada e linha do gatilho (`lib/utils/sinistralidade.dart`). Testes novos: `busca_test.dart`, `sinistralidade_test.dart`. |
 | 10 | 08/11/2026 | `44f5c8f` | **Top 10 de risco** com a regra da recomendação (vigentes, sem vínculo por ramo + data) e os mesmos nomes. **Lista de clientes:** filtro por recomendação ligado à exportação, que passa a trazer recomendação, uso do gatilho e contato (nome, telefone, e-mail). **Tarefas:** ordenar Mais recente/Mais antiga; exportar agrupado por funcionário (CSV/PDF); `concluida_em` gravado ao concluir; "no prazo / fora do prazo" pela regra única (antes concluída no prazo com data vencida contava como fora); editar não troca mais o responsável; o filtro por funcionário pelo id passou a funcionar (o campo não vinha na lista). **Relatórios:** Tarefas por Funcionário (abertas, concluídas %, no prazo × fora). Testes novos: `tarefas_test.dart` (+1 em `relatorio_clientes_test.dart`). |
 | 09 | 08/11/2026 | `4d14169` | **Recomendação do cliente unificada pelo uso do gatilho** (pior apólice vigente; faixas 60/80/100%; sinistros sem vínculo ligados por ramo + data; "Sem apólice vigente" e "Apólice sem valor" em cinza; Detalhes mostra uso do gatilho e % do valor da apólice). Substitui 4 contas diferentes. Botões com texto: **"Exportar relatório"** na lista de clientes e **"Importar contrato (PDF)"** no cadastro. Teste novo: `recomendacao_cliente_test.dart`. |
@@ -751,6 +766,10 @@ apolices: [
 - [x] Recomendação do cliente unificada pelo uso do gatilho; botões "Exportar relatório" e "Importar contrato" com texto (Etapa 09)
 - [x] Top 10 de risco pela recomendação; filtro por recomendação + exportação com contato; tarefas com ordenação, exportação por funcionário, data de conclusão e prazo; tarefas por funcionário nos Relatórios (Etapa 10)
 - [x] Busca ampla de sinistros; filtro de recomendação no padrão visual; sinistralidade mensal por prêmio ganho (Etapa 11)
+- [x] Vídeos do sinistro com limite, conversão 720p, player na tela e arquivamento; fim das fotos duplicadas (Etapa 12)
+- [ ] Planos de armazenamento (bronze/prata/ouro ou por GB): medir uso por corretora (soma de `tamanho_bytes` / Storage) e aplicar `videoMaxMb`/`videosPorSinistro` por plano — depende do multi-tenant
+- [ ] `firebase_options.dart` com o bucket antigo (`appspot.com`): regenerar com `flutterfire configure` (hoje só os vídeos usam o SDK do Storage, com o bucket fixo)
+- [ ] Assistências: vídeos (mesmo componente)
 - [ ] KPI "Sinistralidade (%)" do topo dos Relatórios e sinistralidade por seguradora com a mesma regra (prêmio ganho no período)
 
 ### 🔐 Segurança (ver [Pendências de Segurança](#-pendências-de-segurança))
