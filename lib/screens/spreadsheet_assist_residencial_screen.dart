@@ -433,6 +433,7 @@ class _SpreadsheetAssistResidencialScreenState
         'clientNome': _cliente?.nome ?? '',
         'clientCnpjCpf': _cliente?.cnpjCpf ?? '',
         'responsavelEmail': user?.email ?? '',
+        'responsavelId': user?.uid ?? '', // Etapa 14: sem isso o funcionário não via a tarefa no Dashboard
         'criado_em': FieldValue.serverTimestamp(),
         'tipo': 'agendamento',
       });
@@ -449,6 +450,7 @@ class _SpreadsheetAssistResidencialScreenState
         'clientNome': _cliente?.nome ?? '',
         'clientCnpjCpf': _cliente?.cnpjCpf ?? '',
         'responsavelEmail': user?.email ?? '',
+        'responsavelId': user?.uid ?? '', // Etapa 14: sem isso o funcionário não via a tarefa no Dashboard
         'criado_em': FieldValue.serverTimestamp(),
       });
     }

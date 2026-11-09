@@ -43,6 +43,9 @@ import 'dart:convert';
 import '../models/claim_task_model.dart';
 import '../models/machinery_model.dart';
 import 'package:upgrade_seguros/widgets/selectable_text_helper.dart';
+import 'package:upgrade_seguros/services/tarefas_evento_service.dart'; // Etapa 14
+import 'package:upgrade_seguros/utils/tarefas_evento.dart'; // Etapa 14
+import 'package:upgrade_seguros/widgets/tarefas_evento_dialog.dart'; // Etapa 14
 
 class ClaimDetailScreen extends StatefulWidget {
   final Claim claim;
@@ -383,9 +386,15 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     });
 
     // 🔥 4. CRIA TASK
+    // Etapa 14: a tarefa de contato anterior deste sinistro fica substituída.
+    await TarefasEventoService().concluirContatosAnteriores(
+      _currentClaim.id,
+      motivo: TarefasEvento.motivoSubstituida('status para "$newStatus"', DateTime.now()),
+    );
     final taskId = await _firestoreService.addTask(
       ClaimTask(
         id: '',
+        tipo: TarefasEvento.tipoContato,
         descricao: 'Informar status ao cliente: $newStatus',
         status: STATUS_ABERTA,
         prazo: dataPrevisao ?? DateTime.now().add(const Duration(days: 2)),
@@ -655,6 +664,35 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
 
               const SizedBox(height: 8),
 
+              // ☎️ Etapa 14: avisou por telefone/pessoalmente → conclui a tarefa
+              OutlinedButton.icon(
+                icon: const Icon(Icons.phone_in_talk_outlined),
+                label: const Text('Já informei por outro meio'),
+                onPressed: () async {
+                  Navigator.pop(context);
+                  try {
+                    await TarefasEventoService().concluir(
+                      [taskId],
+                      motivo: TarefasEvento.motivoOutroMeio,
+                      automatica: false,
+                    );
+                    if (mounted) {
+                      ScaffoldMessenger.of(this.context).showSnackBar(
+                        const SnackBar(content: Text('Tarefa concluída: cliente informado por outro meio')),
+                      );
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(this.context).showSnackBar(
+                        SnackBar(content: Text('Erro ao concluir a tarefa: $e')),
+                      );
+                    }
+                  }
+                },
+              ),
+
+              const SizedBox(height: 8),
+
               // ⚪ DEPOIS
               TextButton(
                 onPressed: () => Navigator.pop(context),
@@ -801,9 +839,15 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     });
 
     // 🔥 cria task
+    // Etapa 14: a tarefa de contato anterior deste sinistro fica substituída.
+    await TarefasEventoService().concluirContatosAnteriores(
+      _currentClaim.id,
+      motivo: TarefasEvento.motivoSubstituida('previsão', DateTime.now()),
+    );
     final taskId = await _firestoreService.addTask(
       ClaimTask(
         id: '',
+        tipo: TarefasEvento.tipoContato,
         descricao: 'Atualizar cliente: ${_currentClaim.statusAtual} (nova previsão)',
         status: STATUS_ABERTA,
         prazo: dataPrevisao ?? DateTime.now().add(const Duration(days: 2)),
@@ -1567,6 +1611,10 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
       ),
     );
     if (confirmar != true || !mounted) return;
+
+    // Etapa 14: tarefas abertas do sinistro (o funcionário escolhe quais concluir).
+    final seguir = await confirmarTarefasAoEncerrar(context, claimId: _currentClaim.id, rotulo: 'sinistro');
+    if (!seguir || !mounted) return;
 
     setState(() => _isLoading = true);
     try {

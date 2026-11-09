@@ -27,6 +27,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path/path.dart' as p;
 import '../services/image_services.dart';
 import 'package:upgrade_seguros/widgets/selectable_text_helper.dart';
+import 'package:upgrade_seguros/utils/filtro_status.dart'; // Etapa 14
+import 'package:upgrade_seguros/widgets/tarefas_evento_dialog.dart'; // Etapa 14
 
 class AssistDetailScreen extends StatefulWidget {
   final String assistId;
@@ -784,6 +786,7 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                   'clientNome': _assist!.clientNome,
                   'clientCnpjCpf': _assist!.clientCnpjCpf,
                   'responsavelEmail': _authService.getUserEmail(),
+                  'responsavelId': _authService.getUserId(), // Etapa 14
                   'criado_em': FieldValue.serverTimestamp(),
                   'tipo': 'reagendamento',
                 });
@@ -808,6 +811,23 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
 
   Future<void> _salvar({bool fechar = true, bool notificarWhatsApp = false, bool resetarEdicao = true}) async {
     if (_assist == null) return;
+
+    // Etapa 14: ao concluir/cancelar, mostra as tarefas abertas da assistência
+    // (o funcionário escolhe quais concluir). "Voltar" desfaz a troca de status.
+    final novoStatus = _statusCtrl.text;
+    if (!FiltroStatus.estaEmCurso(novoStatus) && FiltroStatus.estaEmCurso(_assist!.statusAtual)) {
+      final seguir = await confirmarTarefasAoEncerrar(
+        context,
+        claimId: _assist!.id,
+        rotulo: 'assistência',
+        acao: novoStatus == 'Cancelado' ? 'cancelar' : 'encerrar',
+      );
+      if (!mounted) return;
+      if (!seguir) {
+        setState(() => _statusCtrl.text = _assist!.statusAtual);
+        return;
+      }
+    }
 
     setState(() => _isSaving = true);
     try {

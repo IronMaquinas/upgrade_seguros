@@ -212,9 +212,13 @@ void _diagnosticarContratos() {
       if (role == 'admin') {
         _tasks = allTasks;
       } else {
-        _tasks = allTasks
-            .where((t) => t['responsavelId'] == userId)
-            .toList();
+        // Etapa 14: tarefas de assistência antigas não têm responsavelId — usa o e-mail.
+        final email = _authService.getUserEmail().toLowerCase();
+        _tasks = allTasks.where((t) {
+          final id = t['responsavelId'] as String? ?? '';
+          final emailTarefa = (t['responsavelEmail'] as String? ?? '').toLowerCase();
+          return id == userId || (id.isEmpty && emailTarefa.isNotEmpty && emailTarefa == email);
+        }).toList();
       }
       if (mounted) setState(() {});
       //_verificarAlertas();

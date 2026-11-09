@@ -106,6 +106,9 @@ class TarefasFuncionariosCard extends StatelessWidget {
                             _corPercentual(g.percentualConcluidas)),
                         _info('No prazo', '${g.noPrazo(agora)}', const Color(0xFF2E7D32)),
                         _info('Fora do prazo', '${g.foraDoPrazo(agora)}', const Color(0xFFC62828)),
+                        // Etapa 14: concluídas pelo sistema (evento encerrado/excluído, contato substituído).
+                        if (g.encerradasPeloSistema > 0)
+                          _info('Pelo sistema', '${g.encerradasPeloSistema}', Colors.grey.shade700),
                         if (pNoPrazo != null)
                           _info('Cumprimento do prazo', '${pNoPrazo.toStringAsFixed(0)}%', _corPercentual(pNoPrazo)),
                       ],

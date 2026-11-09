@@ -17,6 +17,10 @@ class ClaimTask {
   /// Etapa 10: quando foi concluída (gravado a partir da Etapa 10).
   DateTime? concluidaEm;
 
+  /// Etapa 14: tipo da tarefa automática ('contato_cliente', 'agendamento',
+  /// 'reagendamento'); vazio = tarefa manual ou anterior à Etapa 14.
+  String tipo;
+
   ClaimTask({
     this.id = '',
     required this.descricao,
@@ -28,6 +32,7 @@ class ClaimTask {
     required this.responsavelEmail,
     required this.criadoEm,
     this.concluidaEm,
+    this.tipo = '',
   });
 
   Map<String, dynamic> toMap() {
@@ -41,6 +46,7 @@ class ClaimTask {
       'responsavelEmail': responsavelEmail,
       'criado_em': Timestamp.fromDate(criadoEm),
       if (concluidaEm != null) 'concluida_em': Timestamp.fromDate(concluidaEm!),
+      if (tipo.isNotEmpty) 'tipo': tipo,
     };
   }
 
@@ -56,6 +62,7 @@ class ClaimTask {
       responsavelEmail: map['responsavelEmail'] ?? '',
       criadoEm: (map['criado_em'] as Timestamp?)?.toDate() ?? DateTime.now(),
       concluidaEm: (map['concluida_em'] as Timestamp?)?.toDate(),
+      tipo: map['tipo'] as String? ?? '',
     );
   }
 }

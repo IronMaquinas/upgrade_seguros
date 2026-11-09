@@ -402,6 +402,11 @@ class _TaskListWidgetState extends State<TaskListWidget> {
                                   'concluida_em': FieldValue.serverTimestamp(),
                                 if (isEditing && statusValue != 'Concluída' && rawStatus == 'Concluída')
                                   'concluida_em': FieldValue.delete(),
+                                // Etapa 14: mudou o status à mão → não é mais "concluída pelo sistema".
+                                if (isEditing && statusValue != rawStatus) ...{
+                                  'conclusao_automatica': FieldValue.delete(),
+                                  'motivoConclusao': FieldValue.delete(),
+                                },
                                 if (!isEditing) ...{
                                   'criado_em': FieldValue.serverTimestamp(),
                                   'numeroSinistro': widget.numeroSinistro,

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:upgrade_seguros/models/claim_model.dart';
 import 'package:upgrade_seguros/services/notification_service.dart';
@@ -13,6 +14,9 @@ class SlaMonitorService {
   List<Claim> _assistencias = [];
   List<Map<String, dynamic>> _tasks = [];
   final Set<String> _alertadosRecentemente = {};
+  // Etapa 14: controle do aviso de tarefas atrasadas (um aviso agrupado).
+  int _ultimoTotalAtrasadas = 0;
+  DateTime? _ultimoAvisoTarefas;
 
   bool get isRunning => _timer != null;
 
@@ -53,7 +57,12 @@ class SlaMonitorService {
 
   Future<void> _fetchTasks() async {
     try {
-      final snapshot = await FirebaseFirestore.instance.collection('tasks').get();
+      // Etapa 14: só as abertas — antes lia TODAS as tarefas a cada 30 s
+      // (cada documento lido é cobrado pelo Firestore).
+      final snapshot = await FirebaseFirestore.instance
+          .collection('tasks')
+          .where('status', isNotEqualTo: 'Concluída')
+          .get();
       _tasks = snapshot.docs.map((doc) {
         final data = doc.data();
         data['id'] = doc.id;
@@ -98,23 +107,39 @@ class SlaMonitorService {
       }
     }
 
-    for (final t in _tasks) {
-      final prazo = t['prazo'] as DateTime?;
-      final status = t['status'] as String? ?? '';
-      final taskId = t['taskId'] as String? ?? '';
-      if (prazo == null || status == 'Concluída' || taskId.isEmpty) continue;
-      if (prazo.isBefore(agora)) {
-        final chave = '${taskId}_atrasada';
-        if (_alertadosRecentemente.contains(chave)) continue;
-        _alertadosRecentemente.add(chave);
+    // Etapa 14: o alerta de tarefa atrasada nunca disparava (procurava o campo
+    // 'taskId', que não existe no documento — o id vem em 'id'). Ligado agora,
+    // mas sem enxurrada: UM aviso com o total de tarefas atrasadas de QUEM ESTÁ
+    // LOGADO, quando o total aumenta ou no máximo uma vez por hora.
+    final usuario = FirebaseAuth.instance.currentUser;
+    if (usuario != null) {
+      final emailUsuario = (usuario.email ?? '').toLowerCase();
+      final atrasadas = _tasks.where((t) {
+        final prazo = t['prazo'] as DateTime?;
+        final status = t['status'] as String? ?? '';
+        if (prazo == null || status == 'Concluída') return false;
+        final id = t['responsavelId'] as String? ?? '';
+        final email = (t['responsavelEmail'] as String? ?? '').toLowerCase();
+        final minha = id == usuario.uid || (id.isEmpty && email.isNotEmpty && email == emailUsuario);
+        return minha && agora.isAfter(DateTime(prazo.year, prazo.month, prazo.day, 23, 59, 59));
+      }).toList();
+
+      final total = atrasadas.length;
+      final ultimo = _ultimoAvisoTarefas;
+      final passouUmaHora = ultimo == null || agora.difference(ultimo).inMinutes >= 60;
+      if (total > 0 && (total > _ultimoTotalAtrasadas || passouUmaHora)) {
+        _ultimoAvisoTarefas = agora;
+        final primeira = atrasadas.first;
         _showAlert(
           titulo: '📋 Tarefa Atrasada!',
-          corpo: '${t['descricao'] ?? 'Tarefa'} — ${t['clientNome'] ?? ''} está fora do prazo.',
-          claimId: t['claimId'] as String? ?? '',
-          tipo: t['tipo'] as String? ?? 'sinistro',
+          corpo: total == 1
+              ? '${primeira['descricao'] ?? 'Tarefa'} está fora do prazo.'
+              : 'Você tem $total tarefas fora do prazo. Veja em Tarefas.',
+          claimId: primeira['claimId'] as String? ?? '',
+          tipo: primeira['tipo'] as String? ?? 'sinistro',
         );
-        Future.delayed(const Duration(seconds: 120), () => _alertadosRecentemente.remove(chave));
       }
+      _ultimoTotalAtrasadas = total;
     }
   }
 

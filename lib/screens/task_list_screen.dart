@@ -230,6 +230,8 @@ class _TaskListScreenState extends State<TaskListScreen> {
         responsavelEmail: task['responsavelEmail'] as String? ?? '',
         numeroAtendimento: task['numeroSinistro'] as String? ?? '',
         clienteNome: task['clientNome'] as String? ?? '',
+        encerradaPeloSistema: task['conclusaoAutomatica'] == true, // Etapa 14
+        motivoConclusao: task['motivoConclusao'] as String? ?? '', // Etapa 14
       );
 
   Future<void> _exportar(String formato) async {
@@ -311,6 +313,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
       // Etapa 10: concluída fora do prazo fica vermelha; sem data, cinza.
       if (situacao == Tarefas.foraDoPrazo) return Colors.red.shade400;
       if (situacao == Tarefas.semDataConclusao) return Colors.grey;
+      if (situacao == Tarefas.encerradaPeloSistema) return Colors.grey; // Etapa 14
       return Colors.green.shade400;
     }
 
@@ -516,6 +519,16 @@ class _TaskListScreenState extends State<TaskListScreen> {
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
+              // Etapa 14: por que foi concluída (pelo sistema ou "outro meio").
+              if ((task['motivoConclusao'] as String? ?? '').isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  (task['conclusaoAutomatica'] == true ? '🤖 ' : '') + (task['motivoConclusao'] as String),
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2,
+                ),
+              ],
               const SizedBox(height: 10),
               Row(
                 children: [

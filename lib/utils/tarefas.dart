@@ -10,6 +10,9 @@
 //  • Concluída: compara a data de conclusão (`concluida_em`) com o prazo.
 //    `concluida_em` só passou a ser gravado na Etapa 10 — tarefa concluída antes
 //    disso fica "Sem data de conclusão" (não dá para saber se foi no prazo).
+//  • Etapa 14: tarefa concluída PELO SISTEMA (evento encerrado/excluído,
+//    contato substituído por um mais novo, limpeza) fica "Encerrada pelo
+//    sistema" e não entra no "no prazo / fora do prazo" do funcionário.
 
 class TarefaResumo {
   final String id;
@@ -23,6 +26,12 @@ class TarefaResumo {
   final String numeroAtendimento;
   final String clienteNome;
 
+  /// Etapa 14: concluída pelo sistema (campo `conclusao_automatica`).
+  final bool encerradaPeloSistema;
+
+  /// Etapa 14: por que foi concluída (campo `motivoConclusao`), quando houver.
+  final String motivoConclusao;
+
   const TarefaResumo({
     this.id = '',
     this.descricao = '',
@@ -34,6 +43,8 @@ class TarefaResumo {
     this.responsavelEmail = '',
     this.numeroAtendimento = '',
     this.clienteNome = '',
+    this.encerradaPeloSistema = false,
+    this.motivoConclusao = '',
   });
 
   bool get concluida => status == Tarefas.concluida;
@@ -70,6 +81,9 @@ class ResumoFuncionario {
   int foraDoPrazo(DateTime agora) => _conta(Tarefas.foraDoPrazo, agora);
   int semData(DateTime agora) => _conta(Tarefas.semDataConclusao, agora) + _conta(Tarefas.semPrazo, agora);
 
+  /// Etapa 14: concluídas pelo sistema (fora da conta de prazo).
+  int get encerradasPeloSistema => tarefas.where((t) => t.concluida && t.encerradaPeloSistema).length;
+
   /// % no prazo entre as tarefas em que dá para saber (no prazo + fora do prazo).
   double? percentualNoPrazo(DateTime agora) {
     final n = noPrazo(agora), f = foraDoPrazo(agora);
@@ -84,10 +98,12 @@ class Tarefas {
   static const semDataConclusao = 'Sem data de conclusão';
   static const semPrazo = 'Sem prazo';
   static const semResponsavel = 'Sem responsável';
+  static const encerradaPeloSistema = 'Encerrada pelo sistema';
 
   static DateTime fimDoDia(DateTime d) => DateTime(d.year, d.month, d.day, 23, 59, 59, 999);
 
   static String situacaoPrazo(TarefaResumo t, {DateTime? agora}) {
+    if (t.concluida && t.encerradaPeloSistema) return encerradaPeloSistema;
     final prazo = t.prazo;
     if (prazo == null) return semPrazo;
     final limite = fimDoDia(prazo);

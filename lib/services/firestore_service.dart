@@ -23,6 +23,8 @@ import '../models/third_party_model.dart'; // Adicionado, se estiver faltando
 import '../models/transport_model.dart'; // Adicionado, se estiver faltando
 import 'package:upgrade_seguros/models/assist_sla_config_model.dart';
 import 'package:upgrade_seguros/utils/filtro_status.dart';
+import 'package:upgrade_seguros/services/tarefas_evento_service.dart'; // Etapa 14
+import 'package:upgrade_seguros/utils/tarefas_evento.dart'; // Etapa 14
 
 
 const String _cloudFunctionUrl = 'https://uploadfile-hwtlk2s4qq-uc.a.run.app';
@@ -208,6 +210,14 @@ class FirestoreService {
       final data = docSnapshot.data() as Map<String, dynamic>;
       await _deleteAllClaimFiles(numeroSinistro, data);
       await colecao.doc(claimId).delete();
+
+      // Etapa 14: as tarefas abertas do atendimento excluído são concluídas
+      // (antes ficavam órfãs: sumiam da tela de Tarefas, mas contavam nos
+      // Relatórios e no Dashboard). Não apaga: fica o histórico.
+      await TarefasEventoService().concluirTodasDoEvento(
+        claimId,
+        motivo: TarefasEvento.motivoExclusao(DateTime.now()),
+      );
 
     } catch (e) {
       print('Erro ao excluir sinistro: $e');
@@ -427,6 +437,9 @@ class FirestoreService {
       'status': newStatus,
       // Etapa 10: data de conclusão, para "no prazo / fora do prazo".
       'concluida_em': newStatus == 'Concluída' ? FieldValue.serverTimestamp() : FieldValue.delete(),
+      // Etapa 14: concluída/reaberta por uma pessoa → não é mais "pelo sistema".
+      'conclusao_automatica': FieldValue.delete(),
+      'motivoConclusao': FieldValue.delete(),
     });
   }
 
@@ -447,6 +460,8 @@ class FirestoreService {
         responsavelEmail: d['responsavelEmail'] as String? ?? '',
         numeroAtendimento: d['numeroSinistro'] as String? ?? '',
         clienteNome: d['clientNome'] as String? ?? '',
+        encerradaPeloSistema: d['conclusao_automatica'] == true, // Etapa 14
+        motivoConclusao: d['motivoConclusao'] as String? ?? '', // Etapa 14
       );
     }).toList();
   }
@@ -1420,6 +1435,8 @@ class FirestoreService {
         'clientCnpjCpf': claimData['client_cnpj_cpf'] ?? '',
         'numeroSinistro': claimData['numero_sinistro'] ?? '',
         'tipo': claimData['tipo'] ?? 'sinistro',  // ← para navegar certo
+        'conclusaoAutomatica': data['conclusao_automatica'] == true, // Etapa 14
+        'motivoConclusao': data['motivoConclusao'] ?? '', // Etapa 14
       });
     }
     return allTasks;

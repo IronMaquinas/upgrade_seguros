@@ -2,7 +2,7 @@
 
 > Plataforma web/mobile para corretoras de seguros gerenciarem sinistros, assistências, clientes, tarefas e métricas de desempenho em tempo real.
 
-**Versão do documento:** Etapa 13 (GitHub `4dbf6a6` = Etapas 01–12 + limite de vídeo em 100 MB)
+**Versão do documento:** Etapa 14 (GitHub `fa5b317` = Etapas 01–13)
 **Última atualização:** 08/11/2026
 **Status:** app em uso; ciclo de entregas com verificação por md5 em andamento. Etapa 02: terceiros identificados por personagem (proprietário / motorista / contato) e **histórico de valores do sinistro** (lançamentos com nota fiscal, segurado + terceiros). Pendências de segurança abertas — ver [🔐 Pendências de Segurança](#-pendências-de-segurança).
 
@@ -314,11 +314,23 @@ Concluído [dataConclusao = Timestamp.now()] / Cancelado
 | Status | Aberta / Pendente / Concluída |
 | `concluida_em` | Data/hora da conclusão (Etapa 10) |
 | Prazo | Data com alerta visual colorido |
-| Tipo | `agendamento` / `reagendamento` / manual |
+| Tipo | `agendamento` / `reagendamento` / `contato_cliente` (Etapa 14) / manual |
+| `motivoConclusao` | Por que foi concluída, quando não foi à mão (Etapa 14) |
+| `conclusao_automatica` | `true` = concluída pelo sistema (Etapa 14) |
 
 **Criação automática:**
 - Agendamento informado na abertura → tarefa `tipo: agendamento`
 - Reagendamento → conclui tarefa anterior, cria nova `tipo: reagendamento`
+- Sinistro → status "Aguardando Peças" / "Reparo em Andamento" ou "Atualizar previsão" → tarefa de contato com o cliente (`tipo: contato_cliente` desde a Etapa 14)
+
+**Ligação com o atendimento (Etapa 14)** — regras em `lib/utils/tarefas_evento.dart`, gravações em `lib/services/tarefas_evento_service.dart`, telas em `lib/widgets/tarefas_evento_dialog.dart`, teste `test/tarefas_evento_test.dart`:
+- **Encerrar o sinistro / concluir ou cancelar a assistência** → janela com as tarefas abertas do atendimento, todas marcadas; as marcadas são concluídas ("Concluída ao encerrar o sinistro em dd/mm/aaaa"). "Voltar" cancela o encerramento.
+- **Excluir o atendimento** → todas as tarefas abertas dele são concluídas ("Atendimento excluído em …"). Antes ficavam órfãs: sumiam da tela de Tarefas, mas contavam nos Relatórios e no Dashboard.
+- **Nova comunicação de status ou previsão do sinistro** → as tarefas de contato anteriores daquele sinistro são concluídas ("Substituída pela atualização de …").
+- **Janela "Comunicar cliente"** ganhou **"Já informei por outro meio"** (telefone, presencial): conclui a tarefa (conta como conclusão do funcionário).
+- **Configurações → 🧹 Tarefas esquecidas** (só admin): analisa e mostra a lista antes de concluir — tarefas abertas de atendimentos já encerrados, de atendimentos excluídos e contatos repetidos (fica o mais novo).
+- Concluída **pelo sistema** fica "Encerrada pelo sistema": não entra no "no prazo / fora do prazo" do funcionário (aparece como "Pelo sistema" nos Relatórios e com 🤖 + motivo na lista). Nada é apagado.
+- Tarefas de assistência passam a gravar `responsavelId` (antes só o e-mail — o funcionário não as via no Dashboard; o Dashboard agora também casa pelo e-mail).
 
 **Cores de prazo:**
 - 🟢 Verde — mais de 2 dias
@@ -438,7 +450,7 @@ Sistema salva em avaliacoes + atualiza claim + recalcula NPS do cliente
 - Solicita permissão ao abrir o dashboard
 - Verifica a cada 2 minutos
 - Dispara alerta se SLA vencido ou ≤15min restantes
-- Dispara alerta para tarefas atrasadas
+- Dispara alerta para tarefas atrasadas — desde a Etapa 14 de verdade (antes nunca disparava: procurava um campo que não existe): **um** aviso com o total de tarefas atrasadas de quem está logado, quando o total aumenta ou no máximo de hora em hora. O monitor passou a ler só as tarefas abertas (antes lia todas a cada 30 s).
 - `requireInteraction: true` — não some sem interação
 - Clique abre a ocorrência diretamente
 - Cache de 30min por alerta (evita spam)
@@ -676,6 +688,7 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 |---|---|---|---|
 | 12 | 08/11/2026 | `c348350` | **Vídeos do sinistro** na abertura e no detalhe: limites configuráveis (20 MB, 5 por sinistro), envio direto ao Storage com progresso, player na própria tela, conversão para MP4 720p no servidor (`converterVideo`), arquivamento em Coldline depois de 180 dias, regras do Storage para vídeo. **Fotos:** abertura não envia mais as mesmas fotos a cada salvamento automático (duplicava no Storage); foto adicionada no detalhe passa a ser comprimida. Teste novo: `videos_test.dart`. Pacotes novos: `video_player` (app), `ffmpeg-static` (Functions). |
 | 13 | 08/11/2026 | `4dbf6a6` | **Vídeos na abertura no mesmo desenho dos anexos** (rótulo "VÍDEOS DO SINISTRO", botão "+ Adicionar vídeos" com contorno, caixa cinza com arrastar e soltar). Regra do Storage aceita exatamente 100 MB. Teste de vídeos não depende mais do padrão de MB (que o Marcony passou de 20 para 100 no `4dbf6a6`). |
+| 14 | 09/11/2026 | `fa5b317` | **Tarefas ligadas ao atendimento:** ao encerrar o sinistro ou concluir/cancelar a assistência, o sistema mostra as tarefas abertas e conclui as marcadas; excluir o atendimento conclui as tarefas dele (antes ficavam órfãs e inflavam Relatórios/Dashboard); nova comunicação de status/previsão substitui o contato anterior; botão "Já informei por outro meio"; limpeza das tarefas esquecidas em Configurações (admin, com lista antes). Concluída pelo sistema não conta como atraso. Alerta de tarefa atrasada passa a funcionar (agrupado, do usuário logado) e o monitor lê só as abertas. Tarefas de assistência gravam o responsável. Teste novo: `tarefas_evento_test.dart`. |
 | 11 | 08/11/2026 | `9159bd1` | **Busca de Sinistros** também por terceiros (proprietário, motorista, contato, registro na seguradora deles), proprietário/condutor do veículo segurado e contato do segurado; sem acento, várias palavras, telefone sem máscara (`lib/utils/busca.dart`). **Filtro de recomendação** da lista de clientes vira seletor no padrão dos filtros de Sinistros, ao lado da busca. **Sinistralidade Mensal** recalculada (sinistros ocorridos ÷ prêmio ganho), com linha acumulada e linha do gatilho (`lib/utils/sinistralidade.dart`). Testes novos: `busca_test.dart`, `sinistralidade_test.dart`. |
 | 10 | 08/11/2026 | `44f5c8f` | **Top 10 de risco** com a regra da recomendação (vigentes, sem vínculo por ramo + data) e os mesmos nomes. **Lista de clientes:** filtro por recomendação ligado à exportação, que passa a trazer recomendação, uso do gatilho e contato (nome, telefone, e-mail). **Tarefas:** ordenar Mais recente/Mais antiga; exportar agrupado por funcionário (CSV/PDF); `concluida_em` gravado ao concluir; "no prazo / fora do prazo" pela regra única (antes concluída no prazo com data vencida contava como fora); editar não troca mais o responsável; o filtro por funcionário pelo id passou a funcionar (o campo não vinha na lista). **Relatórios:** Tarefas por Funcionário (abertas, concluídas %, no prazo × fora). Testes novos: `tarefas_test.dart` (+1 em `relatorio_clientes_test.dart`). |
 | 09 | 08/11/2026 | `4d14169` | **Recomendação do cliente unificada pelo uso do gatilho** (pior apólice vigente; faixas 60/80/100%; sinistros sem vínculo ligados por ramo + data; "Sem apólice vigente" e "Apólice sem valor" em cinza; Detalhes mostra uso do gatilho e % do valor da apólice). Substitui 4 contas diferentes. Botões com texto: **"Exportar relatório"** na lista de clientes e **"Importar contrato (PDF)"** no cadastro. Teste novo: `recomendacao_cliente_test.dart`. |
@@ -769,6 +782,7 @@ apolices: [
 - [x] Busca ampla de sinistros; filtro de recomendação no padrão visual; sinistralidade mensal por prêmio ganho (Etapa 11)
 - [x] Vídeos do sinistro com limite, conversão 720p, player na tela e arquivamento; fim das fotos duplicadas (Etapa 12)
 - [x] Vídeos na abertura no desenho das outras categorias de anexos, com arrastar e soltar (Etapa 13)
+- [x] Tarefas ligadas ao atendimento: concluir ao encerrar/excluir, contato substituído, "já informei por outro meio", limpeza das esquecidas, alerta de atraso funcionando (Etapa 14)
 - [ ] Planos de armazenamento (bronze/prata/ouro ou por GB): medir uso por corretora (soma de `tamanho_bytes` / Storage) e aplicar `videoMaxMb`/`videosPorSinistro` por plano — depende do multi-tenant
 - [ ] `firebase_options.dart` com o bucket antigo (`appspot.com`): regenerar com `flutterfire configure` (hoje só os vídeos usam o SDK do Storage, com o bucket fixo)
 - [ ] Assistências: vídeos (mesmo componente)
