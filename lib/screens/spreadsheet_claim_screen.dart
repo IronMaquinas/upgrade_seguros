@@ -4099,6 +4099,10 @@ Future<void> _uploadDocumentoMaterialDamage(int danoIndex) async {
                 progresso: _progressoVideos,
                 limites: _config.limitesVideo,
                 onAdicionar: _escolherVideos,
+                onSoltar: (soltos) {
+                  setState(() => _videosPendentes.addAll(soltos));
+                  _scheduleAutosave();
+                },
                 onRemoverPendente: (v) => setState(() => _videosPendentes.remove(v)),
                 onRemoverEnviado: _removerVideoEnviado,
               ),

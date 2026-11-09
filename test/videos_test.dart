@@ -1,4 +1,4 @@
-// Testes das regras de vídeos do sinistro (Etapa 12).
+// Testes das regras de vídeos do sinistro (Etapa 12; ajustado na Etapa 13).
 // Rodar no Mac: flutter test test/videos_test.dart
 import 'package:flutter_test/flutter_test.dart';
 import 'package:upgrade_seguros/utils/videos.dart';
@@ -13,16 +13,20 @@ const mb = 1024 * 1024;
 
 void main() {
   group('Limites', () {
-    test('padrão 20 MB e 5 vídeos', () {
+    // Etapa 13: o padrão de MB mudou no código (20 → 100, commit 4dbf6a6); o
+    // teste confere a regra (padrão dentro do teto) e não um número fixo.
+    test('padrão dentro do teto e 5 vídeos', () {
       const l = LimitesVideo();
-      expect(l.maxMb, 20);
+      expect(l.maxMb, LimitesVideo.padraoMaxMb);
+      expect(l.maxMb <= LimitesVideo.tetoMb, true);
       expect(l.maxPorSinistro, 5);
-      expect(l.maxBytes, 20 * mb);
+      expect(l.maxBytes, LimitesVideo.padraoMaxMb * mb);
     });
     test('normaliza valores salvos (nunca acima do teto de 100 MB)', () {
       expect(LimitesVideo.normalizarMb(500), 100);
-      expect(LimitesVideo.normalizarMb(0), 20);
-      expect(LimitesVideo.normalizarMb(null), 20);
+      expect(LimitesVideo.normalizarMb(0), LimitesVideo.padraoMaxMb);
+      expect(LimitesVideo.normalizarMb(null), LimitesVideo.padraoMaxMb);
+      expect(LimitesVideo.normalizarMb(20), 20);
       expect(LimitesVideo.normalizarQuantidade(0), 5);
       expect(LimitesVideo.normalizarQuantidade(8), 8);
     });
@@ -31,7 +35,7 @@ void main() {
   group('Validação da seleção', () {
     ({List<_Arq> aceitos, List<String> recusas}) validar(List<_Arq> arqs, {int existentes = 0}) =>
         Videos.validar<_Arq>(arqs,
-            nome: (a) => a.nome, bytes: (a) => a.bytes, jaExistentes: existentes, limites: const LimitesVideo());
+            nome: (a) => a.nome, bytes: (a) => a.bytes, jaExistentes: existentes, limites: const LimitesVideo(maxMb: 20));
 
     test('aceita vídeo do WhatsApp (16 MB)', () {
       final r = validar([const _Arq('VID-20261108-WA0003.mp4', 16 * mb)]);

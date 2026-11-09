@@ -4,7 +4,9 @@
 // enviar com progresso e mostrar no detalhe.
 //  • escolherVideos(...)        → abre o seletor e aplica os limites.
 //  • mostrarPlayerVideo(...)    → janela com o vídeo tocando (play/pausa, tempo, som).
-//  • PainelVideosAbertura       → bloco "Vídeos do Sinistro" na abertura (planilha).
+//  • videosSoltos(...)          → vídeos arrastados para a caixa (Etapa 13).
+//  • PainelVideosAbertura       → bloco "Vídeos do Sinistro" na abertura (planilha),
+//                                 no desenho das categorias de Anexos (Etapa 13).
 //  • GaleriaVideosSinistro      → bloco "Vídeos" no detalhe do sinistro.
 // Regras (formatos, limites, caminho) em lib/utils/videos.dart; envio em
 // lib/services/video_service.dart.
@@ -12,6 +14,7 @@
 import 'dart:io' show File;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -54,6 +57,37 @@ Future<List<VideoSelecionado>> escolherVideos(
     for (final f in r.aceitos)
       VideoSelecionado(nome: f.name, tamanhoBytes: f.size, bytes: f.bytes, caminhoLocal: kIsWeb ? null : f.path),
   ];
+}
+
+/// Etapa 13: vídeos arrastados para a caixa — mesmos limites do seletor.
+Future<List<VideoSelecionado>> videosSoltos(
+  BuildContext context,
+  List<XFile> arquivos, {
+  required LimitesVideo limites,
+  required int jaExistentes,
+}) async {
+  final comTamanho = <({XFile arquivo, int bytes})>[];
+  for (final a in arquivos) {
+    comTamanho.add((arquivo: a, bytes: await a.length()));
+  }
+  final r = Videos.validar<({XFile arquivo, int bytes})>(
+    comTamanho,
+    nome: (x) => x.arquivo.name,
+    bytes: (x) => x.bytes,
+    jaExistentes: jaExistentes,
+    limites: limites,
+  );
+  if (r.recusas.isNotEmpty && context.mounted) _avisar(context, r.recusas);
+  final saida = <VideoSelecionado>[];
+  for (final x in r.aceitos) {
+    saida.add(VideoSelecionado(
+      nome: x.arquivo.name,
+      tamanhoBytes: x.bytes,
+      bytes: kIsWeb ? await x.arquivo.readAsBytes() : null,
+      caminhoLocal: kIsWeb ? null : x.arquivo.path,
+    ));
+  }
+  return saida;
 }
 
 void _avisar(BuildContext context, List<String> mensagens) {
@@ -323,14 +357,19 @@ class _MiniaturaVideo extends StatelessWidget {
 
 // ── Abertura (planilha) ─────────────────────────────────────────────────────
 
-/// Bloco "Vídeos do Sinistro" da abertura. Os vídeos escolhidos ficam
-/// "a enviar" e sobem quando o sinistro é salvo (com progresso em [progresso]).
-class PainelVideosAbertura extends StatelessWidget {
+/// Bloco "Vídeos do Sinistro" da abertura, no mesmo desenho das categorias de
+/// "Anexos e Documentos" (Etapa 13): rótulo cinza em maiúsculas + botão
+/// "+ Adicionar vídeos" com contorno + caixa cinza onde dá para arrastar ou
+/// clicar. Os vídeos escolhidos ficam "a enviar" e sobem quando o sinistro é
+/// salvo (com progresso em [progresso]).
+class PainelVideosAbertura extends StatefulWidget {
   final List<VideoAnexo> enviados;
   final List<VideoSelecionado> pendentes;
   final Map<VideoSelecionado, double> progresso;
   final LimitesVideo limites;
   final VoidCallback onAdicionar;
+  /// Etapa 13: vídeos soltos na caixa (arrastar e soltar), já validados.
+  final void Function(List<VideoSelecionado>)? onSoltar;
   final void Function(VideoSelecionado) onRemoverPendente;
   final void Function(VideoAnexo) onRemoverEnviado;
 
@@ -341,61 +380,184 @@ class PainelVideosAbertura extends StatelessWidget {
     required this.progresso,
     required this.limites,
     required this.onAdicionar,
+    this.onSoltar,
     required this.onRemoverPendente,
     required this.onRemoverEnviado,
   });
 
   @override
+  State<PainelVideosAbertura> createState() => _PainelVideosAberturaState();
+}
+
+class _PainelVideosAberturaState extends State<PainelVideosAbertura> {
+  bool _arrastando = false;
+
+  int get _total => widget.enviados.length + widget.pendentes.length;
+  bool get _cheio => _total >= widget.limites.maxPorSinistro;
+
+  Future<void> _soltou(List<XFile> arquivos) async {
+    setState(() => _arrastando = false);
+    final onSoltar = widget.onSoltar;
+    if (onSoltar == null || arquivos.isEmpty) return;
+    final escolhidos = await videosSoltos(
+      context,
+      arquivos,
+      limites: widget.limites,
+      jaExistentes: _total,
+    );
+    if (escolhidos.isNotEmpty) onSoltar(escolhidos);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final total = enviados.length + pendentes.length;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
+    final limites = widget.limites;
+    final vazio = _total == 0;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Rótulo da categoria (igual a "FOTOS DO SINISTRO", "LAUDOS / BOLETINS"…)
+          Row(
+            children: [
+              Icon(Icons.videocam_outlined, size: 13, color: Colors.grey.shade600),
+              const SizedBox(width: 5),
+              Text(
+                'VÍDEOS DO SINISTRO',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade600,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '$_total de ${limites.maxPorSinistro}',
+                style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+              ),
+              const Spacer(),
+              _BotaoAdicionarVideos(onTap: _cheio ? null : widget.onAdicionar),
+            ],
+          ),
+          const SizedBox(height: 6),
+
+          // Caixa: arrastar e soltar ou clicar para escolher
+          DropTarget(
+            enable: !_cheio && widget.onSoltar != null,
+            onDragEntered: (_) => setState(() => _arrastando = true),
+            onDragExited: (_) => setState(() => _arrastando = false),
+            onDragDone: (detalhes) => _soltou(detalhes.files),
+            child: GestureDetector(
+              onTap: vazio && !_cheio ? widget.onAdicionar : null,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: double.infinity,
+                constraints: const BoxConstraints(minHeight: 72),
+                decoration: BoxDecoration(
+                  color: _arrastando ? _corVideos.withOpacity(0.06) : const Color(0xFFF8F9FB),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: _arrastando ? _corVideos : Colors.grey.shade300,
+                    width: _arrastando ? 1.5 : 0.8,
+                  ),
+                ),
+                padding: const EdgeInsets.all(10),
+                child: vazio
+                    ? _PlaceholderVideos(arrastando: _arrastando)
+                    : Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          for (final v in widget.enviados)
+                            _MiniaturaVideo(
+                              nome: v.nome,
+                              tamanhoBytes: v.tamanhoBytes,
+                              onTocar: () => mostrarPlayerVideo(context, url: v.url, nome: v.nome),
+                              onRemover: () => widget.onRemoverEnviado(v),
+                            ),
+                          for (final v in widget.pendentes)
+                            _MiniaturaVideo(
+                              nome: v.nome,
+                              tamanhoBytes: v.tamanhoBytes,
+                              pendente: true,
+                              progresso: widget.progresso[v],
+                              onTocar: () => mostrarPlayerVideo(context, local: v, nome: v.nome),
+                              onRemover: () => widget.onRemoverPendente(v),
+                            ),
+                        ],
+                      ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${Videos.extensoes.map((e) => e.toUpperCase()).join(', ')} · até ${limites.maxMb} MB cada'
+            ' · máximo ${limites.maxPorSinistro} por sinistro. Clique no vídeo para conferir.',
+            style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Botão pequeno com contorno, igual ao "+ Adicionar arquivos" das categorias.
+class _BotaoAdicionarVideos extends StatelessWidget {
+  final VoidCallback? onTap;
+  const _BotaoAdicionarVideos({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cor = onTap == null ? Colors.grey.shade400 : _corVideos;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          border: Border.all(color: cor.withOpacity(0.4), width: 0.8),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.videocam_outlined, size: 16, color: _corVideos),
-            const SizedBox(width: 6),
-            const Text('Vídeos do Sinistro',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _corVideos)),
-            const SizedBox(width: 8),
-            Text('$total de ${limites.maxPorSinistro} · até ${limites.maxMb} MB cada',
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-            const Spacer(),
-            TextButton.icon(
-              onPressed: total >= limites.maxPorSinistro ? null : onAdicionar,
-              icon: const Icon(Icons.video_call_outlined, size: 18),
-              label: const Text('Adicionar vídeo'),
+            Icon(Icons.add, size: 12, color: cor),
+            const SizedBox(width: 3),
+            Text('Adicionar vídeos', style: TextStyle(fontSize: 11, color: cor)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlaceholderVideos extends StatelessWidget {
+  final bool arrastando;
+  const _PlaceholderVideos({required this.arrastando});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              arrastando ? Icons.file_download_outlined : Icons.video_call_outlined,
+              size: 22,
+              color: arrastando ? _corVideos : Colors.grey.shade400,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              arrastando ? 'Solte aqui para adicionar' : 'Arraste vídeos aqui ou clique para selecionar',
+              style: TextStyle(fontSize: 11, color: arrastando ? _corVideos : Colors.grey.shade500),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
-        const SizedBox(height: 6),
-        if (total == 0)
-          Text('MP4, MOV, M4V, 3GP ou WEBM. Clique no vídeo para conferir antes de salvar.',
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade500))
-        else
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              for (final v in enviados)
-                _MiniaturaVideo(
-                  nome: v.nome,
-                  tamanhoBytes: v.tamanhoBytes,
-                  onTocar: () => mostrarPlayerVideo(context, url: v.url, nome: v.nome),
-                  onRemover: () => onRemoverEnviado(v),
-                ),
-              for (final v in pendentes)
-                _MiniaturaVideo(
-                  nome: v.nome,
-                  tamanhoBytes: v.tamanhoBytes,
-                  pendente: true,
-                  progresso: progresso[v],
-                  onTocar: () => mostrarPlayerVideo(context, local: v, nome: v.nome),
-                  onRemover: () => onRemoverPendente(v),
-                ),
-            ],
-          ),
-      ],
+      ),
     );
   }
 }

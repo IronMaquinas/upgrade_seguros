@@ -14,7 +14,7 @@ service firebase.storage {
     match /videos/{todos=**} {
       allow create, update: if request.auth != null
         && request.resource.contentType.matches('video/.*')
-        && request.resource.size < 100 * 1024 * 1024;
+        && request.resource.size <= 100 * 1024 * 1024;
     }
   }
 }
