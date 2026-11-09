@@ -18,7 +18,7 @@ class LimitesVideo {
   final int maxPorSinistro;
   const LimitesVideo({this.maxMb = padraoMaxMb, this.maxPorSinistro = padraoMaxPorSinistro});
 
-  static const padraoMaxMb = 20;
+  static const padraoMaxMb = 100;
   static const padraoMaxPorSinistro = 5;
 
   /// Teto absoluto (o mesmo das regras do Storage): nenhum plano passa disso.
