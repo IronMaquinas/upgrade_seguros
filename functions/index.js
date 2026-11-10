@@ -6,10 +6,22 @@ const cors = require('cors')({ origin: true });
 admin.initializeApp();
 const bucket = admin.storage().bucket();
 
+// Etapa 15: segurança — NPS público, login por usuário/matrícula e criação de
+// usuário pelo administrador passam pelo servidor; upload/exclusão exigem login.
+const seguranca = require('./seguranca');
+exports.npsPublico = seguranca.npsPublico;
+exports.apoioLogin = seguranca.apoioLogin;
+exports.criarUsuario = seguranca.criarUsuario;
+
 exports.uploadFile = functions.https.onRequest(async (request, response) => {
   cors(request, response, async () => {
     if (request.method !== 'POST') {
       return response.status(405).send('Método não permitido');
+    }
+
+    // Etapa 15: só usuário logado e ativo (antes qualquer um na internet subia arquivo).
+    if (!(await seguranca.usuarioAtivo(request))) {
+      return response.status(401).send('Faça login novamente');
     }
 
     try {
@@ -90,6 +102,11 @@ exports.deleteFiles = functions.https.onRequest(async (request, response) => {
   cors(request, response, async () => {
     if (request.method !== 'POST') {
       return response.status(405).send('Método não permitido');
+    }
+
+    // Etapa 15: só usuário logado e ativo (antes qualquer um na internet apagava arquivo).
+    if (!(await seguranca.usuarioAtivo(request))) {
+      return response.status(401).send('Faça login novamente');
     }
 
     try {

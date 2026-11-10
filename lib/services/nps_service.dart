@@ -1,7 +1,11 @@
 // lib/services/nps_service.dart
 // ignore_for_file: unused_import
 
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:upgrade_seguros/services/funcoes_nuvem.dart'; // Etapa 15
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 
@@ -123,89 +127,34 @@ class NpsService {
     required String reclamacoes,
     required String sugestoes,
   }) async {
+    // Etapa 15: o cliente responde sem login — quem grava é o servidor
+    // (Function npsPublico), que confere o token. Antes o app gravava direto
+    // no banco, o que exigia o banco aberto para qualquer pessoa.
     try {
-      final pesquisa = await _db.collection('nps_pesquisas').doc(claimId).get();
-      if (!pesquisa.exists) return false;
-
-      final data = pesquisa.data()!;
-      if (data['token'] != token) return false;
-      if (data['status'] == 'respondida') return false;
-
-      final categoria = nota >= 9 ? 'promotor' : nota >= 7 ? 'neutro' : 'detrator';
-
-      await _db.collection('avaliacoes').doc(claimId).set({
-        'claimId': claimId,
-        'numeroSinistro': data['numeroSinistro'],
-        'clienteId': data['clienteId'],
-        'clienteNome': data['clienteNome'],
-        'tipo': data['tipo'],
-        'nota': nota,
-        'categoria': categoria,
-        'pontosFortes': pontosFortes,
-        'pontosFracos': pontosFracos,
-        'reclamacoes': reclamacoes,
-        'sugestoes': sugestoes,
-        'respondidoEm': FieldValue.serverTimestamp(),
-      });
-
-      await _db.collection('nps_pesquisas').doc(claimId).update({
-        'status': 'respondida',
-        'respondidoEm': FieldValue.serverTimestamp(),
-        'nota': nota,
-        'categoria': categoria,
-      });
-
-      // Atualiza na coleção correta (sinistros ou assistencias)
-      final colecao = data['tipo'] == 'assistencia' ? 'assistencias' : 'sinistros';
-      await _db.collection(colecao).doc(claimId).update({
-        'nps_avaliada': true,
-        'nps_satisfacao': nota.toDouble(),
-        'nps_categoria': categoria,
-        'npsDataAvaliacao': FieldValue.serverTimestamp(),
-      });
-
-      await _atualizarNpsCliente(data['clienteId']);
-      return true;
+      final r = await FuncoesNuvem.post(
+        'npsPublico',
+        {
+          'acao': 'responder',
+          'claimId': claimId,
+          'token': token,
+          'nota': nota,
+          'pontosFortes': pontosFortes,
+          'pontosFracos': pontosFracos,
+          'reclamacoes': reclamacoes,
+          'sugestoes': sugestoes,
+        },
+        comLogin: false,
+      );
+      if (r.statusCode != 200) debugPrint('NPS não salvo: ${FuncoesNuvem.erro(r)}');
+      return r.statusCode == 200;
     } catch (e) {
-      print('❌ Erro ao salvar NPS: $e');
+      debugPrint('❌ Erro ao salvar NPS: $e');
       return false;
     }
   }
 
-  // ─────────────────────────────────────────────────
-  // Atualizar NPS médio do cliente
-  // ─────────────────────────────────────────────────
-  Future<void> _atualizarNpsCliente(String clienteId) async {
-    try {
-      final avaliacoes = await _db
-          .collection('avaliacoes')
-          .where('clienteId', isEqualTo: clienteId)
-          .get();
-
-      if (avaliacoes.docs.isEmpty) return;
-
-      final notas = avaliacoes.docs
-          .map((d) => (d.data()['nota'] as num?)?.toDouble() ?? 0.0)
-          .toList();
-
-      final media = notas.reduce((a, b) => a + b) / notas.length;
-
-      // Contar promotores e detratores
-      final promotores = notas.where((n) => n >= 9).length;
-      final detratores = notas.where((n) => n <= 6).length;
-      final total      = notas.length;
-      final score      = ((promotores - detratores) / total * 100).round();
-
-      await _db.collection('clientes').doc(clienteId).update({
-        'nps':        media,        // Média das notas
-        'npsScore':   score,        // Score NPS real (-100 a 100)
-        'npsTotal':   total,        // Total de respostas
-        'npsAtualizado': FieldValue.serverTimestamp(),
-      });
-    } catch (e) {
-      print('❌ Erro ao atualizar NPS do cliente: $e');
-    }
-  }
+  // (Etapa 15: o NPS médio do cliente agora é recalculado no servidor, na
+  //  Function npsPublico — functions/seguranca.js.)
 
   // ─────────────────────────────────────────────────
   // Verificar pesquisa (pública - sem auth)
@@ -215,34 +164,17 @@ class NpsService {
     required String claimId,
     required String token,
   }) async {
+    // Etapa 15: consulta pelo servidor (Function npsPublico), sem login.
     try {
-      final doc = await _db.collection('nps_pesquisas').doc(claimId).get();
-      if (!doc.exists) return null;
-
-      final data = doc.data()!;
-      if (data['token'] != token) return null;
-      if (data['status'] == 'respondida') return {'jaRespondida': true};
-
-      Map<String, dynamic> clienteData = {};
-      if (data['clienteId'] != null && (data['clienteId'] as String).isNotEmpty) {
-        try {
-          final clienteDoc = await _db.collection('clientes').doc(data['clienteId']).get();
-          clienteData = clienteDoc.data() ?? {};
-        } catch (e) {
-          print('⚠️ Erro ao buscar cliente: $e');
-        }
-      }
-
-      return {
-        'jaRespondida': false,
-        'clienteNome': data['clienteNome'],
-        'numeroSinistro': data['numeroSinistro'],
-        'tipo': data['tipo'] ?? 'sinistro',
-        'clienteLogoUrl': clienteData['logoUrl'] ?? '',
-        'clienteEmpresa': clienteData['nomeEmpresa'] ?? data['clienteNome'],
-      };
+      final r = await FuncoesNuvem.post(
+        'npsPublico',
+        {'acao': 'verificar', 'claimId': claimId, 'token': token},
+        comLogin: false,
+      );
+      if (r.statusCode != 200) return null;
+      return Map<String, dynamic>.from(jsonDecode(r.body) as Map);
     } catch (e) {
-      print('❌ Erro ao verificar pesquisa: $e');
+      debugPrint('❌ Erro ao verificar pesquisa: $e');
       return null;
     }
   }

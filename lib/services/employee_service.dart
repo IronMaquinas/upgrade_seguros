@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/employee_model.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:upgrade_seguros/services/funcoes_nuvem.dart'; // Etapa 15
 
 class EmployeeService {
   final _db = FirebaseFirestore.instance;
@@ -105,21 +106,19 @@ class EmployeeService {
     final auth = FirebaseAuth.instance;
 
     try {
-      final cred = await auth.createUserWithEmailAndPassword(
-        email: email,
-        password: '123456',
-      );
-
-      await _users.doc(cred.user!.uid).set({
+      // Etapa 15: a conta é criada no servidor (Function criarUsuario, só
+      // administrador). Antes o app criava a conta aqui com a senha fixa
+      // '123456', o que deslogava o administrador e entrava como o usuário novo.
+      final r = await FuncoesNuvem.post('criarUsuario', {
         'nome': nome,
         'email': email,
         'matricula': matricula,
         'role': role,
-        'telefone': telefone,  // ← ADICIONE ISTO
-        'ativo': true,
-        'createdAt': FieldValue.serverTimestamp(),
+        'telefone': telefone,
       });
+      if (r.statusCode != 200) throw Exception(FuncoesNuvem.erro(r));
 
+      // E-mail para o usuário novo definir a senha.
       await auth.sendPasswordResetEmail(email: email);
     } catch (e) {
       rethrow;

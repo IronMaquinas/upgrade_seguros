@@ -2,7 +2,7 @@
 
 > Plataforma web/mobile para corretoras de seguros gerenciarem sinistros, assistências, clientes, tarefas e métricas de desempenho em tempo real.
 
-**Versão do documento:** Etapa 14 (GitHub `fa5b317` = Etapas 01–13)
+**Versão do documento:** Etapa 15 (GitHub `ec4a608` = Etapas 01–14)
 **Última atualização:** 08/11/2026
 **Status:** app em uso; ciclo de entregas com verificação por md5 em andamento. Etapa 02: terceiros identificados por personagem (proprietário / motorista / contato) e **histórico de valores do sinistro** (lançamentos com nota fiscal, segurado + terceiros). Pendências de segurança abertas — ver [🔐 Pendências de Segurança](#-pendências-de-segurança).
 
@@ -606,10 +606,13 @@ Lista de clientes → filtro por **recomendação** (seletor ao lado da busca, c
 
 | Função | Tipo | Descrição |
 |---|---|---|
-| `uploadFile` | HTTP | Recebe base64, salva no Storage, retorna URL pública |
-| `deleteFiles` | HTTP | Remove array de paths do Storage |
+| `uploadFile` | HTTP (login) | Recebe base64, salva no Storage, retorna URL pública. Exige usuário ativo desde a Etapa 15 |
+| `deleteFiles` | HTTP (login) | Remove array de paths do Storage. Exige usuário ativo desde a Etapa 15 |
+| `npsPublico` | HTTP (público) | Etapa 15: pesquisa NPS do cliente final — confere o token, devolve só o necessário para a tela, grava a avaliação e recalcula o NPS do cliente |
+| `apoioLogin` | HTTP (público) | Etapa 15: "usuário" ou "matrícula" → e-mail (só o e-mail) para o login |
+| `criarUsuario` | HTTP (só admin) | Etapa 15: cria a conta (senha aleatória) e o cadastro em `users/`, herdando a empresa do administrador; o app manda o e-mail de definir senha |
 | `converterVideo` | Storage (arquivo finalizado em `videos/`) | Etapa 12: converte para MP4 720p no mesmo caminho (ffmpeg-static) |
-| `verificarAssistenciasAtradasTelegram` | Agendada (a cada 10 min) | Lê `app_config/config` e avisa no Telegram as assistências com SLA atrasado, respeitando horário configurado |
+| `verificarAssistenciasAtradasTelegram` | Agendada (a cada 10 min) | Lê `app_config/config` e avisa no Telegram as assistências com SLA atrasado, respeitando horário configurado. Token do bot no Secret Manager (`TELEGRAM_BOT_TOKEN`, Etapa 15) |
 
 > Storage URLs são públicas (`makePublic()`). Para produção com dados sensíveis, considerar URLs assinadas com expiração (ver Pendências de Segurança, item S6).
 
@@ -620,17 +623,13 @@ Lista de clientes → filtro por **recomendação** (seletor ao lado da busca, c
 Levantadas na revisão da base (07/11/2026). O repositório no GitHub está **público**, então tudo que está no git pode ser lido por qualquer pessoa. Por isso, aqui as pendências ficam descritas de forma resumida, sem detalhes de como explorar.
 
 ### 🔴 Urgente (fazer assim que possível — depende do celular para o 2FA)
-- [ ] **S1 — Trocar o token do bot do Telegram.** O token atual ficou registrado num arquivo de parâmetros dentro de `functions/` e está no histórico do git.
-  1. Telegram → @BotFather → `/revoke` → escolher o bot → gerar token novo.
-  2. Deploy das Functions com o token novo (`firebase deploy --only functions --set-env-vars TELEGRAM_BOT_TOKEN=...`), digitado no terminal, **sem salvar em arquivo do projeto**.
-  3. `git rm --cached functions/telegram-parameters.md`, acrescentar no `.gitignore`, commit. (Continua no histórico — por isso o passo 1 é o que resolve.)
-  4. Conferir: `node verificar-entrega.js` deixa de mostrar o aviso do Telegram.
+- [x] **S1 — Trocar o token do bot do Telegram** (Etapa 15). Token revogado no @BotFather em 09/11/2026; o novo fica só no **Secret Manager** (`firebase functions:secrets:set TELEGRAM_BOT_TOKEN`), lido por `defineSecret` em `functions/notificacoes-telegram.js`. Os arquivos `.env` e de parâmetros saíram do projeto e `functions/.env*` está no `.gitignore`. O token antigo continua no histórico do git, mas não funciona mais.
 - [ ] **S2 — Voltar o repositório para privado** depois de configurar o acesso de leitura do Claude (conector do GitHub em claude.ai → Configurações → Conectores). Sem isso, cada ciclo exige o repositório público.
 
 ### 🟠 Para olhar em seguida (entram no plano quando for oportuno)
-- [ ] **S3 — Exigir login nas Cloud Functions de arquivo** (`uploadFile`, `deleteFiles`): validar o token do Firebase Auth do usuário e restringir os caminhos permitidos. Mexe em `functions/index.js` e em `firestore_service.dart`/`storage_service.dart` (passar o token). *Candidata natural para a próxima etapa que tocar em anexos.* As notas fiscais dos lançamentos (Etapa 02) usam a mesma função (`uploadArquivosEmPasta`), então a correção vale para elas também.
+- [x] **S3 — Exigir login nas Cloud Functions de arquivo** (Etapa 15): `uploadFile` e `deleteFiles` só atendem usuário logado e ativo (ID token no cabeçalho `Authorization`, conferido em `functions/seguranca.js`; o app manda via `lib/services/funcoes_nuvem.dart`, que monta o endereço do Cloud Run — Etapa 15.1). Pendente: restringir os caminhos permitidos (entra com o multi-tenant).
 - [ ] **S4 — Restringir a chave do Google Maps/Places** no Google Cloud Console (referenciadores HTTP do domínio + package/bundle dos apps Android/iOS + só as APIs usadas). Hoje a chave está escrita em 8 arquivos de tela; numa etapa futura, centralizar em `utils/constants.dart` (uma chave, um lugar). *Restrição no console não exige entrega; a centralização entra quando alguma etapa mexer nessas telas.*
-- [ ] **S5 — Regras do Firestore no repositório.** Não há `firestore.rules` no projeto: conferir no console do Firebase o que está publicado, trazer para o repositório e registrar no `firebase.json`, para que regra também passe pelo ciclo de entrega. As regras do Storage (`storage.rules`) exigem só "estar logado" — avaliar restrição por corretora/usuário.
+- [x] **S5 — Regras do Firestore no repositório** (Etapa 15): `firestore.rules` versionado e registrado no `firebase.json`. Só **usuário ativo** (logado + cadastro em `users/{uid}` não desativado) lê e grava; `users/` só o administrador cria, apaga ou muda papel/ativo/empresa. O Storage segue a mesma regra (consulta o cadastro pelo Firestore). Fluxos sem login passam pelo servidor: pesquisa NPS (`npsPublico`), login por usuário/matrícula (`apoioLogin`) e criação de usuário pelo administrador (`criarUsuario`). Próximo: isolamento por corretora (multi-tenant).
 - [ ] **S6 — URLs públicas dos anexos.** `makePublic()` deixa fotos e laudos acessíveis a quem tiver o link. Trocar por URL assinada com expiração ou download autenticado. **Pré-requisito para a Europa (GDPR) e reforça a LGPD.**
 - [x] **S7 — Tirar `node_modules/` do git** (Etapa 06, junto com `android/build/`) (~15 mil arquivos versionados na raiz): `git rm -r --cached node_modules`, acrescentar no `.gitignore`. Não muda o funcionamento; deixa o repositório leve e o diff legível.
 
@@ -689,6 +688,8 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 | 12 | 08/11/2026 | `c348350` | **Vídeos do sinistro** na abertura e no detalhe: limites configuráveis (20 MB, 5 por sinistro), envio direto ao Storage com progresso, player na própria tela, conversão para MP4 720p no servidor (`converterVideo`), arquivamento em Coldline depois de 180 dias, regras do Storage para vídeo. **Fotos:** abertura não envia mais as mesmas fotos a cada salvamento automático (duplicava no Storage); foto adicionada no detalhe passa a ser comprimida. Teste novo: `videos_test.dart`. Pacotes novos: `video_player` (app), `ffmpeg-static` (Functions). |
 | 13 | 08/11/2026 | `4dbf6a6` | **Vídeos na abertura no mesmo desenho dos anexos** (rótulo "VÍDEOS DO SINISTRO", botão "+ Adicionar vídeos" com contorno, caixa cinza com arrastar e soltar). Regra do Storage aceita exatamente 100 MB. Teste de vídeos não depende mais do padrão de MB (que o Marcony passou de 20 para 100 no `4dbf6a6`). |
 | 14 | 09/11/2026 | `fa5b317` | **Tarefas ligadas ao atendimento:** ao encerrar o sinistro ou concluir/cancelar a assistência, o sistema mostra as tarefas abertas e conclui as marcadas; excluir o atendimento conclui as tarefas dele (antes ficavam órfãs e inflavam Relatórios/Dashboard); nova comunicação de status/previsão substitui o contato anterior; botão "Já informei por outro meio"; limpeza das tarefas esquecidas em Configurações (admin, com lista antes). Concluída pelo sistema não conta como atraso. Alerta de tarefa atrasada passa a funcionar (agrupado, do usuário logado) e o monitor lê só as abertas. Tarefas de assistência gravam o responsável. Teste novo: `tarefas_evento_test.dart`. |
+| 15 | 09/11/2026 | `ec4a608` | **Segurança:** regras do Firestore no repositório (só usuário ativo; `users/` protegido) e Storage com a mesma regra; Functions `npsPublico`, `apoioLogin` e `criarUsuario` (fluxos sem login e criação de usuário pelo servidor); `uploadFile`/`deleteFiles` exigem login; token do Telegram como segredo do Firebase e arquivos `.env` fora do projeto. Teste novo: `functions/testes/seguranca.teste.js`. |
+| 15.1 | 09/11/2026 | Etapa 15 | Endereço das Functions: as de 2ª geração respondem no Cloud Run (`https://<nome>-hwtlk2s4qq-uc.a.run.app`), não em `…cloudfunctions.net/<nome>` (404) — afetava `apoioLogin`, `npsPublico`, `criarUsuario` e `deleteFiles`. |
 | 11 | 08/11/2026 | `9159bd1` | **Busca de Sinistros** também por terceiros (proprietário, motorista, contato, registro na seguradora deles), proprietário/condutor do veículo segurado e contato do segurado; sem acento, várias palavras, telefone sem máscara (`lib/utils/busca.dart`). **Filtro de recomendação** da lista de clientes vira seletor no padrão dos filtros de Sinistros, ao lado da busca. **Sinistralidade Mensal** recalculada (sinistros ocorridos ÷ prêmio ganho), com linha acumulada e linha do gatilho (`lib/utils/sinistralidade.dart`). Testes novos: `busca_test.dart`, `sinistralidade_test.dart`. |
 | 10 | 08/11/2026 | `44f5c8f` | **Top 10 de risco** com a regra da recomendação (vigentes, sem vínculo por ramo + data) e os mesmos nomes. **Lista de clientes:** filtro por recomendação ligado à exportação, que passa a trazer recomendação, uso do gatilho e contato (nome, telefone, e-mail). **Tarefas:** ordenar Mais recente/Mais antiga; exportar agrupado por funcionário (CSV/PDF); `concluida_em` gravado ao concluir; "no prazo / fora do prazo" pela regra única (antes concluída no prazo com data vencida contava como fora); editar não troca mais o responsável; o filtro por funcionário pelo id passou a funcionar (o campo não vinha na lista). **Relatórios:** Tarefas por Funcionário (abertas, concluídas %, no prazo × fora). Testes novos: `tarefas_test.dart` (+1 em `relatorio_clientes_test.dart`). |
 | 09 | 08/11/2026 | `4d14169` | **Recomendação do cliente unificada pelo uso do gatilho** (pior apólice vigente; faixas 60/80/100%; sinistros sem vínculo ligados por ramo + data; "Sem apólice vigente" e "Apólice sem valor" em cinza; Detalhes mostra uso do gatilho e % do valor da apólice). Substitui 4 contas diferentes. Botões com texto: **"Exportar relatório"** na lista de clientes e **"Importar contrato (PDF)"** no cadastro. Teste novo: `recomendacao_cliente_test.dart`. |
@@ -783,17 +784,18 @@ apolices: [
 - [x] Vídeos do sinistro com limite, conversão 720p, player na tela e arquivamento; fim das fotos duplicadas (Etapa 12)
 - [x] Vídeos na abertura no desenho das outras categorias de anexos, com arrastar e soltar (Etapa 13)
 - [x] Tarefas ligadas ao atendimento: concluir ao encerrar/excluir, contato substituído, "já informei por outro meio", limpeza das esquecidas, alerta de atraso funcionando (Etapa 14)
+- [x] Segurança: regras do Firestore e do Storage (só usuário ativo), Functions com login, NPS/login/criação de usuário pelo servidor, token do Telegram como segredo (Etapa 15)
 - [ ] Planos de armazenamento (bronze/prata/ouro ou por GB): medir uso por corretora (soma de `tamanho_bytes` / Storage) e aplicar `videoMaxMb`/`videosPorSinistro` por plano — depende do multi-tenant
 - [ ] `firebase_options.dart` com o bucket antigo (`appspot.com`): regenerar com `flutterfire configure` (hoje só os vídeos usam o SDK do Storage, com o bucket fixo)
 - [ ] Assistências: vídeos (mesmo componente)
 - [ ] KPI "Sinistralidade (%)" do topo dos Relatórios e sinistralidade por seguradora com a mesma regra (prêmio ganho no período)
 
 ### 🔐 Segurança (ver [Pendências de Segurança](#-pendências-de-segurança))
-- [ ] 🔴 S1 — Trocar token do Telegram e tirar o arquivo do git
+- [x] 🔴 S1 — Trocar token do Telegram e tirar o arquivo do git (Etapa 15)
 - [ ] 🔴 S2 — Repositório de volta para privado (com conector do GitHub)
-- [ ] 🟠 S3 — Login obrigatório nas Functions de arquivo
+- [x] 🟠 S3 — Login obrigatório nas Functions de arquivo (Etapa 15)
 - [ ] 🟠 S4 — Restringir e centralizar a chave do Google Maps/Places
-- [ ] 🟠 S5 — Regras do Firestore no repositório
+- [x] 🟠 S5 — Regras do Firestore no repositório (Etapa 15)
 - [ ] 🟠 S6 — Anexos com URL assinada em vez de pública
 - [x] 🟠 S7 — `node_modules/` fora do git (Etapa 06)
 

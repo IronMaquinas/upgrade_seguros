@@ -6,20 +6,25 @@ if (!admin.apps.length) {
   admin.initializeApp();
 }
 
-// ⚠️ Não use mais TELEGRAM_CHAT_ID do .env.yaml para envio
-// Apenas para fallback de segurança (opcional), mas vamos usar só o Firestore
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+const { defineSecret } = require("firebase-functions/params");
+
+// Etapa 15: o token do bot é um SEGREDO do Firebase (Secret Manager), não fica
+// mais em arquivo .env nem no git. Para cadastrar/trocar:
+//   firebase functions:secrets:set TELEGRAM_BOT_TOKEN
+// Os destinos (chat_id) continuam vindo do Firestore (app_config/config).
+const TELEGRAM_BOT_TOKEN = defineSecret("TELEGRAM_BOT_TOKEN");
 
 /**
  * Envia mensagem para um chat_id específico
  */
 async function enviarTelegram(mensagem, chatId) {
-  if (!TELEGRAM_BOT_TOKEN || !chatId) {
+  const token = TELEGRAM_BOT_TOKEN.value();
+  if (!token || !chatId) {
     console.warn("⚠️ Token ou chat_id inválido.");
     return;
   }
   try {
-    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -61,7 +66,7 @@ function isSilencePeriod(horarioInicio, horarioFim) {
 }
 
 exports.verificarAssistenciasAtradasTelegram = onSchedule(
-  "every 10 minutes",
+  { schedule: "every 10 minutes", secrets: [TELEGRAM_BOT_TOKEN] },
   async () => {
     try {
       const db = admin.firestore();

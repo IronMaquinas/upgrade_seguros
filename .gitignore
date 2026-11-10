@@ -49,3 +49,5 @@ verificar-entrega.js
 
 node_modules/
 android/build/
+
+functions/.env*

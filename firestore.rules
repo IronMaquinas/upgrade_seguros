@@ -1,0 +1,61 @@
+rules_version = '2';
+
+// firestore.rules — Upgrade Seguros (Etapa 15)
+//
+// ANTES (até 09/11/2026, só no console): `allow read, write: if true` —
+// qualquer pessoa na internet podia ler, alterar e apagar tudo.
+//
+// AGORA:
+//  • Só USUÁRIO ATIVO lê e grava: logado E com documento em users/{uid} que
+//    não esteja desativado (ativo == false). Conta criada por fora do app
+//    (sem documento em users) não acessa nada.
+//  • users/{uid}: só administrador cria, apaga ou muda papel/ativo/empresa.
+//    O próprio usuário pode atualizar os outros campos do seu documento
+//    (ex.: último login, telefone).
+//  • Pesquisa NPS pública e "entrar com usuário/matrícula" não acessam mais o
+//    banco direto: passam pelas Cloud Functions npsPublico e apoioLogin
+//    (functions/seguranca.js), que conferem o token / devolvem só o e-mail.
+//
+// Próxima etapa (multi-tenant): cada usuário só enxerga a própria corretora.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function logado() {
+      return request.auth != null;
+    }
+
+    function docUsuario() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function ativo() {
+      return logado()
+        && exists(docUsuario())
+        && get(docUsuario()).data.get('ativo', true) != false;
+    }
+
+    function admin() {
+      return ativo() && get(docUsuario()).data.get('role', '') == 'admin';
+    }
+
+    // Campos do próprio cadastro que só o administrador muda.
+    function mexeEmCampoProtegido() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['role', 'ativo', 'empresaId', 'corretoraId', 'matricula', 'username']);
+    }
+
+    match /users/{uid} {
+      allow read: if ativo();
+      allow create, delete: if admin();
+      allow update: if admin()
+        || (ativo() && request.auth.uid == uid && !mexeEmCampoProtegido());
+    }
+
+    // Todas as outras coleções (sinistros, assistencias, clientes, tasks,
+    // workshops, seguradoras, app_config, nps_pesquisas, avaliacoes, …):
+    // usuário ativo. O "!= 'users'" impede que esta regra libere users/.
+    match /{colecao}/{documento=**} {
+      allow read, write: if colecao != 'users' && ativo();
+    }
+  }
+}

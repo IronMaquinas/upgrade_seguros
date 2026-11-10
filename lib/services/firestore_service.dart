@@ -25,9 +25,10 @@ import 'package:upgrade_seguros/models/assist_sla_config_model.dart';
 import 'package:upgrade_seguros/utils/filtro_status.dart';
 import 'package:upgrade_seguros/services/tarefas_evento_service.dart'; // Etapa 14
 import 'package:upgrade_seguros/utils/tarefas_evento.dart'; // Etapa 14
+import 'package:upgrade_seguros/services/funcoes_nuvem.dart'; // Etapa 15
 
 
-const String _cloudFunctionUrl = 'https://uploadfile-hwtlk2s4qq-uc.a.run.app';
+const String _cloudFunctionUrl = 'https://uploadfile-hwtlk2s4qq-uc.a.run.app'; // uploadFile (exige login desde a Etapa 15)
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -383,8 +384,8 @@ class FirestoreService {
   Future<void> _deleteFilesFromStorage(List<String> filePaths) async {
     try {
       final response = await http.post(
-        Uri.parse('https://us-central1-upgrade-seguros.cloudfunctions.net/deleteFiles'),
-        headers: {'Content-Type': 'application/json'},
+        FuncoesNuvem.url('deleteFiles'), // Etapa 15.1: endereço do Cloud Run (o .cloudfunctions.net dava 404)
+        headers: await FuncoesNuvem.cabecalhos(), // Etapa 15: com login
         body: jsonEncode({'filePaths': filePaths}),
       );
 
@@ -536,9 +537,7 @@ class FirestoreService {
 
         final http.Response response = await http.post(
           Uri.parse(_cloudFunctionUrl),
-          headers: <String, String>{
-            'Content-Type': 'application/json',
-          },
+          headers: await FuncoesNuvem.cabecalhos(), // Etapa 15: com login
           body: jsonEncode(requestBody),
         );
 
@@ -598,7 +597,7 @@ class FirestoreService {
 
         final http.Response response = await http.post(
           Uri.parse(_cloudFunctionUrl),
-          headers: {'Content-Type': 'application/json'},
+          headers: await FuncoesNuvem.cabecalhos(), // Etapa 15: com login
           body: jsonEncode(requestBody),
         );
 
@@ -639,7 +638,7 @@ class FirestoreService {
 
       final response = await http.post(
         Uri.parse(_cloudFunctionUrl),
-        headers: {'Content-Type': 'application/json'},
+        headers: await FuncoesNuvem.cabecalhos(), // Etapa 15: com login
         body: jsonEncode({
           'file': base64Encode(bytes),
           'fileName': nome,
@@ -691,7 +690,7 @@ class FirestoreService {
 
         final http.Response response = await http.post(
           Uri.parse(_cloudFunctionUrl),
-          headers: {'Content-Type': 'application/json'},
+          headers: await FuncoesNuvem.cabecalhos(), // Etapa 15: com login
           body: jsonEncode(requestBody),
         );
 
@@ -738,9 +737,7 @@ class FirestoreService {
 
         final http.Response response = await http.post(
           Uri.parse(_cloudFunctionUrl),
-          headers: <String, String>{
-            'Content-Type': 'application/json',
-          },
+          headers: await FuncoesNuvem.cabecalhos(), // Etapa 15: com login
           body: jsonEncode(requestBody),
         );
 
@@ -786,9 +783,7 @@ class FirestoreService {
 
         final http.Response response = await http.post(
           Uri.parse(_cloudFunctionUrl),
-          headers: <String, String>{
-            'Content-Type': 'application/json',
-          },
+          headers: await FuncoesNuvem.cabecalhos(), // Etapa 15: com login
           body: jsonEncode(requestBody),
         );
 
@@ -886,7 +881,7 @@ class FirestoreService {
 
         final http.Response response = await http.post(
           Uri.parse(_cloudFunctionUrl),
-          headers: {'Content-Type': 'application/json'},
+          headers: await FuncoesNuvem.cabecalhos(), // Etapa 15: com login
           body: jsonEncode(requestBody),
         );
 
@@ -950,7 +945,7 @@ class FirestoreService {
 
         final http.Response response = await http.post(
           Uri.parse(_cloudFunctionUrl),
-          headers: {'Content-Type': 'application/json'},
+          headers: await FuncoesNuvem.cabecalhos(), // Etapa 15: com login
           body: jsonEncode(requestBody),
         );
 
@@ -1016,7 +1011,7 @@ class FirestoreService {
 
         final http.Response response = await http.post(
           Uri.parse(_cloudFunctionUrl),
-          headers: {'Content-Type': 'application/json'},
+          headers: await FuncoesNuvem.cabecalhos(), // Etapa 15: com login
           body: jsonEncode(requestBody),
         );
 
@@ -1082,7 +1077,7 @@ class FirestoreService {
 
         final http.Response response = await http.post(
           Uri.parse(_cloudFunctionUrl),
-          headers: {'Content-Type': 'application/json'},
+          headers: await FuncoesNuvem.cabecalhos(), // Etapa 15: com login
           body: jsonEncode(requestBody),
         );
 
@@ -1494,7 +1489,7 @@ class FirestoreService {
 
         final http.Response response = await http.post(
           Uri.parse(_cloudFunctionUrl),
-          headers: {'Content-Type': 'application/json'},
+          headers: await FuncoesNuvem.cabecalhos(), // Etapa 15: com login
           body: jsonEncode(requestBody),
         );
 

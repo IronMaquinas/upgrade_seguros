@@ -1,5 +1,9 @@
+import 'dart:convert';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:upgrade_seguros/services/funcoes_nuvem.dart'; // Etapa 15
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -90,11 +94,16 @@ class AuthService {
             password: password,
           );
 
-          // Após login, verifica se já existe documento do user, senão cria (opcional)
-          await _firestore.collection('users').doc(credential.user!.uid).set({
+          // Registra o último login. Etapa 15: não impede a entrada se as
+          // regras recusarem (conta sem cadastro ou desativada).
+          try {
+            await _firestore.collection('users').doc(credential.user!.uid).set({
               'email': credential.user!.email,
               'lastLogin': FieldValue.serverTimestamp(),
             }, SetOptions(merge: true));
+          } catch (e) {
+            debugPrint('lastLogin não gravado: $e');
+          }
 
                   return credential;
                 } catch (e) {
@@ -157,6 +166,17 @@ class AuthService {
       }
   }
 
+  /// Etapa 15: "usuário" ou "matrícula" → e-mail, pela Function apoioLogin
+  /// (sem login). Lança Exception('Usuário não encontrado') se não existir.
+  static Future<String> emailDoLogin(String login) async {
+    final r = await FuncoesNuvem.post('apoioLogin', {'login': login}, comLogin: false);
+    if (r.statusCode == 404) throw Exception('Usuário não encontrado');
+    if (r.statusCode != 200) throw Exception(FuncoesNuvem.erro(r));
+    final email = (jsonDecode(r.body) as Map)['email'] as String? ?? '';
+    if (email.isEmpty) throw Exception('Usuário sem email válido');
+    return email;
+  }
+
   // Verifica se o usuário atual é admin
   Future<bool> isAdmin() async {
     final role = await getUserRole();
@@ -196,32 +216,8 @@ class AuthService {
         return await signInWithEmailAndPassword(login, password);
       }
 
-      // 🔍 busca por username
-      var query = await _firestore
-          .collection('users')
-          .where('username', isEqualTo: login)
-          .limit(1)
-          .get();
-
-      // 🔍 se não achou → tenta matrícula
-      if (query.docs.isEmpty) {
-        query = await _firestore
-            .collection('users')
-            .where('matricula', isEqualTo: login)
-            .limit(1)
-            .get();
-      }
-
-      if (query.docs.isEmpty) {
-        throw Exception('Usuário não encontrado');
-      }
-
-      final data = query.docs.first.data();
-      final email = data['email'];
-
-      if (email == null || email.isEmpty) {
-        throw Exception('Usuário sem email válido');
-      }
+      // 🔍 usuário ou matrícula → e-mail (Etapa 15: pelo servidor)
+      final email = await emailDoLogin(login);
 
       return await _auth.signInWithEmailAndPassword(
         email: email,

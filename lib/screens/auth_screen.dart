@@ -35,8 +35,6 @@ class _AuthScreenState extends State<AuthScreen> {
     String password,
   ) async {
     final auth = FirebaseAuth.instance;
-    final firestore = FirebaseFirestore.instance;
-
     // 🔹 se for email → login direto
     if (login.contains('@')) {
       return await auth.signInWithEmailAndPassword(
@@ -45,28 +43,10 @@ class _AuthScreenState extends State<AuthScreen> {
       );
     }
 
-    // 🔍 busca username
-    var query = await firestore
-        .collection('users')
-        .where('username', isEqualTo: login)
-        .limit(1)
-        .get();
-
-    // 🔍 se não achou → matrícula
-    if (query.docs.isEmpty) {
-      query = await firestore
-          .collection('users')
-          .where('matricula', isEqualTo: login)
-          .limit(1)
-          .get();
-    }
-
-    if (query.docs.isEmpty) {
-      throw Exception('Usuário não encontrado');
-    }
-
-    final data = query.docs.first.data();
-    final email = data['email'];
+    // 🔍 usuário ou matrícula → e-mail.
+    // Etapa 15: quem procura é o servidor (Function apoioLogin), que devolve só
+    // o e-mail; antes o app lia a coleção users sem login (banco aberto).
+    final email = await AuthService.emailDoLogin(login);
 
     return await auth.signInWithEmailAndPassword(
       email: email,
@@ -89,13 +69,19 @@ class _AuthScreenState extends State<AuthScreen> {
       final user = FirebaseAuth.instance.currentUser;
 
       if (user != null) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .set({
-          'email': user.email,
-          'lastLogin': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+        // Etapa 15: registrar o último login não pode impedir a entrada (as
+        // regras recusam se a conta não tiver cadastro ou estiver desativada).
+        try {
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .set({
+            'email': user.email,
+            'lastLogin': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        } catch (e) {
+          debugPrint('lastLogin não gravado: $e');
+        }
       }
 
       await _secureStorage.write(key: 'email', value: _emailController.text.trim());

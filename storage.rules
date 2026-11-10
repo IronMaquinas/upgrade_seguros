@@ -1,18 +1,32 @@
 rules_version = '2';
+
+// storage.rules — Upgrade Seguros
+//
+// Etapa 15: "logado" não basta — qualquer pessoa consegue criar uma conta no
+// Firebase Auth pela internet. Agora vale a mesma regra do banco: usuário com
+// cadastro em users/{uid} e não desativado (consulta ao Firestore pelas
+// regras; no primeiro deploy o Firebase pede para autorizar isso — responda Y).
 service firebase.storage {
   match /b/{bucket}/o {
-    // Fotos, documentos e laudos (como antes: só quem está logado).
+
+    function ativo() {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('ativo', true) != false;
+    }
+
+    // Fotos, documentos e laudos.
     // Etapa 12: vídeo só pode ser enviado para a pasta videos/ (regra abaixo).
     match /{allPaths=**} {
-      allow read, delete: if request.auth != null;
-      allow create, update: if request.auth != null
+      allow read, delete: if ativo();
+      allow create, update: if ativo()
         && !request.resource.contentType.matches('video/.*');
     }
 
     // Etapa 12: vídeos dos sinistros — só vídeo e até 100 MB (teto de qualquer
-    // plano; o limite do plano, hoje 20 MB, é conferido no app).
+    // plano; o limite do plano é conferido no app). Etapa 13: ≤ 100 MB inclusive.
     match /videos/{todos=**} {
-      allow create, update: if request.auth != null
+      allow create, update: if ativo()
         && request.resource.contentType.matches('video/.*')
         && request.resource.size <= 100 * 1024 * 1024;
     }
