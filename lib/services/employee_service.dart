@@ -2,13 +2,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/employee_model.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:upgrade_seguros/services/funcoes_nuvem.dart'; // Etapa 15
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 class EmployeeService {
   final _db = FirebaseFirestore.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   CollectionReference get _employees =>
-      _db.collection('employees');
+      EmpresaAtual.col('employees');
 
   CollectionReference get _users =>
       _db.collection('users');
@@ -79,7 +79,8 @@ class EmployeeService {
 
   /// Stream de todos os usuários (para UserManagementScreen)
   Stream<List<Employee>> getAllEmployeesStream() {
-    return _users.snapshots().map((snapshot) {
+    // Etapa 16: só os usuários da corretora de quem está logado.
+    return _users.where('empresaId', isEqualTo: EmpresaAtual.id).snapshots().map((snapshot) {
       return snapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
         return Employee(

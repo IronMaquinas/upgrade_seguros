@@ -1,8 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/seguradora_model.dart';
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 class SeguradoraService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final String _collection = 'seguradoras';
 
   /// 📝 CRIAR nova seguradora (com TODOS os campos)
@@ -14,13 +14,13 @@ class SeguradoraService {
         throw Exception('Já existe uma seguradora com esse nome!');
       }
 
-      final docRef = await _firestore.collection(_collection).add(
+      final docRef = await EmpresaAtual.col(_collection).add(
         seguradora.toMap(),
       );
 
       // ✅ IMPORTANTE: Atualizar o ID do documento no Firestore
       // Isso garante que o campo 'id' dentro do documento = ID do documento Firestore
-      await _firestore.collection(_collection).doc(docRef.id).update({
+      await EmpresaAtual.col(_collection).doc(docRef.id).update({
         'id': docRef.id,
       });
 
@@ -44,8 +44,7 @@ class SeguradoraService {
   /// 📖 LISTAR todas as seguradoras (ativas e inativas)
   Future<List<Seguradora>> listarTodas() async {
     try {
-      final snapshot = await _firestore
-          .collection(_collection)
+      final snapshot = await EmpresaAtual.col(_collection)
           .orderBy('nome')
           .get();
 
@@ -61,8 +60,7 @@ class SeguradoraService {
   /// 📖 LISTAR apenas as ativas
   Future<List<Seguradora>> listarAtivas() async {
     try {
-      final snapshot = await _firestore
-          .collection(_collection)
+      final snapshot = await EmpresaAtual.col(_collection)
           .where('ativa', isEqualTo: true)
           .orderBy('nome')
           .get();
@@ -79,7 +77,7 @@ class SeguradoraService {
   /// 🔍 BUSCAR por ID
   Future<Seguradora?> buscarPorId(String id) async {
     try {
-      final doc = await _firestore.collection(_collection).doc(id).get();
+      final doc = await EmpresaAtual.col(_collection).doc(id).get();
 
       if (!doc.exists) return null;
 
@@ -101,7 +99,7 @@ class SeguradoraService {
         }
       }
 
-      await _firestore.collection(_collection).doc(id).update(
+      await EmpresaAtual.col(_collection).doc(id).update(
         seguradora.toMap(),
       );
 
@@ -115,7 +113,7 @@ class SeguradoraService {
   /// ❌ DESATIVAR seguradora (soft delete)
   Future<void> desativar(String id) async {
     try {
-      await _firestore.collection(_collection).doc(id).update({
+      await EmpresaAtual.col(_collection).doc(id).update({
         'ativa': false,
       });
 
@@ -129,7 +127,7 @@ class SeguradoraService {
   /// ✅ REATIVAR seguradora
   Future<void> reativar(String id) async {
     try {
-      await _firestore.collection(_collection).doc(id).update({
+      await EmpresaAtual.col(_collection).doc(id).update({
         'ativa': true,
       });
 
@@ -143,8 +141,7 @@ class SeguradoraService {
   /// 🔎 Verificar se nome já existe
   Future<bool> _nomeJaExiste(String nome, {String? excluirId}) async {
     try {
-      var query = _firestore
-          .collection(_collection)
+      var query = EmpresaAtual.col(_collection)
           .where('nome', isEqualTo: nome);
 
       final snapshot = await query.get();
@@ -165,8 +162,7 @@ class SeguradoraService {
 
   /// 🔄 STREAM para atualização em tempo real
   Stream<List<Seguradora>> streamTodas() {
-    return _firestore
-        .collection(_collection)
+    return EmpresaAtual.col(_collection)
         .orderBy('nome')
         .snapshots()
         .map((snapshot) {
@@ -181,8 +177,7 @@ class SeguradoraService {
 
   /// 🔄 STREAM apenas ativas
   Stream<List<Seguradora>> streamAtivas() {
-    return _firestore
-        .collection(_collection)
+    return EmpresaAtual.col(_collection)
         .where('ativa', isEqualTo: true)
         .orderBy('nome')
         .snapshots()

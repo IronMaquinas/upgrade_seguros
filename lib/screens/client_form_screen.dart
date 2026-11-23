@@ -37,6 +37,7 @@ import 'package:flutter_google_places_sdk/flutter_google_places_sdk.dart' hide L
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../widgets/vigencia_date_range_widget.dart';
 import '../widgets/apolice_visualizacao_dialog.dart';
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 class ClientFormScreen extends StatefulWidget {
   final Client? clientToEdit;
@@ -141,8 +142,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
   // Carregar seguradoras do firestore
   Future<void> _carregarSeguradoras() async {
     try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('seguradoras')
+      final snapshot = await EmpresaAtual.col('seguradoras')
           .where('ativa', isEqualTo: true)
           .get();
 

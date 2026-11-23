@@ -29,6 +29,7 @@ import '../services/image_services.dart';
 import 'package:upgrade_seguros/widgets/selectable_text_helper.dart';
 import 'package:upgrade_seguros/utils/filtro_status.dart'; // Etapa 14
 import 'package:upgrade_seguros/widgets/tarefas_evento_dialog.dart'; // Etapa 14
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 class AssistDetailScreen extends StatefulWidget {
   final String assistId;
@@ -752,8 +753,7 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
 
                 // Conclui tarefas anteriores de agendamento/reagendamento
                 try {
-                  final tarefasAnteriores = await FirebaseFirestore.instance
-                      .collection('tasks')
+                  final tarefasAnteriores = await EmpresaAtual.col('tasks')
                       .where('claimId', isEqualTo: _assist!.id)
                       .where('tipo', whereIn: ['agendamento', 'reagendamento'])
                       .get();
@@ -774,7 +774,7 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
 
                 // Gera tarefa de lembrete
                 final placa = _assist!.veiculoSelecionado?.placa ?? '';
-                await FirebaseFirestore.instance.collection('tasks').add({
+                await EmpresaAtual.col('tasks').add({
                   'descricao': 'Reagendamento #$novoNumero para ${_assist!.clientNome}'
                       '${placa.isNotEmpty ? ' • Veículo: $placa' : ''}'
                       '${_assist!.enderecoTerceiro.isNotEmpty ? ' • Local: ${_assist!.enderecoTerceiro}' : ''}',

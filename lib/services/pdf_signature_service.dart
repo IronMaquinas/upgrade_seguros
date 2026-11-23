@@ -2,17 +2,16 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:upgrade_seguros/models/pdf_signature_model.dart';
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 /// Service para gerenciar configurações de assinatura em PDFs
 class PdfSignatureService {
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
   static const String _collectionName = 'pdf_signatures';
 
   /// Obtém a configuração de assinatura para uma seguradora
   Future<PdfSignatureConfig> getSignatureConfig(String seguradoraId) async {
     try {
-      final doc = await _db
-          .collection(_collectionName)
+      final doc = await EmpresaAtual.col(_collectionName)
           .doc(seguradoraId)
           .get();
 
@@ -31,8 +30,7 @@ class PdfSignatureService {
   /// Salva a configuração de assinatura
   Future<void> saveSignatureConfig(PdfSignatureConfig config) async {
     try {
-      await _db
-          .collection(_collectionName)
+      await EmpresaAtual.col(_collectionName)
           .doc(config.seguradoraId)
           .set(
             config.copyWith(updatedAt: DateTime.now()).toJson(),
@@ -51,8 +49,7 @@ class PdfSignatureService {
     bool value,
   ) async {
     try {
-      await _db
-          .collection(_collectionName)
+      await EmpresaAtual.col(_collectionName)
           .doc(seguradoraId)
           .update({
             fieldName: value,
@@ -96,8 +93,7 @@ class PdfSignatureService {
 
   /// Stream para monitorar mudanças em tempo real
   Stream<PdfSignatureConfig> watchSignatureConfig(String seguradoraId) {
-    return _db
-        .collection(_collectionName)
+    return EmpresaAtual.col(_collectionName)
         .doc(seguradoraId)
         .snapshots()
         .map((doc) {

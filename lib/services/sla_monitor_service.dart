@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:upgrade_seguros/models/claim_model.dart';
 import 'package:upgrade_seguros/services/notification_service.dart';
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 class SlaMonitorService {
   static final SlaMonitorService _instance = SlaMonitorService._internal();
@@ -36,6 +37,14 @@ class SlaMonitorService {
   }
 
   Future<void> _loadDataAndCheck() async {
+    // Etapa 16: os dados ficam dentro da corretora do usuário; sem ela, não há o que monitorar.
+    if (!EmpresaAtual.carregada) {
+      try {
+        await EmpresaAtual.carregar();
+      } catch (_) {
+        return;
+      }
+    }
     await _fetchAssistencias();
     await _fetchTasks();
     _checkAlerts();
@@ -43,8 +52,7 @@ class SlaMonitorService {
 
   Future<void> _fetchAssistencias() async {
     try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('assistencias')
+      final snapshot = await EmpresaAtual.col('assistencias')
           .where('status_atual', whereNotIn: ['Concluído', 'Cancelado'])
           .get();
       _assistencias = snapshot.docs
@@ -59,8 +67,7 @@ class SlaMonitorService {
     try {
       // Etapa 14: só as abertas — antes lia TODAS as tarefas a cada 30 s
       // (cada documento lido é cobrado pelo Firestore).
-      final snapshot = await FirebaseFirestore.instance
-          .collection('tasks')
+      final snapshot = await EmpresaAtual.col('tasks')
           .where('status', isNotEqualTo: 'Concluída')
           .get();
       _tasks = snapshot.docs.map((doc) {

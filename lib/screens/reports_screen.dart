@@ -23,6 +23,7 @@ import 'package:upgrade_seguros/widgets/employees_performance_widgets.dart';
 import 'package:upgrade_seguros/widgets/tarefas_funcionarios_card.dart';
 import 'package:upgrade_seguros/utils/tarefas.dart';
 import 'package:upgrade_seguros/utils/sinistralidade.dart';
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 // ─── Helper para converter datas (Timestamp ou String) ───────────────────────
 DateTime _parseDate(dynamic value) {
@@ -330,7 +331,10 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
       final now = DateTime.now();
 
       // Carregar funcionários para mapear ID -> Nome
-      final usersSnapshot = await FirebaseFirestore.instance.collection('users').get();
+      final usersSnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .where('empresaId', isEqualTo: EmpresaAtual.id) // Etapa 16: só a equipe da corretora
+          .get();
       _funcionarioNomes = {};
       for (var doc in usersSnapshot.docs) {
         final data = doc.data();
@@ -345,8 +349,7 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
       final todosSinistros = allClaims.where((c) => c.tipo != 'assistencia').toList();
 
       // ── LISTA COMPLETA DE ASSISTÊNCIAS ──
-      final assistenciasSnap = await FirebaseFirestore.instance
-          .collection('assistencias')
+      final assistenciasSnap = await EmpresaAtual.col('assistencias')
           .get();
       final todasAssistencias = assistenciasSnap.docs
           .map((doc) => Claim.fromMap({...doc.data(), 'id': doc.id}))
@@ -408,8 +411,7 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
       final tempoMedioResolucao = countResolucao > 0 ? somaResolucao / countResolucao : 0.0;
 
       // ── NPS (usando filtro de período) ──
-      final npsAvalSnap = await FirebaseFirestore.instance
-          .collection('avaliacoes')
+      final npsAvalSnap = await EmpresaAtual.col('avaliacoes')
           .get();
 
       final npsNotas = npsAvalSnap.docs
@@ -429,8 +431,7 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
           : 0.0;
 
       // Contadores de pesquisas NPS
-      final pesquisasSnap = await FirebaseFirestore.instance
-          .collection('nps_pesquisas')
+      final pesquisasSnap = await EmpresaAtual.col('nps_pesquisas')
           .get();
       final totalPesquisasEnviadas = pesquisasSnap.docs.length;
       final totalPesquisasRespondidas = pesquisasSnap.docs
@@ -734,8 +735,7 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
           (a, b) => b.sinistralidade.compareTo(a.sinistralidade));
 
       // ── Assistências ───────────────────────────────────────────────────
-      final allAssistencias = await FirebaseFirestore.instance
-          .collection('assistencias')
+      final allAssistencias = await EmpresaAtual.col('assistencias')
           .get();
       final allAssistList = allAssistencias.docs
           .map((doc) => Claim.fromMap({...doc.data(), 'id': doc.id}))

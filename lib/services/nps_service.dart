@@ -8,9 +8,9 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:upgrade_seguros/services/funcoes_nuvem.dart'; // Etapa 15
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 class NpsService {
-  final _db = FirebaseFirestore.instance;
 
   // ── URL base do app web (mudar para produção)
   static const String _baseUrl = 'https://upgrade-seguros.web.app/nps';
@@ -27,7 +27,7 @@ class NpsService {
   }) async {
     final token = '${claimId}_${DateTime.now().millisecondsSinceEpoch}';
 
-    await _db.collection('nps_pesquisas').doc(claimId).set({
+    await EmpresaAtual.col('nps_pesquisas').doc(claimId).set({
       'claimId': claimId,
       'numeroSinistro': numeroSinistro,
       'clienteId': clienteId,
@@ -39,6 +39,13 @@ class NpsService {
       'respondidoEm': null,
     });
 
+    // Etapa 16: o cliente responde sem login e o servidor precisa saber em
+    // qual corretora está a pesquisa. Índice na raiz: nps_indice/{claimId}.
+    await FirebaseFirestore.instance.collection('nps_indice').doc(claimId).set({
+      'empresaId': EmpresaAtual.id,
+      'criadoEm': FieldValue.serverTimestamp(),
+    });
+
     return '$_baseUrl?claim=$claimId&token=$token';
   }
 
@@ -46,8 +53,7 @@ class NpsService {
   Future<void> verificarCotacoesVencidas() async {
     final seiseDiasAtras = DateTime.now().subtract(Duration(days: 7));
     
-    final cotacoes = await _db
-        .collection('cotacoes')
+    final cotacoes = await EmpresaAtual.col('cotacoes')
         .where('status', isEqualTo: 'enviada')
         .where('dataCriacao', isLessThan: seiseDiasAtras)
         .get();

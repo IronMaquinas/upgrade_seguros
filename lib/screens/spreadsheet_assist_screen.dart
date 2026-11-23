@@ -31,6 +31,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:upgrade_seguros/models/workshop_model.dart';
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 class SpreadsheetAssistScreen extends StatefulWidget {
   final String tipoAssistencia;
@@ -199,8 +200,7 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
   Future<void> _carregarWorkshops() async {
     setState(() => _carregandoWorkshops = true);
     try {
-      final docs = await FirebaseFirestore.instance
-          .collection('workshops')
+      final docs = await EmpresaAtual.col('workshops')
           .orderBy('nome')
           .get();
       
@@ -313,8 +313,7 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
 
   // CARREGAR SEGURADORAS DO BANCO DE DADOS
   Future<void> _carregarSeguradoras() async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('seguradoras')
+    final snapshot = await EmpresaAtual.col('seguradoras')
         .where('ativa', isEqualTo: true)
         .get();
     setState(() {
@@ -529,7 +528,7 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
   }
 
   Future<void> _salvarTarefasNoFirestore(String claimId, String numeroAssistencia) async {
-    final collection = FirebaseFirestore.instance.collection('tasks');
+    final collection = EmpresaAtual.col('tasks');
     final user = FirebaseAuth.instance.currentUser;
 
     DateTime? prazoAgendamento;

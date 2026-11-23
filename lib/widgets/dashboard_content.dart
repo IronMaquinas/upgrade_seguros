@@ -19,6 +19,7 @@ import '../models/claim_model.dart';
 import '../models/client_model.dart';
 import '../services/firestore_service.dart';
 import '../services/auth_service.dart';
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 class DashboardContent extends StatefulWidget {
   final Function(Widget)? onNavigate;
@@ -132,8 +133,7 @@ void _diagnosticarContratos() {
   // FUNÇÃO PARA BUSCAR ASSISTÊNCIAS EM ANDAMENTO
   Future<void> _fetchAssistencias() async {
     try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('assistencias')
+      final snapshot = await EmpresaAtual.col('assistencias')
           .where('status_atual', whereNotIn: ['Concluído', 'Cancelado'])
           .get();
       if (mounted) {
@@ -230,8 +230,7 @@ void _diagnosticarContratos() {
   // BUSCAR NPS MÉDIO DE TODOS OS CLIENTES
   Future<void> _fetchNpsMedia() async {
     try {
-      final snapshot = await FirebaseFirestore.instance
-        .collection('nps_pesquisas')
+      final snapshot = await EmpresaAtual.col('nps_pesquisas')
         .where('status', isEqualTo: 'respondida')
         .get();
       

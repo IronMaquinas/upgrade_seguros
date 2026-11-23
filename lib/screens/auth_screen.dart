@@ -10,6 +10,7 @@ import '../screens/register_screen.dart';
 import '../screens/dashboard_screen.dart';
 import '../services/auth_service.dart';
 import '../services/biometric_service.dart';
+import 'package:upgrade_seguros/widgets/portao_empresa.dart'; // Etapa 16
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -89,7 +90,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
       if (mounted) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const DashboardScreen()),
+          MaterialPageRoute(builder: (_) => const PortaoEmpresa(child: DashboardScreen())), // Etapa 16
         );
       }
     } on FirebaseAuthException catch (e) {
@@ -124,7 +125,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
           if (mounted) {
             Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const DashboardScreen()),
+              MaterialPageRoute(builder: (_) => const PortaoEmpresa(child: DashboardScreen())), // Etapa 16
             );
           }
         } else {

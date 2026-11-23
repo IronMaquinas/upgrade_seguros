@@ -13,6 +13,9 @@ exports.npsPublico = seguranca.npsPublico;
 exports.apoioLogin = seguranca.apoioLogin;
 exports.criarUsuario = seguranca.criarUsuario;
 
+// Etapa 16: multi-tenant — cópia dos dados da raiz para a pasta da corretora.
+exports.migrarEmpresa = require('./empresa').migrarEmpresa;
+
 exports.uploadFile = functions.https.onRequest(async (request, response) => {
   cors(request, response, async () => {
     if (request.method !== 'POST') {

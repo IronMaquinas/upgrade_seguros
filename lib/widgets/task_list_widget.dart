@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 class TaskListWidget extends StatefulWidget {
   final String numeroSinistro;         // ID do sinistro
@@ -26,11 +27,10 @@ class TaskListWidget extends StatefulWidget {
 }
 
 class _TaskListWidgetState extends State<TaskListWidget> {
-  final _firestore = FirebaseFirestore.instance;
   final _dateFormat = DateFormat('dd/MM/yyyy HH:mm');
 
   CollectionReference<Map<String, dynamic>> get _tasksCollection =>
-    _firestore.collection('tasks');
+    EmpresaAtual.col('tasks');
 
   // Adiciona ou edita tarefa
   Future<void> _showTaskDialog({DocumentSnapshot? taskDoc}) async {

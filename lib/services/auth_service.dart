@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:upgrade_seguros/services/funcoes_nuvem.dart'; // Etapa 15
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -49,8 +50,7 @@ class AuthService {
  
       // Se não achou em 'users', tenta buscar em 'employees' (by email)
       try {
-        final employeeDoc = await _firestore
-            .collection('employees')
+        final employeeDoc = await EmpresaAtual.col('employees')
             .where('email', isEqualTo: user.email)
             .limit(1)
             .get();
@@ -82,6 +82,7 @@ class AuthService {
 
   // Faz logout
   Future<void> signOut() async {
+    EmpresaAtual.limpar(); // Etapa 16
     await _auth.signOut();
   }
 

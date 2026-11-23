@@ -68,12 +68,23 @@ function isSilencePeriod(horarioInicio, horarioFim) {
 exports.verificarAssistenciasAtradasTelegram = onSchedule(
   { schedule: "every 10 minutes", secrets: [TELEGRAM_BOT_TOKEN] },
   async () => {
+    // Etapa 16: cada corretora tem as próprias configurações e assistências
+    // (corretoras/{id}/app_config/config e corretoras/{id}/assistencias).
+    // listDocuments() traz também corretoras que só têm subcoleções.
+    const corretoras = await admin.firestore().collection("corretoras").listDocuments();
+    for (const corretora of corretoras) {
+      await verificarCorretora(corretora);
+    }
+  }
+);
+
+/** Assistências atrasadas de UMA corretora ([base] = corretoras/{id}). */
+async function verificarCorretora(base) {
     try {
-      const db = admin.firestore();
       const agora = new Date();
 
-      // 1. Carregar configuração do Firestore (app_config/config)
-      const configDoc = await db.collection('app_config').doc('config').get();
+      // 1. Carregar configuração do Firestore (corretoras/{id}/app_config/config)
+      const configDoc = await base.collection('app_config').doc('config').get();
       const config = configDoc.exists ? configDoc.data() : {};
 
       // 2. Extrair configurações de notificação
@@ -86,7 +97,7 @@ exports.verificarAssistenciasAtradasTelegram = onSchedule(
 
       // 3. Verificar se há chat_ids configurados
       if (chatIds.length === 0) {
-        console.log("🔇 Nenhum chat_id configurado no Firestore. Notificações desabilitadas.");
+        console.log(`🔇 ${base.id}: nenhum chat_id configurado. Notificações desabilitadas.`);
         return; // Interrompe a execução
       }
 
@@ -108,7 +119,7 @@ exports.verificarAssistenciasAtradasTelegram = onSchedule(
       const statusList = ["Aberto", "Em Andamento"];
       let allDocs = [];
       for (const status of statusList) {
-        const snapshot = await db
+        const snapshot = await base
           .collection("assistencias")
           .where("status_atual", "==", status)
           .get();
@@ -175,7 +186,7 @@ exports.verificarAssistenciasAtradasTelegram = onSchedule(
             }
 
             // 9. Atualizar última notificação
-            await db.collection("assistencias").doc(doc.id).update({
+            await base.collection("assistencias").doc(doc.id).update({
               ultima_notificacao_atraso: admin.firestore.FieldValue.serverTimestamp(),
             });
 
@@ -186,7 +197,6 @@ exports.verificarAssistenciasAtradasTelegram = onSchedule(
         }
       }
     } catch (error) {
-      console.error("❌ Erro geral:", error);
+      console.error(`❌ Erro geral (corretora ${base.id}):`, error);
     }
-  }
-);
+}

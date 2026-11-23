@@ -25,6 +25,7 @@ import '../services/place_search_delegate.dart';
 import '../utils/formatters.dart';
 import 'assist_detail_screen.dart';
 import '../widgets/client_search_dialog.dart';
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 class SpreadsheetAssistResidencialScreen extends StatefulWidget {
   const SpreadsheetAssistResidencialScreen({super.key});
@@ -132,8 +133,7 @@ class _SpreadsheetAssistResidencialScreenState
 
   // ── Carregar seguradoras do banco de dados ──────────────────────────────
   Future<void> _carregarSeguradoras() async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('seguradoras')
+    final snapshot = await EmpresaAtual.col('seguradoras')
         .where('ativa', isEqualTo: true)
         .get();
     setState(() {
@@ -407,7 +407,7 @@ class _SpreadsheetAssistResidencialScreenState
 
   Future<void> _salvarTarefas(
       String claimId, String numeroAssistencia) async {
-    final collection = FirebaseFirestore.instance.collection('tasks');
+    final collection = EmpresaAtual.col('tasks');
     final user = FirebaseAuth.instance.currentUser;
 
     // Tarefa automática de agendamento

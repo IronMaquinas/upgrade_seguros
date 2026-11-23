@@ -23,6 +23,7 @@ import '../services/firestore_service.dart';
 import '../models/client_model.dart';
 import '../screens/claim_list_screen.dart';
 import '../screens/assist_list_screen.dart';
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -730,6 +731,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               );
               if (shouldLogout == true) {
+                EmpresaAtual.limpar(); // Etapa 16
                 await FirebaseAuth.instance.signOut();
                 if (context.mounted) {
                   Navigator.of(context).pushAndRemoveUntil(

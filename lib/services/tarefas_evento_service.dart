@@ -10,12 +10,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../utils/tarefas_evento.dart';
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 class TarefasEventoService {
   final FirebaseFirestore _db;
   TarefasEventoService({FirebaseFirestore? db}) : _db = db ?? FirebaseFirestore.instance;
 
-  CollectionReference<Map<String, dynamic>> get _tasks => _db.collection('tasks');
+  CollectionReference<Map<String, dynamic>> get _tasks => EmpresaAtual.col('tasks');
 
   /// Tarefas abertas do sinistro/assistência [claimId], da mais antiga para a mais nova.
   Future<List<TarefaDoEvento>> abertasDoEvento(String claimId) async {
@@ -85,8 +86,8 @@ class TarefasEventoService {
     for (var i = 0; i < ids.length; i += 30) {
       final parte = ids.skip(i).take(30).toList();
       final resultados = await Future.wait([
-        _db.collection('sinistros').where(FieldPath.documentId, whereIn: parte).get(),
-        _db.collection('assistencias').where(FieldPath.documentId, whereIn: parte).get(),
+        EmpresaAtual.col('sinistros').where(FieldPath.documentId, whereIn: parte).get(),
+        EmpresaAtual.col('assistencias').where(FieldPath.documentId, whereIn: parte).get(),
       ]);
       for (final r in resultados) {
         for (final d in r.docs) {

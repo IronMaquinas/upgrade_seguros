@@ -26,6 +26,7 @@ import 'package:upgrade_seguros/utils/filtro_status.dart';
 import 'package:upgrade_seguros/services/tarefas_evento_service.dart'; // Etapa 14
 import 'package:upgrade_seguros/utils/tarefas_evento.dart'; // Etapa 14
 import 'package:upgrade_seguros/services/funcoes_nuvem.dart'; // Etapa 15
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 
 const String _cloudFunctionUrl = 'https://uploadfile-hwtlk2s4qq-uc.a.run.app'; // uploadFile (exige login desde a Etapa 15)
@@ -41,25 +42,25 @@ class FirestoreService {
 
   // Coleção pública: clientes
   CollectionReference<Map<String, dynamic>> getClientesCollection() {
-    return _db.collection('clientes');
+    return EmpresaAtual.col('clientes');
   }
 
   // FUNÇÃO HELPER
   CollectionReference<Map<String, dynamic>> getColecaoPorTipo(String tipo) {
     if (tipo == 'assistencia') {
-      return _db.collection('assistencias');
+      return EmpresaAtual.col('assistencias');
     }
-    return _db.collection('sinistros');
+    return EmpresaAtual.col('sinistros');
   }
 
   // Coleção pública: sinistros
   CollectionReference<Map<String, dynamic>> getSinistrosCollection() {
-    return _db.collection('sinistros');
+    return EmpresaAtual.col('sinistros');
   }
 
     // ✅ ESTÁ AQUI: Coleção de tarefas de nível superior. Todas as tarefas devem ser salvas e lidas a partir daqui.
   CollectionReference<Map<String, dynamic>> getTasksCollection() {
-    return _db.collection('tasks');
+    return EmpresaAtual.col('tasks');
   }
 
   /// --- CLIENTES ---
@@ -148,8 +149,7 @@ class FirestoreService {
   // Firestore (dispensa índice composto); ordena aqui, mais recente primeiro.
   // Atenção: `whereNotIn` não traz documentos sem o campo `status_atual`.
   Future<List<Claim>> _emCursoDaColecao(String colecao) async {
-    final snapshot = await _db
-        .collection(colecao)
+    final snapshot = await EmpresaAtual.col(colecao)
         .where('status_atual', whereNotIn: FiltroStatus.finalizados)
         .get();
     return snapshot.docs.map((doc) => Claim.fromMap(doc.data())..id = doc.id).toList();
@@ -184,7 +184,7 @@ class FirestoreService {
 
   Future<void> deleteClient(String clientId) async {
     try {
-      await _db.collection('clientes').doc(clientId).delete();
+      await EmpresaAtual.col('clientes').doc(clientId).delete();
     } catch (e) {
       rethrow; // Propaga o erro para ser tratado na tela
     }
@@ -196,14 +196,14 @@ class FirestoreService {
       DocumentSnapshot docSnapshot;
       CollectionReference colecao;
 
-      final snapSinistro = await _db.collection('sinistros').doc(claimId).get();
+      final snapSinistro = await EmpresaAtual.col('sinistros').doc(claimId).get();
       if (snapSinistro.exists) {
         docSnapshot = snapSinistro;
-        colecao = _db.collection('sinistros');
+        colecao = EmpresaAtual.col('sinistros');
       } else {
-        final snapAssist = await _db.collection('assistencias').doc(claimId).get();
+        final snapAssist = await EmpresaAtual.col('assistencias').doc(claimId).get();
         docSnapshot = snapAssist;
-        colecao = _db.collection('assistencias');
+        colecao = EmpresaAtual.col('assistencias');
       }
 
       if (!docSnapshot.exists) return;
@@ -481,8 +481,7 @@ class FirestoreService {
   Future<Claim?> getClaimByNumeroSinistro(String numeroSinistro) async {
     try {
       // Tenta em sinistros primeiro
-      final sinistroSnap = await _db
-          .collection('sinistros')
+      final sinistroSnap = await EmpresaAtual.col('sinistros')
           .where('numero_sinistro', isEqualTo: numeroSinistro)
           .limit(1)
           .get();
@@ -495,8 +494,7 @@ class FirestoreService {
       }
 
       // Tenta em assistencias
-      final assistSnap = await _db
-          .collection('assistencias')
+      final assistSnap = await EmpresaAtual.col('assistencias')
           .where('numero_sinistro', isEqualTo: numeroSinistro)
           .limit(1)
           .get();
@@ -1102,8 +1100,7 @@ class FirestoreService {
   /// Retorna apenas SINISTROS (filtra por tipo)
   Future<List<Claim>> getClaimsOfType(String tipoAtendimento) async {
     try {
-      final query = _db
-          .collection('assistencias')
+      final query = EmpresaAtual.col('assistencias')
           .where('tipo', isEqualTo: tipoAtendimento)
           .orderBy('data_abertura', descending: true);
   
@@ -1128,8 +1125,7 @@ class FirestoreService {
   /// Retorna ASSISTÊNCIAS com SLA próximo de exceder ou já excedido
   Stream<List<Claim>> streamAssistWithAlerts() {
     try {
-      return _db
-          .collection('assistencias')
+      return EmpresaAtual.col('assistencias')
           .where('tipo', isEqualTo: 'assistencia')
           .where('sla_excedido', isEqualTo: false)
           .orderBy('sla_previsto')
@@ -1144,7 +1140,7 @@ class FirestoreService {
   /// Atualiza o flag sla_excedido de uma assistência
   Future<void> updateAssistSlaExceeded(String claimId, bool excedido) async {
     try {
-      await _db.collection('assistencias').doc(claimId).update({
+      await EmpresaAtual.col('assistencias').doc(claimId).update({
         'sla_excedido': excedido,
         if (excedido)
           'sla_alertado_em': Timestamp.now(),
@@ -1158,7 +1154,7 @@ class FirestoreService {
   /// Retorna configurações de SLA
   Future<List<AssistSlaConfig>> getSlaConfigs() async {
     try {
-      final snapshot = await _db.collection('sla_configs').get();
+      final snapshot = await EmpresaAtual.col('sla_configs').get();
       return snapshot.docs
           .map((doc) => AssistSlaConfig.fromFirestore(doc))
           .toList();
@@ -1171,8 +1167,7 @@ class FirestoreService {
   /// Retorna configuração de SLA para um tipo específico
   Future<AssistSlaConfig?> getSlaConfigForType(String tipoAssistencia) async {
     try {
-      final query = await _db
-          .collection('sla_configs')
+      final query = await EmpresaAtual.col('sla_configs')
           .where('tipo_assistencia', isEqualTo: tipoAssistencia)
           .limit(1)
           .get();
@@ -1192,13 +1187,12 @@ class FirestoreService {
     try {
       if (config.id.isEmpty) {
         // Novo documento
-        await _db.collection('sla_configs').doc(config.tipoAssistencia).set(
+        await EmpresaAtual.col('sla_configs').doc(config.tipoAssistencia).set(
               config.toMap(),
             );
       } else {
         // Atualizar documento existente
-        await _db
-            .collection('sla_configs')
+        await EmpresaAtual.col('sla_configs')
             .doc(config.id)
             .update(config.toMap());
       }
@@ -1211,7 +1205,7 @@ class FirestoreService {
   /// Deleta configuração de SLA
   Future<void> deleteSlaConfig(String configId) async {
     try {
-      await _db.collection('sla_configs').doc(configId).delete();
+      await EmpresaAtual.col('sla_configs').doc(configId).delete();
     } catch (e) {
       debugPrint('Erro ao deletar SLA config: $e');
       rethrow;
@@ -1220,7 +1214,7 @@ class FirestoreService {
 
   Future<void> _initializeSlaConfigs() async {
     try {
-      final existing = await _db.collection('sla_configs').get();
+      final existing = await EmpresaAtual.col('sla_configs').get();
       if (existing.docs.isEmpty) {
         // Criar configurações padrão
         for (final config in AssistSlaDefaults.getAll()) {
@@ -1236,7 +1230,7 @@ class FirestoreService {
   // Adicionar oficina ao sinistro
   Future<void> addOficinaToClaim(String claimId, Workshop oficina) async {
     try {
-      await _db.collection('sinistros').doc(claimId).update({
+      await EmpresaAtual.col('sinistros').doc(claimId).update({
         'oficinas': FieldValue.arrayUnion([oficina.toMap()])
       });
     } catch (e) {
@@ -1247,7 +1241,7 @@ class FirestoreService {
   // Remover oficina do sinistro
   Future<void> removeOficinaFromClaim(String claimId, Workshop oficina) async {
     try {
-      await _db.collection('sinistros').doc(claimId).update({
+      await EmpresaAtual.col('sinistros').doc(claimId).update({
         'oficinas': FieldValue.arrayRemove([oficina.toMap()])
       });
     } catch (e) {
@@ -1258,7 +1252,7 @@ class FirestoreService {
   // Atualizar oficina no sinistro
   Future<void> updateOficinaInClaim(String claimId, Workshop oficina) async {
     try {
-      final doc = await _db.collection('sinistros').doc(claimId).get();
+      final doc = await EmpresaAtual.col('sinistros').doc(claimId).get();
       if (doc.exists) {
         final List<dynamic> oficinasData = doc.data()?['oficinas'] ?? [];
         final List<Workshop> oficinas = oficinasData
@@ -1268,7 +1262,7 @@ class FirestoreService {
         
         oficinas.add(oficina);
         
-        await _db.collection('sinistros').doc(claimId).update({
+        await EmpresaAtual.col('sinistros').doc(claimId).update({
           'oficinas': oficinas.map((o) => o.toMap()).toList()
         });
       }
@@ -1279,7 +1273,7 @@ class FirestoreService {
 
   // Fórmula para avaliar data de vencimento das apólices
   Future<List<Client>> getAllClients() async {
-    final snapshot = await _db.collection('clientes').get();
+    final snapshot = await EmpresaAtual.col('clientes').get();
     return snapshot.docs
         .map((doc) => Client.fromMap(doc.data())..id = doc.id)
         .toList();
@@ -1320,11 +1314,11 @@ class FirestoreService {
 
   Future<Claim?> getClaimById(String claimId) async {
   // Procura em assistências primeiro
-    var doc = await _db.collection('assistencias').doc(claimId).get();
+    var doc = await EmpresaAtual.col('assistencias').doc(claimId).get();
     
     if (!doc.exists) {
       // Se não encontrar, procura em sinistros
-      doc = await _db.collection('sinistros').doc(claimId).get();
+      doc = await EmpresaAtual.col('sinistros').doc(claimId).get();
     }
     
     if (!doc.exists) return null;
@@ -1341,7 +1335,7 @@ class FirestoreService {
   Future<List<Claim>> getAllClaims() async {
     try {
       // Buscar sinistros
-      final sinistrosSnapshot = await _db.collection('sinistros').get();
+      final sinistrosSnapshot = await EmpresaAtual.col('sinistros').get();
       final sinistros = sinistrosSnapshot.docs.map((doc) {
         final claim = Claim.fromMap(doc.data());
         claim.id = doc.id;
@@ -1349,7 +1343,7 @@ class FirestoreService {
       }).toList();
 
       // Buscar assistências
-      final assistenciasSnapshot = await _db.collection('assistencias').get();
+      final assistenciasSnapshot = await EmpresaAtual.col('assistencias').get();
       final assistencias = assistenciasSnapshot.docs.map((doc) {
         final claim = Claim.fromMap(doc.data());
         claim.id = doc.id;
@@ -1395,7 +1389,7 @@ class FirestoreService {
         getSinistrosCollection()
             .where(FieldPath.documentId, whereIn: chunk)
             .get(),
-        _db.collection('assistencias')
+        EmpresaAtual.col('assistencias')
             .where(FieldPath.documentId, whereIn: chunk)
             .get(),
       ]);
@@ -1461,7 +1455,8 @@ class FirestoreService {
 
   // --- OBTER NOME DO USUÁRIO ---
   Future<List<QueryDocumentSnapshot>> getFuncionarios() async {
-    final snapshot = await _db.collection('users').get();
+    // Etapa 16: só a equipe da corretora de quem está logado.
+    final snapshot = await _db.collection('users').where('empresaId', isEqualTo: EmpresaAtual.id).get();
     return snapshot.docs;
   }
 

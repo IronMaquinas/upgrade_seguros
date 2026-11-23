@@ -1,19 +1,18 @@
 // lib/services/config_service.dart
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/config_model.dart';
 import '../utils/gatilho.dart';
 import '../utils/videos.dart';
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 class ConfigService {
-  final _db = FirebaseFirestore.instance;
   static const String _configDoc = 'config';
   static const String _configCollection = 'app_config';
 
   // Garantir que o documento existe
   Future<void> _ensureConfigExists() async {
-    final doc = await _db.collection(_configCollection).doc(_configDoc).get();
+    final doc = await EmpresaAtual.col(_configCollection).doc(_configDoc).get();
     if (!doc.exists) {
-      await _db.collection(_configCollection).doc(_configDoc).set(
+      await EmpresaAtual.col(_configCollection).doc(_configDoc).set(
         AppConfig(id: _configDoc).toMap(),
       );
     }
@@ -23,7 +22,7 @@ class ConfigService {
   Future<AppConfig> getConfig() async {
     try {
       await _ensureConfigExists();  // ← GARANTE QUE EXISTE
-      final doc = await _db.collection(_configCollection).doc(_configDoc).get();
+      final doc = await EmpresaAtual.col(_configCollection).doc(_configDoc).get();
       if (doc.exists) {
         return AppConfig.fromMap(doc.data()!);
       }
@@ -49,7 +48,7 @@ class ConfigService {
   Future<void> updatePercentualGatilho(double percentual) async {
     final valor = GatilhoApolice.normalizarPercentual(percentual);
     await _ensureConfigExists();
-    await _db.collection(_configCollection).doc(_configDoc).update({
+    await EmpresaAtual.col(_configCollection).doc(_configDoc).update({
       'percentualGatilhoPadrao': valor,
     });
     _percentualGatilhoCache = valor;
@@ -60,7 +59,7 @@ class ConfigService {
 
   Future<void> updateLimitesVideo({required int maxMb, required int porSinistro}) async {
     await _ensureConfigExists();
-    await _db.collection(_configCollection).doc(_configDoc).update({
+    await EmpresaAtual.col(_configCollection).doc(_configDoc).update({
       'videoMaxMb': LimitesVideo.normalizarMb(maxMb),
       'videosPorSinistro': LimitesVideo.normalizarQuantidade(porSinistro),
     });
@@ -72,7 +71,7 @@ class ConfigService {
     final config = await getConfig();
     config.slaSinistrosPorRamo[AppConfig.chaveSlaRamo(ramo)] = dias;
     
-    await _db.collection(_configCollection).doc(_configDoc).update({
+    await EmpresaAtual.col(_configCollection).doc(_configDoc).update({
       'slaSinistrosPorRamo': config.slaSinistrosPorRamo,
     });
   }
@@ -83,7 +82,7 @@ class ConfigService {
     final config = await getConfig();
     config.slaAsistenciasPorTipo[tipo] = minutos;
     
-    await _db.collection(_configCollection).doc(_configDoc).update({
+    await EmpresaAtual.col(_configCollection).doc(_configDoc).update({
       'slaAsistenciasPorTipo': config.slaAsistenciasPorTipo,
     });
   }
@@ -104,7 +103,7 @@ class ConfigService {
   // Atualizar toggle NPS
   Future<void> updateNpsEnabled(bool enabled) async {
     await _ensureConfigExists();  // ← GARANTE QUE EXISTE
-    await _db.collection(_configCollection).doc(_configDoc).update({
+    await EmpresaAtual.col(_configCollection).doc(_configDoc).update({
       'enableNpsSurvey': enabled,
     });
   }
@@ -119,7 +118,7 @@ class ConfigService {
     required List<String> chatIds,
   }) async {
     await _ensureConfigExists();
-    await _db.collection(_configCollection).doc(_configDoc).update({
+    await EmpresaAtual.col(_configCollection).doc(_configDoc).update({
       'notificacoesAtivas': ativas,
       'notificacaoHorarioInicio': horarioInicio,
       'notificacaoHorarioFim': horarioFim,

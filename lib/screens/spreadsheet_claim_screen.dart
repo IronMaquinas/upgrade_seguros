@@ -44,6 +44,7 @@ import 'package:upgrade_seguros/services/video_service.dart';
 import 'package:upgrade_seguros/utils/videos.dart';
 import 'package:upgrade_seguros/widgets/videos_sinistro.dart';
 import 'package:upgrade_seguros/utils/gatilho.dart';
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
  enum RelatoStep {
     situacao,
@@ -1347,8 +1348,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
  
   // CARREGA SEGURADORAS PARA PREENCHER AUTOCOMPLETE
   Future<void> _carregarSeguradoras() async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('seguradoras')
+    final snapshot = await EmpresaAtual.col('seguradoras')
         .where('ativa', isEqualTo: true)
         .get();
 
@@ -2874,8 +2874,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
       if (clienteId.isEmpty) return 0.0;
       
       // Buscar direto do Firestore
-      final snapshot = await FirebaseFirestore.instance
-          .collection('sinistros')
+      final snapshot = await EmpresaAtual.col('sinistros')
           .where('id_cliente', isEqualTo: clienteId)
           .get();
       
@@ -2918,8 +2917,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
       print('🔍 Atualizando totalReceita para clienteId: $clienteId');
 
       // Buscar todos os sinistros do cliente
-      final snapshot = await FirebaseFirestore.instance
-          .collection('sinistros')
+      final snapshot = await EmpresaAtual.col('sinistros')
           .where('id_cliente', isEqualTo: clienteId)
           .get();
 
@@ -2936,8 +2934,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
       print('💰 Total a atualizar: R\$ $totalReceita');
 
       // Verificar se documento existe
-      final docExists = await FirebaseFirestore.instance
-          .collection('clientes')
+      final docExists = await EmpresaAtual.col('clientes')
           .doc(clienteId)
           .get();
  
@@ -2946,8 +2943,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
         
         // Listar todos os clients para debugar
         print('📋 Listando todos os clients:');
-        final allClients = await FirebaseFirestore.instance
-            .collection('clientes')
+        final allClients = await EmpresaAtual.col('clientes')
             .get();
         
         for (var doc in allClients.docs) {
@@ -2958,8 +2954,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
       }
 
       // Atualizar cliente com novo totalReceita
-      await FirebaseFirestore.instance
-          .collection('clientes')
+      await EmpresaAtual.col('clientes')
           .doc(clienteId)
           .update({
             'total_receita': totalReceita,

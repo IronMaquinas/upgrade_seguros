@@ -17,6 +17,7 @@ import 'services/biometric_service.dart';
 import 'screens/auth_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/nps_response_screen.dart';
+import 'package:upgrade_seguros/widgets/portao_empresa.dart'; // Etapa 16
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -181,7 +182,7 @@ class _AuthOrDashboardRedirectState extends State<AuthOrDashboardRedirect> {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(
                 builder: (_) => isAuthenticated
-                    ? const DashboardScreen()
+                    ? const PortaoEmpresa(child: DashboardScreen()) // Etapa 16
                     : const AuthScreen(),
               ),
             );

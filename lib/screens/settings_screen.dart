@@ -17,6 +17,7 @@ import 'package:upgrade_seguros/utils/formatters.dart';
 import 'package:upgrade_seguros/utils/gatilho.dart';
 import 'package:upgrade_seguros/utils/videos.dart';
 import 'package:upgrade_seguros/widgets/tarefas_evento_dialog.dart'; // Etapa 14
+import 'package:upgrade_seguros/widgets/migracao_empresa_card.dart'; // Etapa 16
 import '../models/seguradora_model.dart';
 import '../services/seguradora_service.dart';
 import 'package:upgrade_seguros/models/pdf_signature_model.dart';
@@ -51,9 +52,26 @@ class _SettingsScreenState extends State<SettingsScreen>
   final _workshopService = WorkshopService();
   String _buscaOfficina = '';
 
+  // Etapa 16: funcionário vê Configurações como somente leitura.
+  bool _admin = false;
+
+  /// Executa [acao] só para o gestor; para os demais mostra o aviso.
+  void _soGestor(VoidCallback acao) {
+    if (_admin) {
+      acao();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Somente o gestor (administrador) pode alterar as configurações.')),
+      );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    AuthService().isAdmin().then((admin) {
+      if (mounted) setState(() => _admin = admin);
+    }).catchError((_) {});
     _tabController = TabController(length: 4, vsync: this);
     _loadPdfSignatureConfig();
   }
@@ -239,6 +257,26 @@ class _SettingsScreenState extends State<SettingsScreen>
             ),
           ),
 
+          // Etapa 16: aviso de somente leitura para o funcionário.
+          if (!_admin)
+            Container(
+              width: double.infinity,
+              color: const Color(0xFFFFF8E1),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                children: [
+                  Icon(Icons.lock_outline, size: 16, color: Colors.orange.shade800),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Somente leitura: apenas o gestor (administrador) altera as configurações.',
+                      style: TextStyle(fontSize: 12, color: Colors.orange.shade900),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           Expanded(
             child: TabBarView(
               controller: _tabController,
@@ -250,9 +288,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                   service: _service,
                   busca: _busca,
                   onBuscaChanged: (v) => setState(() => _busca = v),
-                  onAdicionar: () => _abrirForm(),
-                  onEditar: (s) => _abrirForm(seguradora: s),
-                  onToggle: _toggleAtiva,
+                  onAdicionar: () => _soGestor(() => _abrirForm()),
+                  onEditar: (s) => _soGestor(() => _abrirForm(seguradora: s)),
+                  onToggle: (s) => _soGestor(() => _toggleAtiva(s)),
                 ),
                 
                 // ─── ABA OFICINAS (NOVA) ───
@@ -260,9 +298,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                   service: _workshopService,
                   busca: _buscaOfficina,
                   onBuscaChanged: (v) => setState(() => _buscaOfficina = v),
-                  onAdicionar: () => _abrirFormOfficina(),
-                  onEditar: (w) => _abrirFormOfficina(workshop: w),
-                  onToggle: _toggleOficinaAtiva,
+                  onAdicionar: () => _soGestor(() => _abrirFormOfficina()),
+                  onEditar: (w) => _soGestor(() => _abrirFormOfficina(workshop: w)),
+                  onToggle: (w) => _soGestor(() => _toggleOficinaAtiva(w)),
                 ),
                 
                 const _AbaUsuarios(),
@@ -951,10 +989,16 @@ class _AbaAjustesState extends State<_AbaAjustes> {
   final _firestoreService = FirestoreService();
   final _employeeService = EmployeeService();
   Employee? _currentEmployee;
+
+  // Etapa 16: só o gestor (admin) altera; até confirmar, fica só leitura.
+  bool _somenteLeitura = true;
  
   @override
   void initState() {
     super.initState();
+    AuthService().isAdmin().then((admin) {
+      if (mounted) setState(() => _somenteLeitura = !admin);
+    }).catchError((_) {});
     _loadConfig();
     _loadPdfSignatureConfig();
     _loadCorretora();
@@ -1502,7 +1546,10 @@ class _AbaAjustesState extends State<_AbaAjustes> {
 
     return SingleChildScrollView(
     padding: const EdgeInsets.all(20),
-    child: Column(
+    child: IgnorePointer(
+      // Etapa 16: funcionário vê as configurações, mas só o gestor altera.
+      ignoring: _somenteLeitura,
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // ─── SLA ASSISTÊNCIAS ─────────────────────────────────────────────
@@ -1742,6 +1789,9 @@ class _AbaAjustesState extends State<_AbaAjustes> {
           // Etapa 14: limpeza de tarefas esquecidas (só aparece para admin).
           const CartaoLimpezaTarefas(),
 
+          // Etapa 16: passagem dos dados para a pasta da corretora (só admin).
+          const CartaoMigracaoEmpresa(),
+
           // ─── SEÇÃO: NOTIFICAÇÕES ───────────────────────────────────────────────
           const SizedBox(height: 32),
           const Text(
@@ -1913,6 +1963,7 @@ class _AbaAjustesState extends State<_AbaAjustes> {
           const SizedBox(height: 40),
         ],
       ),
+    ),
     );
   }
 

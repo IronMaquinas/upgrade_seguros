@@ -46,6 +46,7 @@ import 'package:upgrade_seguros/widgets/selectable_text_helper.dart';
 import 'package:upgrade_seguros/services/tarefas_evento_service.dart'; // Etapa 14
 import 'package:upgrade_seguros/utils/tarefas_evento.dart'; // Etapa 14
 import 'package:upgrade_seguros/widgets/tarefas_evento_dialog.dart'; // Etapa 14
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 
 class ClaimDetailScreen extends StatefulWidget {
   final Claim claim;
@@ -1178,8 +1179,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
       _currentClaim.arquivosLaudosUrls.remove(url);
 
       // 🔥 atualiza Firestore
-      await FirebaseFirestore.instance
-          .collection('sinistros')
+      await EmpresaAtual.col('sinistros')
           .doc(_currentClaim.id)
           .update({
         'arquivos_laudos_urls': FieldValue.arrayRemove([url]),
@@ -1381,8 +1381,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
         }
 
         // Carrega a configuração PDF
-        final pdfConfigDoc = await FirebaseFirestore.instance
-            .collection('pdf_signatures')
+        final pdfConfigDoc = await EmpresaAtual.col('pdf_signatures')
             .doc(empresaId)
             .get();
         if (pdfConfigDoc.exists) {

@@ -67,12 +67,24 @@ function postComCors(handler) {
  *   { acao: 'responder', claimId, token, nota, pontosFortes, pontosFracos, reclamacoes, sugestoes }
  * Mesma lógica que o app fazia em lib/services/nps_service.dart.
  */
+/**
+ * Etapa 16: onde estão os dados da pesquisa. O app grava nps_indice/{claimId}
+ * = { empresaId } ao gerar o link (e a migração grava para as antigas).
+ * Sem índice (antes da migração), usa as coleções da raiz.
+ */
+async function baseDaPesquisa(claimId) {
+  const idx = await db().collection('nps_indice').doc(claimId).get();
+  const e = idx.exists ? String(idx.data().empresaId || '') : '';
+  return e && !e.includes('/') ? db().collection('corretoras').doc(e) : db();
+}
+
 exports.npsPublico = postComCors(async (req, res) => {
   const { acao, claimId, token } = req.body || {};
   if (typeof claimId !== 'string' || !claimId || typeof token !== 'string' || !token || claimId.includes('/')) {
     return res.status(400).json({ erro: 'Dados incompletos' });
   }
-  const refPesquisa = db().collection('nps_pesquisas').doc(claimId);
+  const base = await baseDaPesquisa(claimId);
+  const refPesquisa = base.collection('nps_pesquisas').doc(claimId);
   const pesquisa = await refPesquisa.get();
   if (!pesquisa.exists || pesquisa.data().token !== token) {
     return res.status(404).json({ erro: 'Pesquisa não encontrada' });
@@ -83,7 +95,7 @@ exports.npsPublico = postComCors(async (req, res) => {
     if (p.status === 'respondida') return res.json({ jaRespondida: true });
     let cliente = {};
     if (typeof p.clienteId === 'string' && p.clienteId) {
-      const c = await db().collection('clientes').doc(p.clienteId).get();
+      const c = await base.collection('clientes').doc(p.clienteId).get();
       cliente = c.exists ? c.data() : {};
     }
     // Só o necessário para a tela (antes o app recebia o cadastro inteiro).
@@ -107,7 +119,7 @@ exports.npsPublico = postComCors(async (req, res) => {
   const categoria = nota >= 9 ? 'promotor' : nota >= 7 ? 'neutro' : 'detrator';
   const agora = admin.firestore.FieldValue.serverTimestamp();
 
-  await db().collection('avaliacoes').doc(claimId).set({
+  await base.collection('avaliacoes').doc(claimId).set({
     claimId,
     numeroSinistro: p.numeroSinistro || '',
     clienteId: p.clienteId || '',
@@ -125,7 +137,7 @@ exports.npsPublico = postComCors(async (req, res) => {
 
   const colecao = p.tipo === 'assistencia' ? 'assistencias' : 'sinistros';
   try {
-    await db().collection(colecao).doc(claimId).update({
+    await base.collection(colecao).doc(claimId).update({
       nps_avaliada: true,
       nps_satisfacao: nota,
       nps_categoria: categoria,
@@ -137,12 +149,12 @@ exports.npsPublico = postComCors(async (req, res) => {
 
   if (typeof p.clienteId === 'string' && p.clienteId) {
     try {
-      const avs = await db().collection('avaliacoes').where('clienteId', '==', p.clienteId).get();
+      const avs = await base.collection('avaliacoes').where('clienteId', '==', p.clienteId).get();
       const notas = avs.docs.map((d) => Number(d.data().nota) || 0);
       if (notas.length) {
         const promotores = notas.filter((n) => n >= 9).length;
         const detratores = notas.filter((n) => n <= 6).length;
-        await db().collection('clientes').doc(p.clienteId).update({
+        await base.collection('clientes').doc(p.clienteId).update({
           nps: notas.reduce((a, b) => a + b, 0) / notas.length,
           npsScore: Math.round(((promotores - detratores) / notas.length) * 100),
           npsTotal: notas.length,
@@ -185,6 +197,10 @@ exports.criarUsuario = postComCors(async (req, res) => {
   if (!quem) return res.status(401).json({ erro: 'Faça login novamente' });
   if (quem.role !== 'admin') return res.status(403).json({ erro: 'Só administradores criam usuários' });
 
+  // Etapa 16: o usuário novo entra na corretora do administrador.
+  const empresaId = String(quem.dados.empresaId || '').trim();
+  if (!empresaId) return res.status(400).json({ erro: 'O seu usuário não tem corretora (empresaId) no cadastro' });
+
   const b = req.body || {};
   const nome = String(b.nome || '').trim();
   const email = String(b.email || '').trim().toLowerCase();
@@ -217,7 +233,7 @@ exports.criarUsuario = postComCors(async (req, res) => {
     role,
     telefone,
     ativo: true,
-    empresaId: quem.dados.empresaId || null,
+    empresaId,
     criadoPor: quem.uid,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
