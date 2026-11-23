@@ -31,6 +31,7 @@ import 'package:upgrade_seguros/utils/filtro_status.dart'; // Etapa 14
 import 'package:upgrade_seguros/widgets/tarefas_evento_dialog.dart'; // Etapa 14
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
+import 'package:upgrade_seguros/widgets/lancamentos_widget.dart'; // Etapa 19a
 
 class AssistDetailScreen extends StatefulWidget {
   final String assistId;
@@ -1587,6 +1588,32 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
 
             const SizedBox(height: 16),
 
+            // 💰 VALORES DA ASSISTÊNCIA (Etapa 19a) — mesmo histórico de
+            // lançamentos do sinistro: valor inicial + adicionais, com nota
+            // fiscal, cancelamento com motivo e total. Atualiza ao vivo.
+            _buildSection(
+              icon: Icons.payments_outlined,
+              color: const Color(0xFF2E7D32),
+              title: 'Valores da Assistência',
+              children: [
+                StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                  stream: EmpresaAtual.col('assistencias').doc(widget.assistId).snapshots(),
+                  builder: (context, snap) {
+                    final dados = snap.data?.data();
+                    final atual = dados == null ? _assist! : (Claim.fromMap({...dados, 'id': widget.assistId})..id = widget.assistId);
+                    return LancamentosSinistroCard(
+                      claim: atual,
+                      usuarioNome: _nomeUsuarioLogado,
+                      usuarioEmail: _authService.getUserEmail(),
+                      onAbrirAnexo: _abrirAnexoValor,
+                    );
+                  },
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
             // 🔧 SERVIÇOS E REPAROS
             _buildSection(
               icon: Icons.build_outlined,
@@ -2369,6 +2396,18 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
       ],
     );
 }
+
+  // Etapa 19a: abre a nota fiscal / evidência de um valor lançado.
+  Future<void> _abrirAnexoValor(String url) async {
+    final limpa = url.trim();
+    if (await canLaunchUrlString(limpa)) {
+      await launchUrlString(limpa, mode: LaunchMode.externalApplication);
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível abrir o arquivo.')),
+      );
+    }
+  }
 
   Widget _buildSection({
     required String title,

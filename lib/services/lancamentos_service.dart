@@ -1,6 +1,9 @@
 // lib/services/lancamentos_service.dart
 //
-// Grava e cancela lançamentos de valor do sinistro (Etapa 02).
+// Grava e cancela lançamentos de valor do sinistro (Etapa 02) e, desde a
+// Etapa 19a, também da assistência (colecao: 'assistencias'). Os campos
+// gravados são os mesmos (lancamentos, valor_total_sinistro…), porque
+// sinistro e assistência usam o mesmo modelo (Claim).
 //
 // Tudo passa por transação do Firestore: lê o sinistro, aplica a mudança e
 // grava `lancamentos` + `valor_total_sinistro` + `valor_segurado` +
@@ -12,23 +15,30 @@ import 'package:file_picker/file_picker.dart';
 
 import '../models/lancamento_model.dart';
 import '../models/third_party_model.dart';
+import 'empresa_atual.dart'; // Etapa 19a
 import 'firestore_service.dart';
 
 class LancamentosService {
-  LancamentosService({FirestoreService? firestoreService})
+  LancamentosService({FirestoreService? firestoreService, this.colecao = 'sinistros'})
       : _firestoreService = firestoreService ?? FirestoreService();
 
   final FirestoreService _firestoreService;
 
-  DocumentReference<Map<String, dynamic>> _doc(String claimId) =>
-      _firestoreService.getSinistrosCollection().doc(claimId);
+  /// 'sinistros' ou 'assistencias' (Etapa 19a).
+  final String colecao;
+
+  bool get _assistencia => colecao == 'assistencias';
+
+  DocumentReference<Map<String, dynamic>> _doc(String claimId) => _assistencia
+      ? EmpresaAtual.col('assistencias').doc(claimId)
+      : _firestoreService.getSinistrosCollection().doc(claimId);
 
   static Object _ts(DateTime d) => Timestamp.fromDate(d);
 
   /// Envia as notas fiscais / evidências para o Storage.
   Future<List<AnexoLancamento>> enviarAnexos(String numeroSinistro, List<PlatformFile> arquivos) async {
     if (arquivos.isEmpty) return [];
-    final pasta = 'sinistros/${numeroSinistro.replaceAll('/', '_')}/lancamentos';
+    final pasta = '${_assistencia ? 'assistencias' : 'sinistros'}/${numeroSinistro.replaceAll('/', '_')}/lancamentos';
     final urls = await _firestoreService.uploadArquivosEmPasta(pasta, arquivos);
     return [
       for (var i = 0; i < urls.length; i++) AnexoLancamento(nome: arquivos[i].name, url: urls[i]),
@@ -54,7 +64,7 @@ class LancamentosService {
     await FirebaseFirestore.instance.runTransaction((tx) async {
       final snap = await tx.get(ref);
       final dados = snap.data();
-      if (dados == null) throw Exception('Sinistro não encontrado.');
+      if (dados == null) throw Exception(_assistencia ? 'Assistência não encontrada.' : 'Sinistro não encontrado.');
 
       final lista = LancamentoSinistro.listaDoMapa(dados['lancamentos']);
       final updates = <String, dynamic>{};
@@ -126,7 +136,7 @@ class LancamentosService {
     await FirebaseFirestore.instance.runTransaction((tx) async {
       final snap = await tx.get(ref);
       final dados = snap.data();
-      if (dados == null) throw Exception('Sinistro não encontrado.');
+      if (dados == null) throw Exception(_assistencia ? 'Assistência não encontrada.' : 'Sinistro não encontrado.');
 
       final lista = LancamentoSinistro.listaDoMapa(dados['lancamentos']);
       final i = lista.indexWhere((l) => l.id == lancamentoId);

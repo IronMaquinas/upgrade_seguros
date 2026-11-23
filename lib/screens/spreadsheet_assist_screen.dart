@@ -33,6 +33,8 @@ import 'package:url_launcher/url_launcher_string.dart';
 import 'package:upgrade_seguros/models/workshop_model.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 import 'package:upgrade_seguros/services/marca_pdf.dart'; // Etapa 17
+import 'package:upgrade_seguros/models/lancamento_model.dart'; // Etapa 19a
+import 'package:upgrade_seguros/utils/gatilho.dart' show GatilhoApolice; // Etapa 19a
 
 class SpreadsheetAssistScreen extends StatefulWidget {
   final String tipoAssistencia;
@@ -78,6 +80,8 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
   final TextEditingController telefoneClienteCtrl = TextEditingController();
   final TextEditingController _oficinaTerceiroCtrl = TextEditingController();
   final TextEditingController _franquiaCtrl = TextEditingController();
+  // Etapa 19a: valor inicial da assistência (opcional) — vira o 1º lançamento.
+  final TextEditingController _valorInicialCtrl = TextEditingController();
   final TextEditingController _relatoCtrl = TextEditingController();
   final TextEditingController _anotacoesCtrl = TextEditingController();
   final TextEditingController _seguradoraCtrl = TextEditingController();
@@ -171,6 +175,7 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
     telefoneClienteCtrl.dispose();
     _oficinaTerceiroCtrl.dispose();
     _franquiaCtrl.dispose();
+    _valorInicialCtrl.dispose();
     _relatoCtrl.dispose();
     _anotacoesCtrl.dispose();
     super.dispose();
@@ -867,6 +872,9 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
       //final tipoSelecionado = _tipoAssistenciaCtrl.text;
       final ramoApolice = tipoSelecionado == 'Veicular' ? 'Veículo Individual' : 'Residencial';
 
+      // Etapa 19a: valor inicial (opcional) vira o 1º lançamento do histórico.
+      final valorInicial = GatilhoApolice.lerMoeda(_valorInicialCtrl.text);
+
       // Cria o claim como assistência
       final assist = Claim(
         idCliente: _cliente!.id,
@@ -899,6 +907,22 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
         telefoneContatoLocal: _telefoneContatoLocalCtrl.text.isNotEmpty ? _telefoneContatoLocalCtrl.text : null,
         protocoloSeguradora: _protocoloSeguradoraCtrl.text.isNotEmpty ? _protocoloSeguradoraCtrl.text.toUpperCase() : null,
         valorFranquia: BRFormatters.parseFromMoeda(_franquiaCtrl.text),
+        valorTotalSinistro: valorInicial, // Etapa 19a: total = soma dos lançamentos
+        lancamentos: valorInicial > 0
+            ? [
+                LancamentoSinistro(
+                  id: 'abertura',
+                  data: DateTime.now(),
+                  tipo: TiposLancamento.servicoAssistencia,
+                  descricao: 'Valor informado ao abrir a assistência.',
+                  valor: valorInicial,
+                  origem: OrigemLancamento.abertura,
+                  registradoPor: _nomeUsuarioLogado,
+                  registradoPorEmail: userEmail,
+                  registradoEm: DateTime.now(),
+                ),
+              ]
+            : const [],
         // 🆕 Campos de assistência
         tipo: 'assistencia',
         tipoAssistencia: tipoSelecionado.toLowerCase().replaceAll(' ', '_'),        slaPrevisto: slaPrevisto,
@@ -1266,6 +1290,22 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
                         decoration: InputDecoration(
                           labelText: 'Franquia',
                           prefixIcon: const Icon(Icons.attach_money),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [BRFormatters.moedaFormatter],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // Etapa 19a
+                    SizedBox(
+                      width: 190,
+                      child: TextField(
+                        controller: _valorInicialCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Valor do serviço',
+                          helperText: 'Opcional — adicionais depois',
+                          prefixIcon: const Icon(Icons.payments_outlined),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                         ),
                         keyboardType: TextInputType.number,
@@ -1817,6 +1857,22 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
                           decoration: InputDecoration(
                             labelText: 'Franquia',
                             prefixIcon: const Icon(Icons.attach_money),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [BRFormatters.moedaFormatter],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      // Etapa 19a
+                      SizedBox(
+                        width: 190,
+                        child: TextField(
+                          controller: _valorInicialCtrl,
+                          decoration: InputDecoration(
+                            labelText: 'Valor do serviço',
+                            helperText: 'Opcional — adicionais depois',
+                            prefixIcon: const Icon(Icons.payments_outlined),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                           ),
                           keyboardType: TextInputType.number,

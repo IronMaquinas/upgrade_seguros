@@ -166,4 +166,32 @@ void main() {
     final ids = List.generate(50, (_) => LancamentoSinistro.novoId()).toSet();
     expect(ids.length, 50);
   });
+
+  // Etapa 19a: valores da assistência usam o mesmo histórico
+  group('assistência (19a)', () {
+    test('tipos próprios, com "Outro" e sem os gerados pelo sistema', () {
+      expect(TiposLancamento.manuaisAssistencia.first, TiposLancamento.servicoAssistencia);
+      expect(TiposLancamento.manuaisAssistencia.contains(TiposLancamento.outro), true);
+      expect(TiposLancamento.manuaisAssistencia.contains(TiposLancamento.abertura), false);
+    });
+    test('valor inicial + adicional − cancelado = total', () {
+      LancamentoSinistro l(String id, double v, String tipo) => LancamentoSinistro(
+            id: id,
+            data: DateTime(2026, 11, 23),
+            tipo: tipo,
+            descricao: '',
+            valor: v,
+            registradoPor: 'Ana',
+            registradoEm: DateTime(2026, 11, 23),
+          );
+      final lista = [
+        l('abertura', 350, TiposLancamento.servicoAssistencia),
+        l('b', 80, TiposLancamento.kmExcedente),
+        l('c', 999, TiposLancamento.pedagio).cancelar(motivo: 'lançado em dobro', por: 'Ana'),
+      ];
+      final r = ResumoValores.calcular(lista);
+      expect(r.total, 430);
+      expect(r.terceiros, 0);
+    });
+  });
 }

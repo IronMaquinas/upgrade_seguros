@@ -438,8 +438,10 @@ void _diagnosticarContratos() {
   // ── Custo médio: média de valorTotalSinistro de todos os sinistros ────
   double get _custoMedio {
     final dataLimite = DateTime.now().subtract(Duration(days: _periodoDias));
+    // Etapa 19a: só sinistros. As assistências entravam com valor 0 (puxando a
+    // média para baixo) e agora passam a ter valor próprio.
     final filtered = _recentClaims
-        .where((c) => c.dataAbertura.isAfter(dataLimite))
+        .where((c) => c.tipo != 'assistencia' && c.dataAbertura.isAfter(dataLimite))
         .toList();
     if (filtered.isEmpty) return 0;
     final valores = filtered
@@ -471,7 +473,7 @@ void _diagnosticarContratos() {
   double get _lossRatio {
     final dataLimite = DateTime.now().subtract(Duration(days: _periodoDias));
     final totalOcorrido = _recentClaims
-        .where((c) => c.dataAbertura.isAfter(dataLimite))
+        .where((c) => c.tipo != 'assistencia' && c.dataAbertura.isAfter(dataLimite)) // Etapa 19a: só sinistros
         .fold(0.0, (s, c) => s + c.valorTotalSinistro);
     final totalPremios = _clients.fold(0.0, (s, c) => s + c.valorTotalApolicesAtivas);
     if (totalPremios == 0) return 0;

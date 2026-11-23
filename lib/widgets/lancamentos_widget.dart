@@ -2,7 +2,9 @@
 //
 // Histórico de valores do sinistro (Etapa 02): totais (segurado, terceiros,
 // total), lista de lançamentos com notas fiscais, botão de novo lançamento e
-// cancelamento com motivo. Usado no detalhe do sinistro.
+// cancelamento com motivo. Usado no detalhe do sinistro e, desde a Etapa 19a,
+// no detalhe da assistência (claim.tipo == 'assistencia': sem terceiros,
+// tipos próprios — guincho, km excedente, pedágio… — e textos "da assistência").
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -19,6 +21,13 @@ final DateFormat _data = DateFormat('dd/MM/yyyy');
 final DateFormat _dataHora = DateFormat('dd/MM/yyyy HH:mm');
 
 String formatarMoedaLancamento(double v) => _moeda.format(v);
+
+/// Etapa 19a: o atendimento é uma assistência?
+bool _ehAssistencia(Claim c) => c.tipo == 'assistencia';
+
+/// Etapa 19a: serviço da coleção certa (sinistros ou assistencias).
+LancamentosService _servicoPara(Claim c, LancamentosService? s) =>
+    s ?? LancamentosService(colecao: _ehAssistencia(c) ? 'assistencias' : 'sinistros');
 
 /// Lê "R$ 1.234,56" (com ou sem espaço especial) como 1234.56.
 double lerMoedaDigitada(String texto) {
@@ -41,7 +50,7 @@ Future<bool> mostrarDialogoNovoLancamento(
       claim: claim,
       usuarioNome: usuarioNome,
       usuarioEmail: usuarioEmail,
-      service: service ?? LancamentosService(),
+      service: _servicoPara(claim, service),
     ),
   );
   return ok == true;
@@ -115,7 +124,7 @@ class LancamentosSinistroCard extends StatelessWidget {
     if (motivo == null || !context.mounted) return;
 
     try {
-      await (service ?? LancamentosService()).cancelar(
+      await _servicoPara(claim, service).cancelar(
         claimId: claim.id,
         lancamentoId: l.id,
         motivo: motivo,
@@ -260,17 +269,20 @@ class LancamentosSinistroCard extends StatelessWidget {
       }
     }
 
+    final assist = _ehAssistencia(claim); // Etapa 19a
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: [
-            _total('Segurado', lista.isEmpty ? anterior : resumo.segurado),
-            _total('Terceiros', resumo.terceiros),
-            _total('Total do sinistro', claim.valorTotalCalculado, destaque: true),
-          ],
+          children: assist
+              ? [_total('Total da assistência', claim.valorTotalCalculado, destaque: true)]
+              : [
+                  _total('Segurado', lista.isEmpty ? anterior : resumo.segurado),
+                  _total('Terceiros', resumo.terceiros),
+                  _total('Total do sinistro', claim.valorTotalCalculado, destaque: true),
+                ],
         ),
         if (porTerceiro.isNotEmpty) ...[
           const SizedBox(height: 8),
@@ -290,7 +302,7 @@ class LancamentosSinistroCard extends StatelessWidget {
               border: Border.all(color: Colors.amber.shade200),
             ),
             child: Text(
-              'Este sinistro tem ${formatarMoedaLancamento(anterior)} registrados antes do histórico de lançamentos. '
+              '${assist ? 'Esta assistência' : 'Este sinistro'} tem ${formatarMoedaLancamento(anterior)} registrados antes do histórico de lançamentos. '
               'No primeiro lançamento novo, esse valor entra no histórico como '
               '"${TiposLancamento.anteriorAoHistorico}" (e pode ser cancelado com motivo, se for o caso).',
               style: const TextStyle(fontSize: 12),
@@ -300,7 +312,9 @@ class LancamentosSinistroCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(
-              'Nenhum lançamento ainda. Registre cada custo (reparo, peças, indenização…) com a nota fiscal.',
+              assist
+                  ? 'Nenhum valor lançado ainda. Registre o valor do serviço e cada adicional (km excedente, pedágio, hora parada…) com a nota fiscal.'
+                  : 'Nenhum lançamento ainda. Registre cada custo (reparo, peças, indenização…) com a nota fiscal.',
               style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
             ),
           ),
@@ -347,7 +361,7 @@ class _NovoLancamentoDialogState extends State<_NovoLancamentoDialog> {
   final _valorCtrl = TextEditingController();
   final _descricaoCtrl = TextEditingController();
   DateTime _dataEvento = DateTime.now();
-  String _tipo = TiposLancamento.reparo;
+  late String _tipo = _ehAssistencia(widget.claim) ? TiposLancamento.servicoAssistencia : TiposLancamento.reparo;
 
   /// -1 = segurado; >= 0 = índice do terceiro em claim.terceiros.
   int _beneficiario = -1;
@@ -446,8 +460,9 @@ class _NovoLancamentoDialogState extends State<_NovoLancamentoDialog> {
   @override
   Widget build(BuildContext context) {
     final terceiros = widget.claim.terceiros;
+    final assist = _ehAssistencia(widget.claim); // Etapa 19a
     return AlertDialog(
-      title: const Text('Novo lançamento de valor'),
+      title: Text(assist ? 'Novo valor da assistência' : 'Novo lançamento de valor'),
       content: SizedBox(
         width: 520,
         child: SingleChildScrollView(
@@ -455,7 +470,7 @@ class _NovoLancamentoDialogState extends State<_NovoLancamentoDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              DropdownButtonFormField<int>(
+              if (!assist) DropdownButtonFormField<int>(
                 value: _beneficiario,
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'A quem se refere'),
@@ -466,12 +481,12 @@ class _NovoLancamentoDialogState extends State<_NovoLancamentoDialog> {
                 ],
                 onChanged: _salvando ? null : (v) => setState(() => _beneficiario = v ?? -1),
               ),
-              const SizedBox(height: 8),
+              if (!assist) const SizedBox(height: 8),
               DropdownButtonFormField<String>(
                 value: _tipo,
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Tipo'),
-                items: TiposLancamento.manuais
+                items: (assist ? TiposLancamento.manuaisAssistencia : TiposLancamento.manuais)
                     .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                     .toList(),
                 onChanged: _salvando ? null : (v) => setState(() => _tipo = v ?? TiposLancamento.outro),

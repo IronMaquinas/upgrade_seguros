@@ -31,6 +31,25 @@ class TiposLancamento {
   static const abertura = 'Valor informado na abertura';
   static const anteriorAoHistorico = 'Valor registrado antes do histórico';
 
+  /// Etapa 19a: tipos oferecidos nos lançamentos de ASSISTÊNCIA.
+  static const servicoAssistencia = 'Serviço (guincho / remoção)';
+  static const kmExcedente = 'Km excedente';
+  static const horaParada = 'Hora parada / espera';
+  static const pedagio = 'Pedágio';
+  static const diaria = 'Diária / pernoite';
+  static const pecasMaterial = 'Peças / material';
+
+  static const manuaisAssistencia = <String>[
+    servicoAssistencia,
+    kmExcedente,
+    horaParada,
+    pedagio,
+    diaria,
+    maoDeObra,
+    pecasMaterial,
+    outro,
+  ];
+
   static const manuais = <String>[
     reparo,
     pecas,
