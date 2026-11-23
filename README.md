@@ -448,14 +448,12 @@ Sistema salva em avaliacoes + atualiza claim + recalcula NPS do cliente
 - Ordenados: vencidas → em risco → no prazo
 - Clique navega para a assistência
 
-### Notificações do Browser
-- Solicita permissão ao abrir o dashboard
-- Verifica a cada 2 minutos
-- Dispara alerta se SLA vencido ou ≤15min restantes
-- Dispara alerta para tarefas atrasadas — desde a Etapa 14 de verdade (antes nunca disparava: procurava um campo que não existe): **um** aviso com o total de tarefas atrasadas de quem está logado, quando o total aumenta ou no máximo de hora em hora. O monitor passou a ler só as tarefas abertas (antes lia todas a cada 30 s).
-- `requireInteraction: true` — não some sem interação
-- Clique abre a ocorrência diretamente
-- Cache de 30min por alerta (evita spam)
+### Notificações na tela
+Aviso flutuante no canto superior direito (`lib/services/notification_service.dart`), disparado pelo monitor de SLA (`lib/services/sla_monitor_service.dart`, a cada 30 s):
+- Assistência com SLA vencido ou com ≤15 min restantes (vermelho/laranja).
+- Tarefas atrasadas — desde a Etapa 14 de verdade (antes nunca disparava: procurava um campo que não existe): **um** aviso com o total de tarefas atrasadas de quem está logado, quando o total aumenta ou no máximo de hora em hora. O monitor lê só as tarefas abertas.
+- **Clique abre** (Etapa 18.1 — antes o cartão não respondia ao clique, embora este README dissesse que abria): assistência → detalhe da assistência; uma tarefa atrasada → o atendimento dela; várias → lista de Tarefas. Botão ✕ fecha; some sozinho em 10 s.
+- O Dashboard pede permissão de notificação do navegador, mas **ainda não há notificação nativa** (fora da aba) — ver Roadmap.
 
 ---
 
@@ -725,6 +723,7 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 | 17 | 23/11/2026 | `701591d` | **Perfil da corretora:** cartão 🏢 Dados da corretora em Configurações (nome, razão social, CNPJ, SUSEP, endereço, telefone, e-mail, site e logo; só o gestor altera; salva com botão — antes nome/telefone/e-mail da assinatura gravavam a cada letra). **Cabeçalho e rodapé padrão** em todos os PDFs (`marca_pdf.dart`): logo e dados do cadastro em cima; quem gerou, data e página embaixo. Nome do arquivo e assinatura do WhatsApp da assistência pelo cadastro. Removido `pdf_services_admin.dart` (cópia antiga sem uso). Teste novo: `perfil_corretora_test.dart`. |
 | 17.1 | 23/11/2026 | Etapa 17 | 🏢 Dados da corretora: **CNPJ primeiro**, com validação dos dígitos e consulta à Receita (preenche razão social; nome fantasia, endereço e telefone se vazios; avisa se não estiver ATIVA); razão social e nome fantasia logo abaixo. +3 testes em `perfil_corretora_test.dart`. |
 | 18 | 23/11/2026 | `e1d5941` | **Relatórios:** gráficos de linha mensais (NPS, contratos, valor das apólices, ticket médio, retenção, SLA) param no mês atual — antes dezembro aparecia como 0 ("queda"); tabela mensal do PDF idem. **Top 10 Clientes por Valor de Sinistros** no lugar do "por Receita" (calculado na hora, sem Cancelado/Negado). **Maiores Apólices Vigentes** com ⚠️ no valor destoante (para achar a apólice digitada errada). Teste novo: `rankings_clientes_test.dart`. |
+| 18.1 | 23/11/2026 | Etapa 18 | **Notificação na tela clicável:** assistência vencida/em risco abre o detalhe da assistência; tarefa atrasada abre o atendimento (ou a lista de Tarefas, se forem várias); botão ✕ para fechar. Antes o clique não fazia nada. README: seção de notificações corrigida (dizia que o clique já abria) e notificação nativa do navegador no roadmap. |
 | 11 | 08/11/2026 | `9159bd1` | **Busca de Sinistros** também por terceiros (proprietário, motorista, contato, registro na seguradora deles), proprietário/condutor do veículo segurado e contato do segurado; sem acento, várias palavras, telefone sem máscara (`lib/utils/busca.dart`). **Filtro de recomendação** da lista de clientes vira seletor no padrão dos filtros de Sinistros, ao lado da busca. **Sinistralidade Mensal** recalculada (sinistros ocorridos ÷ prêmio ganho), com linha acumulada e linha do gatilho (`lib/utils/sinistralidade.dart`). Testes novos: `busca_test.dart`, `sinistralidade_test.dart`. |
 | 10 | 08/11/2026 | `44f5c8f` | **Top 10 de risco** com a regra da recomendação (vigentes, sem vínculo por ramo + data) e os mesmos nomes. **Lista de clientes:** filtro por recomendação ligado à exportação, que passa a trazer recomendação, uso do gatilho e contato (nome, telefone, e-mail). **Tarefas:** ordenar Mais recente/Mais antiga; exportar agrupado por funcionário (CSV/PDF); `concluida_em` gravado ao concluir; "no prazo / fora do prazo" pela regra única (antes concluída no prazo com data vencida contava como fora); editar não troca mais o responsável; o filtro por funcionário pelo id passou a funcionar (o campo não vinha na lista). **Relatórios:** Tarefas por Funcionário (abertas, concluídas %, no prazo × fora). Testes novos: `tarefas_test.dart` (+1 em `relatorio_clientes_test.dart`). |
 | 09 | 08/11/2026 | `4d14169` | **Recomendação do cliente unificada pelo uso do gatilho** (pior apólice vigente; faixas 60/80/100%; sinistros sem vínculo ligados por ramo + data; "Sem apólice vigente" e "Apólice sem valor" em cinza; Detalhes mostra uso do gatilho e % do valor da apólice). Substitui 4 contas diferentes. Botões com texto: **"Exportar relatório"** na lista de clientes e **"Importar contrato (PDF)"** no cadastro. Teste novo: `recomendacao_cliente_test.dart`. |
@@ -825,6 +824,8 @@ apolices: [
 - [x] Multi-tenant, arquivos (16c): Storage por corretora, links com chave no lugar dos públicos (S6), passagem dos arquivos antigos e limpeza dos originais; leitura única de nome/extensão dos links
 - [x] Perfil da corretora (Etapa 17): dados e logo no cadastro; cabeçalho e rodapé padrão em todos os PDFs
 - [x] Relatórios (Etapa 18): gráficos mensais param no mês atual (fim da "queda" de dezembro); Top 10 por valor de sinistros no lugar do "por Receita"; Maiores Apólices Vigentes com aviso de valor destoante
+- [x] Notificação na tela clicável: abre a assistência, o atendimento da tarefa ou a lista de Tarefas; botão fechar (Etapa 18.1)
+- [ ] Notificação **nativa do navegador** (aparece mesmo com outra aba/janela em foco), com clique abrindo o atendimento — hoje o Dashboard só pede a permissão
 - [ ] **Etapa 19 — Relatórios de sinistros e assistências com modelos salvos** (pedido da cliente): "Exportar relatório" nas listas → modelos da corretora (todos veem e usam) → campos por seção (ocorrência, bem, condutor, proprietário, terceiros, valores…) + filtros (período, cliente, status, seguradora); PDF e Excel; indicador de largura para o PDF paisagem (tabela × ficha por ocorrência). Aguardando o modelo da funcionária
 - [ ] Marca da corretora na tela (white-label): nome "Upgrade Corretora" no menu e logo da tela de login ainda fixos (o login vem antes de saber a corretora — depende do domínio próprio)
 - [ ] Planos de armazenamento (bronze/prata/ouro ou por GB): medir uso por corretora (soma de `tamanho_bytes` / Storage) e aplicar `videoMaxMb`/`videosPorSinistro` por plano — depende do multi-tenant

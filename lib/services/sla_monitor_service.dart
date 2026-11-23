@@ -5,6 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:upgrade_seguros/models/claim_model.dart';
 import 'package:upgrade_seguros/services/notification_service.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
+import 'package:upgrade_seguros/services/firestore_service.dart'; // Etapa 18.1
+import 'package:upgrade_seguros/screens/assist_detail_screen.dart'; // Etapa 18.1
+import 'package:upgrade_seguros/screens/claim_detail_screen.dart'; // Etapa 18.1
+import 'package:upgrade_seguros/screens/task_list_screen.dart'; // Etapa 18.1
 
 class SlaMonitorService {
   static final SlaMonitorService _instance = SlaMonitorService._internal();
@@ -142,8 +146,9 @@ class SlaMonitorService {
           corpo: total == 1
               ? '${primeira['descricao'] ?? 'Tarefa'} está fora do prazo.'
               : 'Você tem $total tarefas fora do prazo. Veja em Tarefas.',
-          claimId: primeira['claimId'] as String? ?? '',
-          tipo: primeira['tipo'] as String? ?? 'sinistro',
+          // Etapa 18.1: uma tarefa → abre o atendimento dela; várias → lista de Tarefas
+          claimId: total == 1 ? (primeira['claimId'] as String? ?? '') : '',
+          tipo: total == 1 ? (primeira['tipo'] as String? ?? 'sinistro') : 'tarefas',
         );
       }
       _ultimoTotalAtrasadas = total;
@@ -161,10 +166,40 @@ class SlaMonitorService {
       titulo,
       corpo,
       backgroundColor: titulo.contains('Vencido') ? Colors.red : Colors.orange,
+      onTap: () => _abrir(claimId, tipo), // Etapa 18.1
     );
 
     // (opcional) notificação nativa do navegador
     // ... seu código JS aqui
+  }
+
+  /// Etapa 18.1: clique na notificação. Assistência → detalhe da assistência;
+  /// tarefa de um atendimento → o atendimento; várias tarefas (ou tarefa sem
+  /// atendimento) → lista de Tarefas.
+  Future<void> _abrir(String claimId, String tipo) async {
+    final nav = NotificationService.navigatorKey.currentState;
+    if (nav == null) return;
+    if (claimId.isEmpty) {
+      nav.push(MaterialPageRoute(builder: (_) => const TaskListScreen()));
+      return;
+    }
+    if (tipo == 'assistencia') {
+      nav.push(MaterialPageRoute(builder: (_) => AssistDetailScreen(assistId: claimId)));
+      return;
+    }
+    try {
+      final claim = await FirestoreService().getClaimById(claimId);
+      if (claim == null) {
+        nav.push(MaterialPageRoute(builder: (_) => const TaskListScreen()));
+      } else if (claim.tipo == 'assistencia') {
+        nav.push(MaterialPageRoute(builder: (_) => AssistDetailScreen(assistId: claim.id)));
+      } else {
+        nav.push(MaterialPageRoute(builder: (_) => ClaimDetailScreen(claim: claim)));
+      }
+    } catch (e) {
+      print('Erro ao abrir pela notificação: $e');
+      nav.push(MaterialPageRoute(builder: (_) => const TaskListScreen()));
+    }
   }
 
   String _getTipoAssistLabel(String? tipo) {
