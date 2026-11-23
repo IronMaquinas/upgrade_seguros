@@ -398,6 +398,10 @@ class _ExportarDialog extends StatefulWidget {
 
 enum _Periodo { mesAtual, mesAnterior, anoAtual, personalizado, tudo }
 
+/// 19b.3: o relatório é de UM cliente (todas as seguradoras dele) ou de UMA
+/// seguradora (todos os clientes dela).
+enum _Recorte { cliente, seguradora }
+
 class _ExportarDialogState extends State<_ExportarDialog> {
   List<RegistroRelatorio>? _registros;
   String? _erro;
@@ -408,13 +412,17 @@ class _ExportarDialogState extends State<_ExportarDialog> {
   // aparecem/ativam depois que o período é escolhido.
   _Periodo? _periodo;
   DateTimeRange? _intervalo;
-  bool _pelaOcorrencia = false;
+  // 19b.3: sem "Data de referência" (sempre a da ocorrência) e sem "Tipo de
+  // ocorrência" (os dados já são só sinistros ou só assistências). Entra o
+  // recorte por cliente OU seguradora e o filtro por ramo.
+  _Recorte _recorte = _Recorte.cliente;
   String? _clienteId;
-  final Set<String> _status = {};
   String? _seguradora;
-  String? _tipoAtendimento;
+  final Set<String> _ramos = {};
+  final Set<String> _status = {};
 
-  bool get _assist => widget.modelo.tipo == 'assistencia';
+  bool get _temQuem => _recorte == _Recorte.cliente ? _clienteId != null : _seguradora != null;
+  bool get _pronto => _periodo != null && _temQuem;
 
   @override
   void initState() {
@@ -449,11 +457,10 @@ class _ExportarDialogState extends State<_ExportarDialog> {
     return FiltroRelatorio(
       de: de,
       ate: ate,
-      pelaOcorrencia: _pelaOcorrencia,
       status: _status,
-      clienteId: _clienteId,
-      seguradora: _seguradora,
-      tipoAtendimento: _tipoAtendimento,
+      clienteId: _recorte == _Recorte.cliente ? _clienteId : null,
+      seguradora: _recorte == _Recorte.seguradora ? _seguradora : null,
+      ramos: _ramos,
     );
   }
 
@@ -482,22 +489,27 @@ class _ExportarDialogState extends State<_ExportarDialog> {
 
   Widget _campoCliente(List<ClienteDoRelatorio> clientes) {
     return Autocomplete<ClienteDoRelatorio>(
+      key: const ValueKey('cliente'),
       displayStringForOption: (c) => c.nome,
       optionsBuilder: (v) => ClienteDoRelatorio.buscar(clientes, v.text),
-      onSelected: (c) => setState(() => _clienteId = c.id),
+      onSelected: (c) => setState(() {
+        _clienteId = c.id;
+        _ramos.clear();
+        _status.clear();
+      }),
       fieldViewBuilder: (context, ctrl, foco, aoEnviar) {
         return TextField(
           controller: ctrl,
           focusNode: foco,
           decoration: InputDecoration(
             labelText: 'Cliente',
-            hintText: 'Todos os clientes — digite o nome ou o CNPJ',
+            hintText: 'Digite o nome ou o CNPJ',
             isDense: true,
             prefixIcon: const Icon(Icons.search, size: 20),
             suffixIcon: _clienteId == null
                 ? null
                 : IconButton(
-                    tooltip: 'Todos os clientes',
+                    tooltip: 'Limpar',
                     icon: const Icon(Icons.close, size: 18),
                     onPressed: () {
                       ctrl.clear();
@@ -562,12 +574,14 @@ class _ExportarDialogState extends State<_ExportarDialog> {
       final r = RelatorioMontado.montar(widget.modelo, regs, filtro);
       // 19b.1: o cliente vai em linha própria no cabeçalho (nome + CNPJ),
       // fora da descrição dos filtros.
-      final cliente = _cliente;
-      final descricao = filtro.descrever(incluirCliente: false);
+      final cliente = _recorte == _Recorte.cliente ? _cliente : null;
+      final seguradora = _recorte == _Recorte.seguradora ? _seguradora : null;
+      final descricao = filtro.descrever(incluirCliente: false, incluirSeguradora: false);
       final marca = await MarcaPdf.carregar();
       // Arquivo: corretora - cliente - modelo - data (para achar entre vários)
       final resto = nomeDoRelatorio(
         cliente: cliente?.nome,
+        seguradora: seguradora,
         modelo: widget.modelo.nome,
         quando: DateTime.now(),
       );
@@ -579,6 +593,7 @@ class _ExportarDialogState extends State<_ExportarDialog> {
             filtro: descricao,
             clienteNome: cliente?.nome,
             clienteDocumento: cliente == null ? null : PerfilCorretora.formatarCnpj(cliente.documento),
+            seguradoraNome: seguradora,
           ),
           filename: PerfilCorretora.nomeArquivo(marca.corretora, resto, 'pdf'),
         );
@@ -606,20 +621,74 @@ class _ExportarDialogState extends State<_ExportarDialog> {
       corpo = const SizedBox(height: 160, child: Center(child: CircularProgressIndicator()));
     } else {
       final clientes = _clientesDe(regs);
-      final status = {for (final r in regs) if (r.status.isNotEmpty) r.status}.toList()..sort();
-      final seguradoras = {for (final r in regs) if (r.seguradora.trim().isNotEmpty) r.seguradora}.toList()..sort();
-      final tipos = {for (final r in regs) if (r.tipoAtendimento.isNotEmpty) r.tipoAtendimento}.toList()..sort();
+      final seguradoras = seguradorasAgrupadas(regs.map((r) => r.seguradora));
+      // Ramos e status: só os que existem no cliente/seguradora escolhido.
+      final doQuem = [
+        for (final r in regs)
+          if (_recorte == _Recorte.cliente
+              ? (_clienteId == null || r.clienteId == _clienteId)
+              : (_seguradora == null || chaveSeguradora(r.seguradora) == chaveSeguradora(_seguradora!)))
+            r,
+      ];
+      final ramos = {for (final r in doQuem) rotuloRamo(r.ramo)}.toList()..sort();
+      final status = {for (final r in doQuem) if (r.status.isNotEmpty) r.status}.toList()..sort();
       final previa = RelatorioMontado.montar(widget.modelo, regs, _filtro);
       final campoValor = CatalogoRelatorio.porId('valor_total')!;
       final totalValor = previa.registros.fold<double>(0, (s, r) => s + ((r.valores['valor_total'] as num?)?.toDouble() ?? 0));
       final (de, ate) = _datas;
+      const titulo = TextStyle(fontWeight: FontWeight.w600);
+      String data(DateTime d) => RelatorioMontado.formatar(const CampoRelatorio('d', '', '', formato: FormatoCampo.data), d);
+      final falta = [
+        if (!_temQuem) _recorte == _Recorte.cliente ? 'o cliente' : 'a seguradora',
+        if (_periodo == null) 'o período',
+      ];
 
       corpo = SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Período', style: TextStyle(fontWeight: FontWeight.w600)),
+            const Text('Relatório por', style: titulo),
+            const SizedBox(height: 6),
+            SegmentedButton<_Recorte>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: _Recorte.cliente, icon: Icon(Icons.person_outline, size: 18), label: Text('Cliente')),
+                ButtonSegment(value: _Recorte.seguradora, icon: Icon(Icons.shield_outlined, size: 18), label: Text('Seguradora')),
+              ],
+              selected: {_recorte},
+              onSelectionChanged: (v) => setState(() {
+                _recorte = v.first;
+                _clienteId = null;
+                _seguradora = null;
+                _ramos.clear();
+                _status.clear();
+              }),
+            ),
+            const SizedBox(height: 10),
+            if (_recorte == _Recorte.cliente)
+              // 19b.1: digitar e escolher (nome + CNPJ) — 160+ clientes.
+              _campoCliente(clientes)
+            else
+              DropdownButtonFormField<String>(
+                key: const ValueKey('seguradora'),
+                value: _seguradora,
+                isExpanded: true,
+                dropdownColor: Colors.white,
+                menuMaxHeight: 360,
+                hint: const Text('Escolha a seguradora'),
+                decoration: const InputDecoration(labelText: 'Seguradora', isDense: true, prefixIcon: Icon(Icons.shield_outlined, size: 20)),
+                items: [
+                  for (final s in seguradoras) DropdownMenuItem<String>(value: s, child: Text(s, overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (v) => setState(() {
+                  _seguradora = v;
+                  _ramos.clear();
+                  _status.clear();
+                }),
+              ),
+            const SizedBox(height: 16),
+            const Text('Período (data da ocorrência)', style: titulo),
             const SizedBox(height: 6),
             Wrap(spacing: 6, runSpacing: 6, children: [
               for (final p in _Periodo.values)
@@ -628,82 +697,50 @@ class _ExportarDialogState extends State<_ExportarDialog> {
                     _Periodo.mesAtual => 'Mês atual',
                     _Periodo.mesAnterior => 'Mês anterior',
                     _Periodo.anoAtual => 'Este ano',
-                    _Periodo.personalizado => _intervalo == null
-                        ? 'Escolher datas…'
-                        : '${RelatorioMontado.formatar(const CampoRelatorio('d', '', '', formato: FormatoCampo.data), _intervalo!.start)}'
-                            ' a ${RelatorioMontado.formatar(const CampoRelatorio('d', '', '', formato: FormatoCampo.data), _intervalo!.end)}',
+                    _Periodo.personalizado => _intervalo == null ? 'Escolher datas…' : '${data(_intervalo!.start)} a ${data(_intervalo!.end)}',
                     _Periodo.tudo => 'Tudo',
                   }),
                   selected: _periodo == p,
                   onSelected: (_) => p == _Periodo.personalizado ? _escolherIntervalo() : setState(() => _periodo = p),
                 ),
             ]),
-            // 19b.2: data de referência em bloco próprio, com espaço (antes
-            // ficava colada nos botões do período).
-            if (!_assist) ...[
-              const SizedBox(height: 14),
-              const Text('Data de referência', style: TextStyle(fontWeight: FontWeight.w600)),
-              const SizedBox(height: 6),
-              Wrap(spacing: 6, runSpacing: 6, children: [
-                ChoiceChip(label: const Text('Abertura'), selected: !_pelaOcorrencia, onSelected: (_) => setState(() => _pelaOcorrencia = false)),
-                ChoiceChip(label: const Text('Ocorrência'), selected: _pelaOcorrencia, onSelected: (_) => setState(() => _pelaOcorrencia = true)),
-              ]),
-            ],
             if (de != null || ate != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
-                  'De ${de == null ? 'início' : RelatorioMontado.formatar(const CampoRelatorio('d', '', '', formato: FormatoCampo.data), de)}'
-                  ' a ${ate == null ? 'hoje' : RelatorioMontado.formatar(const CampoRelatorio('d', '', '', formato: FormatoCampo.data), ate)}',
+                  'De ${de == null ? 'início' : data(de)} a ${ate == null ? 'hoje' : data(ate)}',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                 ),
               ),
-            const SizedBox(height: 14),
-            // 19b.1: digitar e escolher (nome + CNPJ), como no resto do app —
-            // com 160+ clientes a lista suspensa ficava inviável.
-            _campoCliente(clientes),
-            const SizedBox(height: 10),
-            Row(children: [
-              Expanded(
-                child: DropdownButtonFormField<String?>(
-                  value: _seguradora,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Seguradora', isDense: true),
-                  items: [
-                    const DropdownMenuItem<String?>(value: null, child: Text('Todas')),
-                    for (final s in seguradoras) DropdownMenuItem<String?>(value: s, child: Text(s, overflow: TextOverflow.ellipsis)),
-                  ],
-                  onChanged: (v) => setState(() => _seguradora = v),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: DropdownButtonFormField<String?>(
-                  value: _tipoAtendimento,
-                  isExpanded: true,
-                  decoration: InputDecoration(labelText: _assist ? 'Tipo de assistência' : 'Tipo de ocorrência', isDense: true),
-                  items: [
-                    const DropdownMenuItem<String?>(value: null, child: Text('Todos')),
-                    for (final t in tipos) DropdownMenuItem<String?>(value: t, child: Text(t, overflow: TextOverflow.ellipsis)),
-                  ],
-                  onChanged: (v) => setState(() => _tipoAtendimento = v),
-                ),
-              ),
-            ]),
-            const SizedBox(height: 12),
-            const Text('Status (nenhum marcado = todos)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
-            const SizedBox(height: 4),
-            Wrap(spacing: 6, runSpacing: 4, children: [
-              for (final s in status)
-                FilterChip(
-                  label: Text(s, style: const TextStyle(fontSize: 12)),
-                  selected: _status.contains(s),
-                  onSelected: (v) => setState(() => v ? _status.add(s) : _status.remove(s)),
-                ),
-            ]),
-            const SizedBox(height: 14),
-            if (_periodo == null)
-              Text('Escolha o período para ver a prévia e exportar.',
+            if (ramos.length > 1) ...[
+              const SizedBox(height: 16),
+              const Text('Ramo (nenhum marcado = todos)', style: titulo),
+              const SizedBox(height: 6),
+              Wrap(spacing: 6, runSpacing: 4, children: [
+                for (final r in ramos)
+                  FilterChip(
+                    label: Text(r, style: const TextStyle(fontSize: 12)),
+                    selected: _ramos.contains(r),
+                    onSelected: (v) => setState(() => v ? _ramos.add(r) : _ramos.remove(r)),
+                  ),
+              ]),
+            ],
+            if (status.length > 1) ...[
+              const SizedBox(height: 16),
+              const Text('Status (nenhum marcado = todos)', style: titulo),
+              const SizedBox(height: 6),
+              Wrap(spacing: 6, runSpacing: 4, children: [
+                for (final s in status)
+                  FilterChip(
+                    label: Text(s, style: const TextStyle(fontSize: 12)),
+                    selected: _status.contains(s),
+                    onSelected: (v) => setState(() => v ? _status.add(s) : _status.remove(s)),
+                  ),
+              ]),
+            ],
+            const SizedBox(height: 16),
+            if (!_pronto)
+              Text('Escolha ${falta.join(' e ')} para ver a prévia e exportar.',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontStyle: FontStyle.italic))
             else
               Container(
@@ -731,12 +768,12 @@ class _ExportarDialogState extends State<_ExportarDialog> {
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Fechar')),
         OutlinedButton.icon(
-          onPressed: regs == null || _gerando || _periodo == null ? null : () => _gerar(false),
+          onPressed: regs == null || _gerando || !_pronto ? null : () => _gerar(false),
           icon: const Icon(Icons.table_chart_outlined),
           label: const Text('Excel (CSV)'),
         ),
         ElevatedButton.icon(
-          onPressed: regs == null || _gerando || _periodo == null ? null : () => _gerar(true),
+          onPressed: regs == null || _gerando || !_pronto ? null : () => _gerar(true),
           icon: _gerando
               ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
               : const Icon(Icons.picture_as_pdf_outlined),

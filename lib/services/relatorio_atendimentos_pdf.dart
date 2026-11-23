@@ -25,6 +25,7 @@ class RelatorioAtendimentosPdf {
     String filtro = '',
     String? clienteNome, // 19b.1: cliente em destaque no cabeçalho
     String? clienteDocumento,
+    String? seguradoraNome, // 19b.3: recorte por seguradora
   }) async {
     final layout = OcupacaoPdf.de(r.colunas).layout;
     final fonte = layout == LayoutPdf.tabela ? 7.0 : 6.0;
@@ -139,6 +140,8 @@ class RelatorioAtendimentosPdf {
               'Cliente: $clienteNome${(clienteDocumento ?? '').isEmpty ? '' : ' · CNPJ/CPF $clienteDocumento'}',
               style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold),
             ),
+          if ((seguradoraNome ?? '').isNotEmpty)
+            pw.Text('Seguradora: $seguradoraNome', style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold)),
           pw.Text(
             [
               '${r.quantidade} ${r.quantidade == 1 ? (r.modelo.tipo == 'assistencia' ? 'assistência' : 'sinistro') : tipoNome.toLowerCase()}',

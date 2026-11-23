@@ -246,6 +246,10 @@ class RegistroRelatorio {
   final String clienteNome;
   final String seguradora;
   final String tipoAtendimento;
+
+  /// 19b.3: ramo do atendimento (Frota, Residencial, Vida… / nas assistências,
+  /// "Assistência" ou "Assistência Residencial"). Vazio = não informado.
+  final String ramo;
   final Map<String, Object?> valores;
 
   const RegistroRelatorio({
@@ -258,58 +262,110 @@ class RegistroRelatorio {
     this.clienteNome = '',
     this.seguradora = '',
     this.tipoAtendimento = '',
+    this.ramo = '',
     this.valores = const {},
   });
 }
 
+/// 19b.3: o relatório sai sempre pela DATA DA OCORRÊNCIA (a de abertura pode
+/// ir como coluna) e é recortado por cliente OU por seguradora — um cliente
+/// pode ter apólices em várias seguradoras, e uma seguradora pode pedir o
+/// acompanhamento de todos os clientes dela.
 class FiltroRelatorio {
   final DateTime? de;
   final DateTime? ate;
-
-  /// true = filtra pela data da ocorrência; false = pela data de abertura.
-  final bool pelaOcorrencia;
   final Set<String> status;
   final String? clienteId;
+
+  /// Comparada pela [chaveSeguradora] (CHUBB = Chubb, AXA = AXA SEGUROS).
   final String? seguradora;
-  final String? tipoAtendimento;
+
+  /// Ramos marcados (vazio = todos). Ramo vazio no registro = "Não informado".
+  final Set<String> ramos;
 
   const FiltroRelatorio({
     this.de,
     this.ate,
-    this.pelaOcorrencia = false,
     this.status = const {},
     this.clienteId,
     this.seguradora,
-    this.tipoAtendimento,
+    this.ramos = const {},
   });
 
   static DateTime _dia(DateTime d) => DateTime(d.year, d.month, d.day);
 
   bool aceita(RegistroRelatorio r) {
-    final d = _dia(pelaOcorrencia ? r.dataOcorrencia : r.dataAbertura);
+    final d = _dia(r.dataOcorrencia);
     if (de != null && d.isBefore(_dia(de!))) return false;
     if (ate != null && d.isAfter(_dia(ate!))) return false;
     if (status.isNotEmpty && !status.contains(r.status)) return false;
     if ((clienteId ?? '').isNotEmpty && r.clienteId != clienteId) return false;
-    if ((seguradora ?? '').isNotEmpty && r.seguradora != seguradora) return false;
-    if ((tipoAtendimento ?? '').isNotEmpty && r.tipoAtendimento != tipoAtendimento) return false;
+    if ((seguradora ?? '').trim().isNotEmpty && chaveSeguradora(r.seguradora) != chaveSeguradora(seguradora!)) return false;
+    if (ramos.isNotEmpty && !ramos.contains(rotuloRamo(r.ramo))) return false;
     return true;
   }
 
-  /// Texto para o cabeçalho do PDF / nome do arquivo.
-  /// [incluirCliente]: false quando o cliente vai em linha própria (19b.1).
-  String descrever({String? nomeCliente, bool incluirCliente = true}) {
+  /// Texto para o cabeçalho do PDF.
+  /// [incluirCliente] / [incluirSeguradora]: false quando vão em linha própria.
+  String descrever({String? nomeCliente, bool incluirCliente = true, bool incluirSeguradora = true}) {
     String f(DateTime d) => '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
     final partes = <String>[
-      if (de != null || ate != null)
-        '${pelaOcorrencia ? 'Ocorrência' : 'Abertura'}: ${de == null ? 'início' : f(de!)} a ${ate == null ? 'hoje' : f(ate!)}',
+      if (de != null || ate != null) 'Ocorrência: ${de == null ? 'início' : f(de!)} a ${ate == null ? 'hoje' : f(ate!)}',
       if (incluirCliente && (clienteId ?? '').isNotEmpty) 'Cliente: ${nomeCliente ?? clienteId}',
+      if (incluirSeguradora && (seguradora ?? '').trim().isNotEmpty) 'Seguradora: ${seguradora!.trim()}',
+      if (ramos.isNotEmpty) 'Ramo: ${(ramos.toList()..sort()).join(', ')}',
       if (status.isNotEmpty) 'Status: ${status.join(', ')}',
-      if ((seguradora ?? '').isNotEmpty) 'Seguradora: $seguradora',
-      if ((tipoAtendimento ?? '').isNotEmpty) 'Tipo: $tipoAtendimento',
     ];
     return partes.join(' · ');
   }
+}
+
+/// 19b.3: rótulo do ramo nos filtros ("Assistência" sozinho não diz nada).
+String rotuloRamo(String ramo) {
+  final r = ramo.trim();
+  if (r.isEmpty) return 'Não informado';
+  if (r == 'Assistência') return 'Veículo';
+  if (r == 'Assistência Residencial') return 'Residencial';
+  return r;
+}
+
+/// 19b.3: chave para juntar grafias da mesma seguradora: sem acento, caixa,
+/// pontuação e espaços repetidos, e sem "Seguros"/"Seguradora"/"S.A." no fim.
+/// ("Porto Seguro" fica: só o plural/“Seguradora” saem.) Erros de digitação
+/// (ex.: "SEGURUROS") continuam separados — ver pendência de duplicidade.
+String chaveSeguradora(String nome) {
+  const de = 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ';
+  const para = 'AAAAAEEEEIIIIOOOOOUUUUC';
+  final b = StringBuffer();
+  for (final ch in nome.toUpperCase().split('')) {
+    final i = de.indexOf(ch);
+    b.write(i >= 0 ? para[i] : ch);
+  }
+  var t = b.toString().replaceAll(RegExp(r'[./\-]'), '').replaceAll(RegExp(r'[^A-Z0-9 ]'), ' ');
+  final p = t.split(RegExp(r'\s+')).where((x) => x.isNotEmpty).toList();
+  const sufixos = {'SEGUROS', 'SEGURADORA', 'SA', 'CIA'};
+  while (p.length > 1 && sufixos.contains(p.last)) {
+    p.removeLast();
+  }
+  return p.join(' ');
+}
+
+/// 19b.3: uma opção por seguradora, com a grafia mais usada nos registros.
+List<String> seguradorasAgrupadas(Iterable<String> nomes) {
+  final grupos = <String, Map<String, int>>{};
+  for (final n in nomes) {
+    final t = n.trim();
+    if (t.isEmpty) continue;
+    final c = chaveSeguradora(t);
+    if (c.isEmpty) continue;
+    final g = grupos.putIfAbsent(c, () => {});
+    g[t] = (g[t] ?? 0) + 1;
+  }
+  final lista = [
+    for (final g in grupos.values)
+      (g.entries.toList()..sort((a, b) => b.value != a.value ? b.value.compareTo(a.value) : a.key.compareTo(b.key))).first.key,
+  ]..sort((a, b) => chaveSeguradora(a).compareTo(chaveSeguradora(b)));
+  return lista;
 }
 
 class RelatorioMontado {
@@ -331,11 +387,7 @@ class RelatorioMontado {
   static RelatorioMontado montar(ModeloRelatorio modelo, List<RegistroRelatorio> todos, FiltroRelatorio filtro) {
     final colunas = modelo.camposValidos;
     final regs = todos.where((r) => r.tipo == modelo.tipo && filtro.aceita(r)).toList()
-      ..sort((a, b) {
-        final da = filtro.pelaOcorrencia ? a.dataOcorrencia : a.dataAbertura;
-        final db = filtro.pelaOcorrencia ? b.dataOcorrencia : b.dataAbertura;
-        return da.compareTo(db);
-      });
+      ..sort((a, b) => a.dataOcorrencia.compareTo(b.dataOcorrencia));
     final totais = <String, double>{for (final c in colunas) if (c.soma) c.id: 0};
     final linhas = <List<String>>[];
     for (final r in regs) {
@@ -486,8 +538,13 @@ class ClienteDoRelatorio {
 
 /// 19b.1: parte do nome do arquivo depois da corretora:
 /// "Águia Branca - Mensal - 2026-11-23" (sem cliente: "Todos os clientes - …").
-String nomeDoRelatorio({String? cliente, required String modelo, required DateTime quando}) {
+String nomeDoRelatorio({String? cliente, String? seguradora, required String modelo, required DateTime quando}) {
   final d = '${quando.year}-${quando.month.toString().padLeft(2, '0')}-${quando.day.toString().padLeft(2, '0')}';
-  final c = (cliente ?? '').trim().isEmpty ? 'Todos os clientes' : cliente!.trim();
+  // 19b.3: no recorte por seguradora, o nome dela entra no lugar do cliente.
+  final c = (cliente ?? '').trim().isNotEmpty
+      ? cliente!.trim()
+      : (seguradora ?? '').trim().isNotEmpty
+          ? seguradora!.trim()
+          : 'Todos os clientes';
   return '$c - ${modelo.trim()} - $d';
 }

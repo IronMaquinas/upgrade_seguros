@@ -133,6 +133,7 @@ class RelatorioAtendimentosService {
       clienteNome: c.clientNome,
       seguradora: c.seguradora,
       tipoAtendimento: tipoAtendimento,
+      ramo: c.ramoSinistro, // 19b.3: filtro por ramo
       valores: valores,
     );
   }

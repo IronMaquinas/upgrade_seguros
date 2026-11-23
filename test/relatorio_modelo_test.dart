@@ -1,4 +1,4 @@
-// test/relatorio_modelo_test.dart — Etapa 19b
+// test/relatorio_modelo_test.dart — Etapa 19b (19b.3: período pela ocorrência, seguradora, ramo)
 import 'package:flutter_test/flutter_test.dart';
 import 'package:upgrade_seguros/utils/relatorio_modelo.dart';
 
@@ -8,16 +8,21 @@ RegistroRelatorio reg(String id, DateTime abertura,
         String cliente = 'AB',
         String tipoAt = 'Guincho',
         double valor = 0,
-        String placa = 'ABC1D23'}) =>
+        String placa = 'ABC1D23',
+        DateTime? ocorrencia,
+        String seguradora = '',
+        String ramo = ''}) =>
     RegistroRelatorio(
       id: id,
       tipo: tipo,
       dataAbertura: abertura,
-      dataOcorrencia: abertura.subtract(const Duration(days: 1)),
+      dataOcorrencia: ocorrencia ?? abertura,
       status: status,
       clienteId: cliente,
       clienteNome: 'Cliente $cliente',
       tipoAtendimento: tipoAt,
+      seguradora: seguradora,
+      ramo: ramo,
       valores: {
         'numero': id,
         'data_abertura': abertura,
@@ -109,21 +114,19 @@ void main() {
       expect(r.registros.map((x) => x.id).toList(), ['A2']);
     });
 
-    test('status e tipo de atendimento', () {
+    test('status', () {
       final lista = [...todos, reg('A5', DateTime(2026, 11, 3), status: 'Cancelado', valor: 50)];
       final r = RelatorioMontado.montar(modelo, lista, const FiltroRelatorio(status: {'Cancelado'}));
       expect(r.registros.single.id, 'A5');
-      final r2 = RelatorioMontado.montar(modelo, todos, const FiltroRelatorio(tipoAtendimento: 'Vidro'));
-      expect(r2.registros.single.id, 'A1');
     });
 
-    test('data da ocorrência × abertura', () {
-      // A1: abertura 02/11, ocorrência 01/11
-      final pelaAbertura = RelatorioMontado.montar(modelo, todos, FiltroRelatorio(de: DateTime(2026, 11, 1), ate: DateTime(2026, 11, 1)));
-      final pelaOcorrencia = RelatorioMontado.montar(modelo, todos,
-          FiltroRelatorio(de: DateTime(2026, 11, 1), ate: DateTime(2026, 11, 1), pelaOcorrencia: true));
-      expect(pelaAbertura.quantidade, 0);
-      expect(pelaOcorrencia.registros.single.id, 'A1');
+    test('19b.3: período sempre pela data da ocorrência', () {
+      // aberto em 01/12, ocorrido em 30/11 → entra em novembro
+      final x = reg('X', DateTime(2026, 12, 1), ocorrencia: DateTime(2026, 11, 30));
+      final nov = RelatorioMontado.montar(modelo, [x], FiltroRelatorio(de: DateTime(2026, 11, 1), ate: DateTime(2026, 11, 30)));
+      final dez = RelatorioMontado.montar(modelo, [x], FiltroRelatorio(de: DateTime(2026, 12, 1), ate: DateTime(2026, 12, 31)));
+      expect(nov.registros.single.id, 'X');
+      expect(dez.quantidade, 0);
     });
 
     test('CSV: ; , BOM, valor em número e linha de total', () {
@@ -139,7 +142,7 @@ void main() {
 
     test('descrição do filtro', () {
       final f = FiltroRelatorio(de: DateTime(2026, 11, 1), ate: DateTime(2026, 11, 30), clienteId: 'AB', status: const {'Concluído'});
-      expect(f.descrever(nomeCliente: 'Águia Branca'), 'Abertura: 01/11/2026 a 30/11/2026 · Cliente: Águia Branca · Status: Concluído');
+      expect(f.descrever(nomeCliente: 'Águia Branca'), 'Ocorrência: 01/11/2026 a 30/11/2026 · Cliente: Águia Branca · Status: Concluído');
     });
   });
 
@@ -186,7 +189,53 @@ void main() {
     });
     test('descrição sem o cliente quando ele vai em linha própria', () {
       final f = FiltroRelatorio(de: DateTime(2026, 11, 1), ate: DateTime(2026, 11, 30), clienteId: 'AB');
-      expect(f.descrever(incluirCliente: false), 'Abertura: 01/11/2026 a 30/11/2026');
+      expect(f.descrever(incluirCliente: false), 'Ocorrência: 01/11/2026 a 30/11/2026');
+    });
+  });
+
+  group('19b.3: seguradora e ramo', () {
+    const modelo = ModeloRelatorio(nome: 'Acomp.', tipo: 'assistencia', campos: ['numero', 'placa']);
+    test('mesma seguradora com grafias diferentes vira uma só', () {
+      expect(chaveSeguradora('CHUBB'), chaveSeguradora('Chubb'));
+      expect(chaveSeguradora('AXA'), chaveSeguradora('AXA SEGUROS'));
+      expect(chaveSeguradora('Ezze Seguros'), chaveSeguradora('EZZE'));
+      expect(chaveSeguradora('Tokio Marine Seguradora S.A.'), 'TOKIO MARINE');
+      expect(chaveSeguradora(' ESSOR '), 'ESSOR');
+      expect(chaveSeguradora('Porto Seguro'), 'PORTO SEGURO');
+      expect(chaveSeguradora('Seguros'), 'SEGUROS');
+      // erro de digitação continua separado (pendência de duplicidade)
+      expect(chaveSeguradora('AXA SEGURUROS') == chaveSeguradora('AXA'), false);
+    });
+    test('lista agrupada usa a grafia mais comum', () {
+      final l = seguradorasAgrupadas(['Chubb', 'CHUBB', 'CHUBB', 'ALLIANZ', 'Allianz', 'Allianz', '', 'AXA', 'AXA SEGUROS', 'AXA']);
+      expect(l, ['Allianz', 'AXA', 'CHUBB']);
+    });
+    test('filtro por seguradora pega todas as grafias', () {
+      final lista = [
+        reg('S1', DateTime(2026, 11, 2), seguradora: 'CHUBB'),
+        reg('S2', DateTime(2026, 11, 3), seguradora: 'Chubb'),
+        reg('S3', DateTime(2026, 11, 4), seguradora: 'Allianz'),
+      ];
+      final r = RelatorioMontado.montar(modelo, lista, const FiltroRelatorio(seguradora: 'CHUBB'));
+      expect(r.registros.map((x) => x.id).toList(), ['S1', 'S2']);
+      expect(const FiltroRelatorio(seguradora: 'CHUBB').descrever(incluirSeguradora: false), '');
+      expect(const FiltroRelatorio(seguradora: 'CHUBB').descrever(), 'Seguradora: CHUBB');
+    });
+    test('filtro por ramo (vazio = todos; sem ramo = Não informado)', () {
+      final lista = [
+        reg('R1', DateTime(2026, 11, 2), ramo: 'Frota'),
+        reg('R2', DateTime(2026, 11, 3), ramo: 'Vida'),
+        reg('R3', DateTime(2026, 11, 4)),
+      ];
+      expect(RelatorioMontado.montar(modelo, lista, const FiltroRelatorio()).quantidade, 3);
+      expect(RelatorioMontado.montar(modelo, lista, const FiltroRelatorio(ramos: {'Frota', 'Não informado'})).registros.map((x) => x.id).toList(),
+          ['R1', 'R3']);
+      expect(rotuloRamo('Assistência'), 'Veículo');
+      expect(rotuloRamo('Assistência Residencial'), 'Residencial');
+    });
+    test('nome do arquivo com a seguradora no lugar do cliente', () {
+      expect(nomeDoRelatorio(seguradora: 'CHUBB', modelo: 'Acompanhamento', quando: DateTime(2026, 11, 23)),
+          'CHUBB - Acompanhamento - 2026-11-23');
     });
   });
 }
