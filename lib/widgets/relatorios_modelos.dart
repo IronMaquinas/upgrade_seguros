@@ -403,7 +403,10 @@ class _ExportarDialogState extends State<_ExportarDialog> {
   String? _erro;
   bool _gerando = false;
 
-  _Periodo _periodo = _Periodo.mesAtual;
+  // 19b.2: abre sem período escolhido (antes já vinha "Mês atual" e a prévia
+  // aparecia antes de qualquer escolha). A prévia e os botões de exportar só
+  // aparecem/ativam depois que o período é escolhido.
+  _Periodo? _periodo;
   DateTimeRange? _intervalo;
   bool _pelaOcorrencia = false;
   String? _clienteId;
@@ -426,6 +429,8 @@ class _ExportarDialogState extends State<_ExportarDialog> {
   (DateTime?, DateTime?) get _datas {
     final h = DateTime.now();
     switch (_periodo) {
+      case null:
+        return (null, null);
       case _Periodo.mesAtual:
         return (DateTime(h.year, h.month, 1), DateTime(h.year, h.month + 1, 0));
       case _Periodo.mesAnterior:
@@ -633,17 +638,20 @@ class _ExportarDialogState extends State<_ExportarDialog> {
                   onSelected: (_) => p == _Periodo.personalizado ? _escolherIntervalo() : setState(() => _periodo = p),
                 ),
             ]),
-            if (!_assist)
-              Row(children: [
-                const Text('Data de referência:', style: TextStyle(fontSize: 12)),
-                const SizedBox(width: 8),
+            // 19b.2: data de referência em bloco próprio, com espaço (antes
+            // ficava colada nos botões do período).
+            if (!_assist) ...[
+              const SizedBox(height: 14),
+              const Text('Data de referência', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              Wrap(spacing: 6, runSpacing: 6, children: [
                 ChoiceChip(label: const Text('Abertura'), selected: !_pelaOcorrencia, onSelected: (_) => setState(() => _pelaOcorrencia = false)),
-                const SizedBox(width: 6),
                 ChoiceChip(label: const Text('Ocorrência'), selected: _pelaOcorrencia, onSelected: (_) => setState(() => _pelaOcorrencia = true)),
               ]),
+            ],
             if (de != null || ate != null)
               Padding(
-                padding: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.only(top: 8),
                 child: Text(
                   'De ${de == null ? 'início' : RelatorioMontado.formatar(const CampoRelatorio('d', '', '', formato: FormatoCampo.data), de)}'
                   ' a ${ate == null ? 'hoje' : RelatorioMontado.formatar(const CampoRelatorio('d', '', '', formato: FormatoCampo.data), ate)}',
@@ -694,17 +702,22 @@ class _ExportarDialogState extends State<_ExportarDialog> {
                 ),
             ]),
             const SizedBox(height: 14),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
-              child: Text(
-                '${previa.quantidade} ${_nomeTipo(widget.modelo.tipo, plural: previa.quantidade != 1)} · '
-                'valor total ${RelatorioMontado.formatar(campoValor, totalValor)} · '
-                '${_rotuloLayout(OcupacaoPdf.de(previa.colunas).layout)}',
-                style: const TextStyle(fontWeight: FontWeight.w600),
+            if (_periodo == null)
+              Text('Escolha o período para ver a prévia e exportar.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontStyle: FontStyle.italic))
+            else
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
+                child: Text(
+                  'Prévia: ${previa.quantidade} ${_nomeTipo(widget.modelo.tipo, plural: previa.quantidade != 1)}'
+                  // 19b.2: valor só se o modelo tiver o campo "Valor total"
+                  '${widget.modelo.campos.contains('valor_total') ? ' · valor total ${RelatorioMontado.formatar(campoValor, totalValor)}' : ''}'
+                  ' · ${_rotuloLayout(OcupacaoPdf.de(previa.colunas).layout)}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
               ),
-            ),
           ],
         ),
       );
@@ -718,12 +731,12 @@ class _ExportarDialogState extends State<_ExportarDialog> {
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Fechar')),
         OutlinedButton.icon(
-          onPressed: regs == null || _gerando ? null : () => _gerar(false),
+          onPressed: regs == null || _gerando || _periodo == null ? null : () => _gerar(false),
           icon: const Icon(Icons.table_chart_outlined),
           label: const Text('Excel (CSV)'),
         ),
         ElevatedButton.icon(
-          onPressed: regs == null || _gerando ? null : () => _gerar(true),
+          onPressed: regs == null || _gerando || _periodo == null ? null : () => _gerar(true),
           icon: _gerando
               ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
               : const Icon(Icons.picture_as_pdf_outlined),
