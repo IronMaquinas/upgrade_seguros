@@ -8,6 +8,8 @@ import '../utils/busca.dart';
 import '../utils/filtro_status.dart';
 import '../screens/claim_detail_screen.dart';
 import '../screens/spreadsheet_claim_screen.dart';
+import 'package:upgrade_seguros/widgets/relatorios_modelos.dart'; // Etapa 19b
+import 'package:upgrade_seguros/widgets/botao_com_texto.dart'; // Etapa 19b
 
 class ClaimListScreen extends StatefulWidget {
   const ClaimListScreen({
@@ -914,6 +916,18 @@ class ClaimListScreenState extends State<ClaimListScreen> {
           ),
         ),
         actions: [
+          // Etapa 19b: relatórios com modelos salvos (PDF / Excel)
+          InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => abrirRelatoriosComModelos(context, tipo: 'sinistro'),
+            child: Tooltip(
+              message: 'Relatório por modelo (PDF ou Excel)',
+              child: BotaoComTexto(
+                icone: Icons.file_download_outlined,
+                texto: MediaQuery.of(context).size.width < 600 ? 'Exportar' : 'Exportar relatório',
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh_outlined),
             onPressed: _fetchClaims,

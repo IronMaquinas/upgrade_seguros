@@ -11,6 +11,8 @@ import '../widgets/assist_tipo_picker.dart';
 import 'assist_detail_screen.dart';
 import 'spreadsheet_assist_screen.dart';
 import 'spreadsheet_assist_residencial_screen.dart';
+import 'package:upgrade_seguros/widgets/relatorios_modelos.dart'; // Etapa 19b
+import 'package:upgrade_seguros/widgets/botao_com_texto.dart'; // Etapa 19b
 
 class AssistListScreen extends StatefulWidget {
   final List<String>? initialStatusFilter;
@@ -837,6 +839,18 @@ class AssistListScreenState extends State<AssistListScreen> {
           ),
         ),
         actions: [
+          // Etapa 19b: relatórios com modelos salvos (PDF / Excel)
+          InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => abrirRelatoriosComModelos(context, tipo: 'assistencia'),
+            child: Tooltip(
+              message: 'Relatório por modelo (PDF ou Excel)',
+              child: BotaoComTexto(
+                icone: Icons.file_download_outlined,
+                texto: MediaQuery.of(context).size.width < 600 ? 'Exportar' : 'Exportar relatório',
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh_outlined),
             onPressed: _fetchAssists,

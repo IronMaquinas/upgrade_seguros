@@ -44,6 +44,7 @@ const COLECOES = [
   'pdf_signatures',
   'cotacoes',
   'employees',
+  'modelos_relatorio', // Etapa 19b: modelos de relatório da corretora
 ];
 
 // Etapa 16b: prazo mínimo entre a migração e a limpeza da raiz.

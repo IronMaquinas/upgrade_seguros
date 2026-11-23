@@ -50,6 +50,7 @@ class EmpresaAtual {
     'pdf_signatures',
     'cotacoes',
     'employees',
+    'modelos_relatorio', // Etapa 19b: modelos de relatório da corretora
   ];
 
   static String? _id;
