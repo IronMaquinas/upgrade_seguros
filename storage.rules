@@ -32,10 +32,15 @@ service firebase.storage {
     }
 
     // A corretora do usuário recebeu os dados antigos (tem a data da migração).
+    // Etapa 16c.1: lê o cadastro do usuário UMA vez (let) e só então a
+    // corretora. Na versão anterior o Playground dava "Function not found:
+    // firestore.get" com a consulta encadeada dentro de outras funções.
     function recebeuDadosAntigos() {
-      return ativo()
-        && perfil().get('empresaId', '') != ''
-        && firestore.get(/databases/(default)/documents/corretoras/$(perfil().get('empresaId', ''))).data.get('migradoEm', null) != null;
+      let u = firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+      let e = u.get('empresaId', '');
+      return u.get('ativo', true) != false
+        && e != ''
+        && firestore.get(/databases/(default)/documents/corretoras/$(e)).data.get('migradoEm', null) != null;
     }
 
     // Arquivos da corretora: fotos, documentos e laudos.
@@ -57,7 +62,8 @@ service firebase.storage {
     // Pastas antigas (até a 16b): só leitura e exclusão, e só pela corretora
     // que recebeu os dados antigos. Nada novo entra aqui.
     match /{pasta}/{todos=**} {
-      allow read, delete: if pasta in ['sinistros', 'clientes', 'videos', 'veiculos']
+      allow read, delete: if request.auth != null
+        && pasta in ['sinistros', 'clientes', 'videos', 'veiculos']
         && recebeuDadosAntigos();
     }
   }
