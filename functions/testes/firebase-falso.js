@@ -68,8 +68,58 @@ function batch() {
   };
 }
 
+// Etapa 16c: transação simples (lê e grava na hora; basta para os testes).
+async function runTransaction(fn) {
+  return fn({
+    get: (ref) => ref.get(),
+    set: (ref, v) => ref.set(v),
+    update: (ref, v) => ref.update(v),
+  });
+}
+
+// Etapa 16c: Storage de mentira. objetos[caminho] = { conteudo, metadata, publico }
+const objetos = {};
+const NOME_BUCKET = 'balde-teste';
+function arquivoRef(nome) {
+  return {
+    name: nome,
+    get metadata() { return { size: String((objetos[nome] && objetos[nome].tamanho) || 0) }; },
+    async exists() { return [!!objetos[nome]]; },
+    async save(buf, opts = {}) {
+      const m = opts.metadata || {};
+      objetos[nome] = { tamanho: buf.length, contentType: m.contentType, metadata: { ...(m.metadata || {}) }, publico: false };
+    },
+    async delete() {
+      if (!objetos[nome]) { const e = new Error('No such object'); e.code = 404; throw e; }
+      delete objetos[nome];
+    },
+    async copy(destino) {
+      if (!objetos[nome]) { const e = new Error('No such object'); e.code = 404; throw e; }
+      const o = objetos[nome];
+      // como no GCS: copia os metadados, mas NÃO o "público"
+      objetos[destino.name] = { ...o, metadata: { ...o.metadata }, publico: false };
+    },
+    async getMetadata() {
+      const o = objetos[nome];
+      return [{ contentType: o.contentType, metadata: { ...o.metadata } }];
+    },
+    async setMetadata({ metadata }) { objetos[nome].metadata = { ...objetos[nome].metadata, ...metadata }; },
+  };
+}
+const balde = {
+  name: NOME_BUCKET,
+  file: (n) => arquivoRef(n),
+  async getFiles({ prefix = '', maxResults = 1000, pageToken } = {}) {
+    const nomes = Object.keys(objetos).filter((k) => k.startsWith(prefix)).sort();
+    const ini = pageToken ? Number(pageToken) : 0;
+    const pagina = nomes.slice(ini, ini + maxResults).map(arquivoRef);
+    const prox = ini + maxResults < nomes.length ? { pageToken: String(ini + maxResults) } : null;
+    return [pagina, prox];
+  },
+};
+
 const firestore = Object.assign(
-  () => ({ collection: (n) => colRef(n), doc: (p) => docRef(p), batch }),
+  () => ({ collection: (n) => colRef(n), doc: (p) => docRef(p), batch, runTransaction }),
   { FieldValue: { serverTimestamp: () => SV } },
 );
 
@@ -77,6 +127,7 @@ const fakeAdmin = {
   apps: [1],
   initializeApp() {},
   firestore,
+  storage: () => ({ bucket: () => balde }),
   auth: () => ({
     async verifyIdToken(t) {
       if (!tokens[t]) throw new Error('token inválido');
@@ -125,4 +176,4 @@ function placar() {
   };
 }
 
-module.exports = { instalar, store, tokens, chamar, placar };
+module.exports = { instalar, store, tokens, chamar, placar, objetos, NOME_BUCKET };

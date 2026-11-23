@@ -10,6 +10,7 @@ import 'package:upgrade_seguros/services/place_search_delegate.dart';
 import '../services/firestore_service.dart';
 import '../services/auth_service.dart';
 import '../models/workshop_model.dart';
+import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
 
 class WorkshopWidget extends StatefulWidget {
   final String claimId;
@@ -387,11 +388,7 @@ class _WorkshopWidgetState extends State<WorkshopWidget> {
 
   // ✅ Adicione esta função auxiliar para extrair nome do arquivo da URL
   String _getFileNameFromUrl(String url) {
-    try {
-      return Uri.decodeFull(url.split('/').last.split('?').first);
-    } catch (e) {
-      return 'documento';
-    }
+    return Arquivos.nomeDoArquivo(url); // Etapa 16c: link antigo e novo
   }
 
   @override
@@ -627,11 +624,7 @@ class _WorkshopCard extends StatelessWidget {
   }
 
   String _getFileNameFromUrl(String url) {
-    try {
-      return Uri.decodeFull(url.split('/').last.split('?').first);
-    } catch (e) {
-      return 'documento';
-    }
+    return Arquivos.nomeDoArquivo(url); // Etapa 16c: link antigo e novo
   }
 
   void _openDocument(String url) async {

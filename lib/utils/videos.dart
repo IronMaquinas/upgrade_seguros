@@ -7,9 +7,11 @@
 //  • Limites vêm das Configurações (`app_config/config`): tamanho máximo por
 //    vídeo (padrão 20 MB — o vídeo do WhatsApp tem até 16 MB) e quantidade por
 //    sinistro (padrão 5). Pensados para variar por plano contratado no futuro.
-//  • Caminho no Storage: videos/sinistros/{nº do sinistro}/{data}_{nome}.
-//    O prefixo "videos/" é o que permite a regra de ciclo de vida (Coldline
-//    depois de 180 dias) e a regra de segurança só para vídeos.
+//  • Caminho no Storage (Etapa 16c, dentro da pasta da corretora):
+//    corretoras/{empresaId}/videos/sinistros/{nº do sinistro}/{data}_{nome}.
+//    A pasta "videos/" é o que permite a regra de segurança só para vídeos; a
+//    regra de ciclo de vida (Coldline depois de 180 dias) reconhece pela
+//    extensão (storage-lifecycle.json). Vídeos antigos: videos/sinistros/…
 //  • Depois do envio, a Cloud Function `converterVideo` converte para MP4 720p
 //    (H.264) no mesmo endereço — o link salvo no sinistro continua valendo.
 
@@ -122,8 +124,10 @@ class Videos {
     return limpo.isEmpty ? 'video.mp4' : limpo;
   }
 
-  static String caminho(String numeroSinistro, String nome, DateTime quando) =>
-      'videos/sinistros/${nomeSeguro(numeroSinistro)}/${quando.millisecondsSinceEpoch}_${nomeSeguro(nome)}';
+  /// Etapa 16c: dentro da pasta da corretora
+  /// (corretoras/{empresaId}/videos/sinistros/{nº}/{ms}_{nome}).
+  static String caminho(String numeroSinistro, String nome, DateTime quando, {required String empresaId}) =>
+      'corretoras/$empresaId/videos/sinistros/${nomeSeguro(numeroSinistro)}/${quando.millisecondsSinceEpoch}_${nomeSeguro(nome)}';
 
   /// "12,4 MB" / "850 KB"
   static String tamanho(int bytes) {

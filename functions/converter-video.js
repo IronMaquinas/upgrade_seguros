@@ -5,7 +5,8 @@
 //  • Por quê: vídeo de celular é grande (1080p/4K) e o do iPhone (.mov, HEVC)
 //    não toca no Chrome. 720p é suficiente para acompanhar o evento e fica
 //    bem menor (CRF 28, "veryfast").
-//  • Onde: só arquivos em "videos/" (o app envia para videos/sinistros/{nº}/...).
+//  • Onde: só arquivos em "videos/" — desde a 16c dentro da pasta da corretora
+//    (corretoras/{id}/videos/sinistros/{nº}/...; antes, videos/sinistros/...).
 //  • Como: baixa para /tmp, converte com ffmpeg (pacote ffmpeg-static) e grava
 //    POR CIMA, no mesmo caminho, mantendo o token de download — o link salvo
 //    no sinistro continua valendo e passa a entregar o vídeo convertido.
@@ -23,6 +24,12 @@ const os = require('os');
 const path = require('path');
 
 // Lado menor até 720 px (vídeo em pé continua em pé), sem aumentar vídeo pequeno.
+// Etapa 16c: vídeos novos ficam na pasta da corretora
+// (corretoras/{id}/videos/…); os antigos, em videos/….
+function ehCaminhoDeVideo(nome) {
+  return /^(corretoras\/[^/]+\/)?videos\//.test(String(nome));
+}
+
 const FILTRO_720P = "scale='if(gt(iw,ih),-2,min(720,iw))':'if(gt(iw,ih),min(720,ih),-2)'";
 
 function argumentosFfmpeg(entrada, saida) {
@@ -67,7 +74,7 @@ const converterVideo = onObjectFinalized(
     const obj = event.data;
     const nome = obj.name || '';
     const meta = obj.metadata || {};
-    if (!nome.startsWith('videos/')) return;
+    if (!ehCaminhoDeVideo(nome)) return;
     if (!String(obj.contentType || '').startsWith('video/')) return;
     if (meta.convertido === 'sim' || meta.convertido === 'falhou') return;
 
@@ -107,4 +114,4 @@ const converterVideo = onObjectFinalized(
   },
 );
 
-module.exports = { converterVideo, argumentosFfmpeg, decidir, rodarFfmpeg };
+module.exports = { converterVideo, argumentosFfmpeg, decidir, rodarFfmpeg, ehCaminhoDeVideo };

@@ -45,6 +45,7 @@ import 'package:upgrade_seguros/utils/videos.dart';
 import 'package:upgrade_seguros/widgets/videos_sinistro.dart';
 import 'package:upgrade_seguros/utils/gatilho.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
+import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
 
  enum RelatoStep {
     situacao,
@@ -800,7 +801,7 @@ class _TerceirosListWidgetState extends State<_TerceirosListWidget> {
                                         const SizedBox(width: 4),
                                         Expanded(
                                           child: Text(
-                                            url.split('/').last,
+                                            Arquivos.nomeDoArquivo(url),
                                             style: const TextStyle(fontSize: 9),
                                             overflow: TextOverflow.ellipsis,
                                           ),
@@ -6924,7 +6925,7 @@ class _BodilyInjuryListWidgetState extends State<_BodilyInjuryListWidget> {
                                         const SizedBox(width: 4),
                                         Expanded(
                                           child: Text(
-                                            url.split('/').last,
+                                            Arquivos.nomeDoArquivo(url),
                                             style: const TextStyle(fontSize: 9),
                                             overflow: TextOverflow.ellipsis,
                                           ),
@@ -7552,7 +7553,7 @@ class _MaterialDamageListWidgetState extends State<_MaterialDamageListWidget> {
                                         const SizedBox(width: 4),
                                         Expanded(
                                           child: Text(
-                                            url.split('/').last,
+                                            Arquivos.nomeDoArquivo(url),
                                             style: const TextStyle(fontSize: 9),
                                             overflow: TextOverflow.ellipsis,
                                           ),

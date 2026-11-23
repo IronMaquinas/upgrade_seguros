@@ -26,6 +26,9 @@ import '../models/apolice_model.dart';
 import '../models/vehicle_model.dart';
 import '../services/firestore_service.dart';
 import '../screens/claim_detail_screen.dart';
+import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
+import 'package:upgrade_seguros/utils/videos.dart' show Videos; // Etapa 16c (bucket)
+import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16c
 
 class ClientDetailScreen extends StatefulWidget {
   final Client client;
@@ -199,9 +202,11 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
       );
       if (compressed == null) return null;
 
-      final ref = FirebaseStorage.instance
+      // Etapa 16c: mesmo bucket das fotos e dentro da pasta da corretora
+      // (o bucket padrão do firebase_options ainda é o nome antigo, appspot.com).
+      final ref = FirebaseStorage.instanceFor(bucket: 'gs://${Videos.bucket}')
           .ref()
-          .child('veiculos/${DateTime.now().millisecondsSinceEpoch}.jpg');
+          .child('corretoras/${EmpresaAtual.id}/veiculos/${DateTime.now().millisecondsSinceEpoch}.jpg');
 
       await ref.putFile(File(compressed.path));
 
@@ -754,7 +759,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                                                                   // Ícone baseado na extensão
                                                                   IconData icon = Icons.insert_drive_file;
                                                                   Color iconColor = Colors.grey.shade700;
-                                                                  final ext = url.split('.').last.toLowerCase();
+                                                                  final ext = Arquivos.extensao(url);
                                                                   if (ext == 'pdf') {
                                                                     icon = Icons.picture_as_pdf;
                                                                     iconColor = Colors.red;
@@ -775,7 +780,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                                                                         context: context,
                                                                         builder: (_) => AlertDialog(
                                                                           title: const Text('Documento'),
-                                                                          content: Text('Clique em "Abrir" para visualizar o documento:\n\n${url.split('/').last}'),
+                                                                          content: Text('Clique em "Abrir" para visualizar o documento:\n\n${Arquivos.nomeDoArquivo(url)}'),
                                                                           actions: [
                                                                             TextButton(
                                                                               onPressed: () => Navigator.pop(context),
@@ -812,7 +817,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                                                                           Icon(icon, size: 12, color: iconColor),
                                                                           const SizedBox(width: 2),
                                                                           Text(
-                                                                            url.split('/').last.split('?').first.substring(0, 10) + '…',
+                                                                            Arquivos.abreviado(url, 10),
                                                                             style: TextStyle(fontSize: 9, color: Colors.grey.shade700),
                                                                           ),
                                                                         ],

@@ -19,6 +19,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, Uint8List;
 
 import '../utils/videos.dart';
+import 'empresa_atual.dart'; // Etapa 16c: pasta da corretora
 
 /// Vídeo escolhido no aparelho, ainda não enviado.
 class VideoSelecionado {
@@ -44,7 +45,7 @@ class VideoService {
     void Function(double progresso)? aoProgredir,
   }) async {
     final agora = DateTime.now();
-    final caminho = Videos.caminho(numeroSinistro, video.nome, agora);
+    final caminho = Videos.caminho(numeroSinistro, video.nome, agora, empresaId: EmpresaAtual.id); // Etapa 16c
     final ref = _storage.ref(caminho);
     final metadados = SettableMetadata(
       contentType: Videos.contentType(video.nome),

@@ -3,32 +3,62 @@ rules_version = '2';
 // storage.rules — Upgrade Seguros
 //
 // Etapa 15: "logado" não basta — qualquer pessoa consegue criar uma conta no
-// Firebase Auth pela internet. Agora vale a mesma regra do banco: usuário com
-// cadastro em users/{uid} e não desativado (consulta ao Firestore pelas
-// regras; no primeiro deploy o Firebase pede para autorizar isso — responda Y).
+// Firebase Auth pela internet. Vale a mesma regra do banco: usuário com
+// cadastro em users/{uid} e não desativado (consulta ao Firestore pelas regras).
+//
+// Etapa 16c: cada corretora só mexe na PRÓPRIA pasta de arquivos
+// (corretoras/{empresaId}/…), como no banco (16b). As pastas antigas
+// (sinistros/, clientes/, videos/, veiculos/) só podem ser lidas/apagadas pela
+// corretora que recebeu os dados antigos (migração da Etapa 16) e não recebem
+// arquivos novos. O resto do bucket (ex.: backups/) fica fechado para o app.
+//
+// Obs.: o Firebase permite no máximo 2 documentos do banco consultados por
+// verificação — estas regras usam no máximo 2 (o usuário e a corretora dele).
 service firebase.storage {
   match /b/{bucket}/o {
 
-    function ativo() {
-      return request.auth != null
-        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
-        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('ativo', true) != false;
+    function perfil() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
     }
 
-    // Fotos, documentos e laudos.
-    // Etapa 12: vídeo só pode ser enviado para a pasta videos/ (regra abaixo).
-    match /{allPaths=**} {
-      allow read, delete: if ativo();
-      allow create, update: if ativo()
+    // Sem cadastro em users/{uid}, perfil() dá erro e o pedido é negado.
+    function ativo() {
+      return request.auth != null
+        && perfil().get('ativo', true) != false;
+    }
+
+    function membro(e) {
+      return ativo() && perfil().get('empresaId', '') == e;
+    }
+
+    // A corretora do usuário recebeu os dados antigos (tem a data da migração).
+    function recebeuDadosAntigos() {
+      return ativo()
+        && perfil().get('empresaId', '') != ''
+        && firestore.get(/databases/(default)/documents/corretoras/$(perfil().get('empresaId', ''))).data.get('migradoEm', null) != null;
+    }
+
+    // Arquivos da corretora: fotos, documentos e laudos.
+    // Vídeo só pode ser enviado para a pasta videos/ (regra abaixo).
+    match /corretoras/{e}/{todos=**} {
+      allow read, delete: if membro(e);
+      allow create, update: if membro(e)
         && !request.resource.contentType.matches('video/.*');
     }
 
-    // Etapa 12: vídeos dos sinistros — só vídeo e até 100 MB (teto de qualquer
-    // plano; o limite do plano é conferido no app). Etapa 13: ≤ 100 MB inclusive.
-    match /videos/{todos=**} {
-      allow create, update: if ativo()
+    // Vídeos dos sinistros — só vídeo e até 100 MB (teto de qualquer plano;
+    // o limite do plano é conferido no app).
+    match /corretoras/{e}/videos/{todos=**} {
+      allow create, update: if membro(e)
         && request.resource.contentType.matches('video/.*')
         && request.resource.size <= 100 * 1024 * 1024;
+    }
+
+    // Pastas antigas (até a 16b): só leitura e exclusão, e só pela corretora
+    // que recebeu os dados antigos. Nada novo entra aqui.
+    match /{pasta}/{todos=**} {
+      allow read, delete: if pasta in ['sinistros', 'clientes', 'videos', 'veiculos']
+        && recebeuDadosAntigos();
     }
   }
 }

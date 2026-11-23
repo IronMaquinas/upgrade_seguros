@@ -7,6 +7,15 @@
         "matchesPrefix": ["videos/"],
         "matchesStorageClass": ["STANDARD"]
       }
+    },
+    {
+      "action": { "type": "SetStorageClass", "storageClass": "COLDLINE" },
+      "condition": {
+        "age": 180,
+        "matchesPrefix": ["corretoras/"],
+        "matchesSuffix": [".mp4", ".MP4", ".mov", ".MOV", ".m4v", ".M4V", ".3gp", ".3GP", ".webm", ".WEBM"],
+        "matchesStorageClass": ["STANDARD"]
+      }
     }
   ]
 }

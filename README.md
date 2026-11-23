@@ -359,8 +359,10 @@ Concluído [dataConclusao = Timestamp.now()] / Cancelado
 
 - Upload via clique ou **drag & drop**
 - Sanitização de nome (remove `# ? & % espaços`)
-- Armazenamento: Firebase Storage
-- Paths: `assistencias/{numero}/fotos/` e `/laudos/`
+- Armazenamento: Firebase Storage (bucket `upgrade-seguros.firebasestorage.app`)
+- **Pasta por corretora (Etapa 16c):** tudo em `corretoras/{empresaId}/…` — ex.: `corretoras/{id}/sinistros/{nº}/fotos/`, `…/laudos/`, `…/terceiros/`, `corretoras/{id}/clientes/{id}/apolices/…`, `corretoras/{id}/videos/sinistros/{nº}/`. O app continua pedindo `sinistros/{nº}/fotos/…` e a Function `uploadFile` acrescenta a pasta da corretora do usuário (não dá para gravar na pasta de outra). Até a 16b os arquivos ficavam nessas mesmas pastas, só que na raiz do bucket (comuns a todas as corretoras).
+- **Links protegidos (Etapa 16c):** o upload não deixa mais o arquivo público. O link gravado é o do Firebase com chave de acesso (`firebasestorage.googleapis.com/v0/b/…/o/…?alt=media&token=…`, o mesmo formato que os vídeos já usavam). Para ler caminho, nome e extensão de um link use `lib/utils/arquivos.dart` (`Arquivos.caminhoDoArquivo` / `nomeDoArquivo` / `extensao`) — no formato novo, `url.split('/').last` devolve o caminho codificado com o token.
+- **Arquivos antigos → pasta da corretora:** Configurações → 📁 Arquivos da corretora (só administrador; Function `arquivosEmpresa`): "Diagnóstico", "Passar arquivos" (copia em lotes de 100 e troca os links nos documentos; o original fica) e "Apagar originais" (7 dias depois da conversão; apaga das pastas antigas só o que tem cópia — os links públicos antigos param de abrir).
 - Web: compressão via pacote `image` (sem dependência de flutter_image_compress)
 - **Abertura do sinistro (Etapa 12):** cada anexo sobe **uma vez só** (`_urlAnexoEnviado`). Antes, todo salvamento — inclusive o automático a cada edição — comprimia e enviava as fotos de novo com nome novo, duplicando arquivos no Storage.
 
@@ -368,12 +370,12 @@ Concluído [dataConclusao = Timestamp.now()] / Cancelado
 - **Onde:** abertura (dentro de "Anexos e Documentos", categoria "VÍDEOS DO SINISTRO" — desde a Etapa 13 no mesmo desenho das outras categorias: rótulo cinza, botão "+ Adicionar vídeos" com contorno e caixa onde dá para **arrastar e soltar** ou clicar) e detalhe ("Vídeos da Ocorrência", no modo edição para adicionar/excluir).
 - **Limites** (Configurações → "🎬 Vídeos do sinistro", em `app_config/config`): `videoMaxMb` e `videosPorSinistro` (padrão **5**). Pensados para variar por plano. O padrão de MB nasceu em 20 (Etapa 12) e foi alterado no código para **100** pelo Marcony (commit `4dbf6a6`): a cliente tem vídeos de 60–70 MB. Um valor salvo em Configurações vale mais que o padrão do código. Teto absoluto de 100 MB (até 100 MB inclusive nas regras do Storage desde a Etapa 13).
 - **Envio direto ao Storage** pelo SDK (`lib/services/video_service.dart`), com progresso — a Function `uploadFile` (base64 por HTTP) tem limite de ~10 MB e não serve para vídeo. Bucket explícito `upgrade-seguros.firebasestorage.app` (`Videos.bucket`): o `firebase_options.dart` ainda tem o nome antigo `appspot.com`.
-- **Caminho:** `videos/sinistros/{nº}/{data}_{nome}`. Registro no sinistro: campo `videos` = lista de `{url, caminho, nome, tamanho_bytes, enviado_em, enviado_por}` (`VideoAnexo`, `lib/utils/videos.dart`). O tamanho fica guardado para a futura medição por plano.
+- **Caminho:** `corretoras/{empresaId}/videos/sinistros/{nº}/{data}_{nome}` (Etapa 16c; antes `videos/sinistros/…`). Registro no sinistro: campo `videos` = lista de `{url, caminho, nome, tamanho_bytes, enviado_em, enviado_por}` (`VideoAnexo`, `lib/utils/videos.dart`). O tamanho fica guardado para a futura medição por plano.
 - **Conversão:** `functions/converter-video.js` (gatilho de Storage, 2 GiB, 9 min) converte para MP4 720p (lado menor ≤ 720 px, CRF 28, AAC 96k, faststart) e grava por cima mantendo o token — o link salvo continua valendo. Marca `convertido=sim|falhou`. Se o original já é MP4 e a conversão não ficar menor, mantém o original. Resolve o .mov (HEVC) do iPhone, que não toca no Chrome.
 - **Assistir:** `video_player` numa janela sobre a tela (play/pausa, barra de tempo, som). Na abertura, toca o arquivo local antes de enviar. `lib/widgets/videos_sinistro.dart`.
 - **No detalhe**, adicionar/excluir grava direto no documento (`arrayUnion`/`arrayRemove`) e exclui o arquivo do Storage. Excluir o sinistro apaga os vídeos.
-- **Arquivamento:** `storage-lifecycle.json` — vídeos com mais de 180 dias vão para **Coldline** (ativar uma vez com `gcloud storage buckets update gs://upgrade-seguros.firebasestorage.app --lifecycle-file=storage-lifecycle.json` ou pelo console do Cloud Storage → bucket → Ciclo de vida).
-- **Regras do Storage** (`storage.rules`): vídeo só na pasta `videos/`, só logado, até 100 MB (inclusive — Etapa 13; antes um arquivo de exatamente 100 MB passava no app e era recusado no Storage); demais pastas como antes.
+- **Arquivamento:** `storage-lifecycle.json` — vídeos com mais de 180 dias vão para **Coldline** (desde a 16c a regra reconhece os vídeos dentro de `corretoras/` pela extensão; reaplicar depois de mudar o arquivo, com `gcloud storage buckets update gs://upgrade-seguros.firebasestorage.app --lifecycle-file=storage-lifecycle.json` ou pelo console do Cloud Storage → bucket → Ciclo de vida).
+- **Regras do Storage** (`storage.rules`): vídeo só na pasta `videos/` da corretora, só usuário ativo da corretora, até 100 MB (inclusive — Etapa 13; antes um arquivo de exatamente 100 MB passava no app e era recusado no Storage). Etapa 16c: cada corretora só lê/grava/apaga em `corretoras/{o empresaId dele}/…`; as pastas antigas (`sinistros/`, `clientes/`, `videos/`, `veiculos/`) só leitura/exclusão, e só pela corretora que recebeu os dados antigos; o resto do bucket (ex.: `backups/`) fechado para o app.
 
 ---
 
@@ -616,16 +618,17 @@ A lista das coleções da corretora está em `EmpresaAtual.colecoes` (app) e `CO
 
 | Função | Tipo | Descrição |
 |---|---|---|
-| `uploadFile` | HTTP (login) | Recebe base64, salva no Storage, retorna URL pública. Exige usuário ativo desde a Etapa 15 |
-| `deleteFiles` | HTTP (login) | Remove array de paths do Storage. Exige usuário ativo desde a Etapa 15 |
+| `uploadFile` | HTTP (login) | Recebe base64 e salva no Storage **dentro da pasta da corretora do usuário**; devolve link com chave de acesso (não público) — Etapa 16c, `functions/arquivos.js`. Exige usuário ativo desde a Etapa 15 |
+| `deleteFiles` | HTTP (login) | Remove arquivos (aceita caminho ou link, nos dois formatos). Etapa 16c: só da pasta da própria corretora (e das pastas antigas, para a corretora que recebeu os dados antigos); devolve `{excluidos, recusados}` |
+| `arquivosEmpresa` | HTTP (só admin) | Etapa 16c: `diagnostico` (links antigos por coleção/pasta), `converter` (copia um lote para `corretoras/{id}/…` e troca os links nos documentos, em transação; repete até `terminou`) e `apagarOriginais` (confirmação `APAGAR`, 7 dias após a conversão, só o que tem cópia, por partes com `cursor`) |
 | `npsPublico` | HTTP (público) | Etapa 15: pesquisa NPS do cliente final — confere o token, devolve só o necessário para a tela, grava a avaliação e recalcula o NPS do cliente |
 | `apoioLogin` | HTTP (público) | Etapa 15: "usuário" ou "matrícula" → e-mail (só o e-mail) para o login |
 | `criarUsuario` | HTTP (só admin) | Etapa 15: cria a conta (senha aleatória) e o cadastro em `users/`, herdando a empresa do administrador; o app manda o e-mail de definir senha |
 | `migrarEmpresa` | HTTP (só admin) | Etapa 16: `diagnostico` (raiz × pasta da corretora, usuários, dias desde a migração) e `copiar` (raiz → `corretoras/{empresaId}/…`, só o que falta; índice do NPS; usuários sem empresa). Etapa 16b: `apagarRaiz` (confirmação `APAGAR`, 7 dias após a migração, só documentos com cópia) |
-| `converterVideo` | Storage (arquivo finalizado em `videos/`) | Etapa 12: converte para MP4 720p no mesmo caminho (ffmpeg-static) |
+| `converterVideo` | Storage (arquivo finalizado em `videos/` ou `corretoras/{id}/videos/`) | Etapa 12: converte para MP4 720p no mesmo caminho (ffmpeg-static) |
 | `verificarAssistenciasAtradasTelegram` | Agendada (a cada 10 min) | Lê `app_config/config` e avisa no Telegram as assistências com SLA atrasado, respeitando horário configurado. Token do bot no Secret Manager (`TELEGRAM_BOT_TOKEN`, Etapa 15) |
 
-> Storage URLs são públicas (`makePublic()`). Para produção com dados sensíveis, considerar URLs assinadas com expiração (ver Pendências de Segurança, item S6).
+> Desde a Etapa 16c os anexos não são mais públicos: o link gravado tem uma chave de acesso do Firebase (ver Pendências de Segurança, item S6).
 
 ---
 
@@ -641,7 +644,7 @@ Levantadas na revisão da base (07/11/2026). O repositório no GitHub está **p�
 - [x] **S3 — Exigir login nas Cloud Functions de arquivo** (Etapa 15): `uploadFile` e `deleteFiles` só atendem usuário logado e ativo (ID token no cabeçalho `Authorization`, conferido em `functions/seguranca.js`; o app manda via `lib/services/funcoes_nuvem.dart`, que monta o endereço do Cloud Run — Etapa 15.1). Pendente: restringir os caminhos permitidos (entra com o multi-tenant).
 - [ ] **S4 — Restringir a chave do Google Maps/Places** no Google Cloud Console (referenciadores HTTP do domínio + package/bundle dos apps Android/iOS + só as APIs usadas). Hoje a chave está escrita em 8 arquivos de tela; numa etapa futura, centralizar em `utils/constants.dart` (uma chave, um lugar). *Restrição no console não exige entrega; a centralização entra quando alguma etapa mexer nessas telas.*
 - [x] **S5 — Regras do Firestore no repositório** (Etapa 15): `firestore.rules` versionado e registrado no `firebase.json`. Só **usuário ativo** (logado + cadastro em `users/{uid}` não desativado) lê e grava; `users/` só o administrador cria, apaga ou muda papel/ativo/empresa. O Storage segue a mesma regra (consulta o cadastro pelo Firestore). Fluxos sem login passam pelo servidor: pesquisa NPS (`npsPublico`), login por usuário/matrícula (`apoioLogin`) e criação de usuário pelo administrador (`criarUsuario`). Próximo: isolamento por corretora (multi-tenant).
-- [ ] **S6 — URLs públicas dos anexos.** `makePublic()` deixa fotos e laudos acessíveis a quem tiver o link. Trocar por URL assinada com expiração ou download autenticado. **Pré-requisito para a Europa (GDPR) e reforça a LGPD.**
+- [x] **S6 — URLs públicas dos anexos** (Etapa 16c). O upload não usa mais `makePublic()`: os arquivos ficam na pasta da corretora e o link gravado tem chave de acesso do Firebase (não dá para chegar ao arquivo só sabendo o caminho). Os arquivos antigos passam para a pasta da corretora pelo cartão 📁 de Configurações e os originais públicos são apagados depois de 7 dias. Limite conhecido: quem tiver o link completo abre (como os links do Firebase em geral). **Se a Europa (GDPR) pedir, o próximo passo é link com validade (URL assinada) gerado na hora de abrir.**
 - [x] **S7 — Tirar `node_modules/` do git** (Etapa 06, junto com `android/build/`) (~15 mil arquivos versionados na raiz): `git rm -r --cached node_modules`, acrescentar no `.gitignore`. Não muda o funcionamento; deixa o repositório leve e o diff legível.
 
 ---
@@ -659,6 +662,8 @@ Levantadas na revisão da base (07/11/2026). O repositório no GitHub está **p�
 - **Tarefas concluídas antes da Etapa 10** não têm `concluida_em`: aparecem como "Sem data de conclusão" e ficam fora do "no prazo / fora do prazo".
 - **Editar tarefa trocava o responsável** para quem editou (até a Etapa 09). Tarefas editadas antes podem estar com o responsável errado nas estatísticas por funcionário.
 - **Modal "Tipo de Assistência" é um componente só** (Etapa 06): `lib/widgets/assist_tipo_picker.dart` → `mostrarSeletorTipoAssistencia()`, usado pelo Dashboard e pelo botão laranja "Nova Assistência" da lista. Cor padrão das assistências: `corAssistencia` (`Colors.orange.shade600`).
+- **Link de arquivo (Etapa 16c):** nunca tirar nome/extensão com `url.split('/')` ou `url.split('.')` — no link novo o caminho vem codificado (`%2F`) e com `?alt=media&token=…` no fim. Usar `Arquivos.nomeDoArquivo` / `Arquivos.extensao` (`lib/utils/arquivos.dart`).
+- **Fotos de veículo pelo celular** (`client_detail_screen` / `client_form_screen`, `putFile`): só funcionam no app mobile (no navegador o envio é pela Function). Desde a 16c usam o bucket certo e a pasta da corretora; antes iam para o bucket padrão antigo (`appspot.com`).
 - **Arquivos auxiliares na raiz/lib:** `ROTEIRO_REFATORACAO_PICKER_RAMO.md` (o picker global já existe em `dashboard_screen.dart` — confirmar que o roteiro foi concluído e apagar) e `lib/readme.dart` (anotações soltas em comentário).
 
 ---
@@ -703,6 +708,7 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 | 15.1 | 09/11/2026 | Etapa 15 | Endereço das Functions: as de 2ª geração respondem no Cloud Run (`https://<nome>-hwtlk2s4qq-uc.a.run.app`), não em `…cloudfunctions.net/<nome>` (404) — afetava `apoioLogin`, `npsPublico`, `criarUsuario` e `deleteFiles`. |
 | 16 | 10/11/2026 | `0d24d50` | **Multi-tenant (preparação):** cada corretora com a própria pasta no banco (`corretoras/{id}/…`); app lê/grava pela corretora do usuário (`EmpresaAtual`), listas de usuários só da corretora; `PortaoEmpresa` antes do Dashboard (segura as telas até a migração); Function `migrarEmpresa` (diagnóstico + cópia idempotente, raiz preservada); NPS e Telegram por corretora; Configurações somente leitura para funcionário. Testes: `functions/testes/empresa.teste.js` (+ `firebase-falso.js`). |
 | 16b | 23/11/2026 | `99cc809` | **Multi-tenant, trava:** regras do banco por corretora (membro lê/grava a própria pasta; excluir atendimento/cliente e configurações só gestor; `users` só da mesma corretora; raiz antiga bloqueada); "Apagar dados antigos" (`migrarEmpresa` `apagarRaiz`: 7 dias após a migração, só o que tem cópia, confirmação digitada); data da 1ª migração preservada. Migração feita em 23/11/2026. |
+| 16c | 23/11/2026 | `81e6d14` | **Multi-tenant, arquivos:** `uploadFile` grava em `corretoras/{id}/…` e devolve link com chave (fim do `makePublic`, S6); `deleteFiles` só na pasta da corretora; regras do Storage por corretora (pastas antigas só leitura/exclusão); vídeos e fotos de veículo na pasta da corretora; Function `arquivosEmpresa` + cartão 📁 em Configurações (passar arquivos antigos em lotes, trocar os links, apagar originais após 7 dias). Nome/extensão de arquivo lidos por `lib/utils/arquivos.dart` (o formato novo quebrava `split('/')`). Testes novos: `functions/testes/arquivos.teste.js`, `test/arquivos_test.dart`. |
 | 11 | 08/11/2026 | `9159bd1` | **Busca de Sinistros** também por terceiros (proprietário, motorista, contato, registro na seguradora deles), proprietário/condutor do veículo segurado e contato do segurado; sem acento, várias palavras, telefone sem máscara (`lib/utils/busca.dart`). **Filtro de recomendação** da lista de clientes vira seletor no padrão dos filtros de Sinistros, ao lado da busca. **Sinistralidade Mensal** recalculada (sinistros ocorridos ÷ prêmio ganho), com linha acumulada e linha do gatilho (`lib/utils/sinistralidade.dart`). Testes novos: `busca_test.dart`, `sinistralidade_test.dart`. |
 | 10 | 08/11/2026 | `44f5c8f` | **Top 10 de risco** com a regra da recomendação (vigentes, sem vínculo por ramo + data) e os mesmos nomes. **Lista de clientes:** filtro por recomendação ligado à exportação, que passa a trazer recomendação, uso do gatilho e contato (nome, telefone, e-mail). **Tarefas:** ordenar Mais recente/Mais antiga; exportar agrupado por funcionário (CSV/PDF); `concluida_em` gravado ao concluir; "no prazo / fora do prazo" pela regra única (antes concluída no prazo com data vencida contava como fora); editar não troca mais o responsável; o filtro por funcionário pelo id passou a funcionar (o campo não vinha na lista). **Relatórios:** Tarefas por Funcionário (abertas, concluídas %, no prazo × fora). Testes novos: `tarefas_test.dart` (+1 em `relatorio_clientes_test.dart`). |
 | 09 | 08/11/2026 | `4d14169` | **Recomendação do cliente unificada pelo uso do gatilho** (pior apólice vigente; faixas 60/80/100%; sinistros sem vínculo ligados por ramo + data; "Sem apólice vigente" e "Apólice sem valor" em cinza; Detalhes mostra uso do gatilho e % do valor da apólice). Substitui 4 contas diferentes. Botões com texto: **"Exportar relatório"** na lista de clientes e **"Importar contrato (PDF)"** no cadastro. Teste novo: `recomendacao_cliente_test.dart`. |
@@ -800,7 +806,7 @@ apolices: [
 - [x] Segurança: regras do Firestore e do Storage (só usuário ativo), Functions com login, NPS/login/criação de usuário pelo servidor, token do Telegram como segredo (Etapa 15)
 - [x] Multi-tenant, preparação: dados por corretora (`corretoras/{id}/…`), migração, Configurações só leitura para funcionário (Etapa 16)
 - [x] Multi-tenant, trava (16b): regras isolando cada corretora; excluir e configurar só gestor nas regras; limpeza das coleções antigas da raiz
-- [ ] 16c: arquivos (Storage) por corretora e links protegidos do Firebase no lugar dos links públicos (S6) — corrige também imagens que às vezes não aparecem no Chrome
+- [x] Multi-tenant, arquivos (16c): Storage por corretora, links com chave no lugar dos públicos (S6), passagem dos arquivos antigos e limpeza dos originais; leitura única de nome/extensão dos links
 - [ ] Planos de armazenamento (bronze/prata/ouro ou por GB): medir uso por corretora (soma de `tamanho_bytes` / Storage) e aplicar `videoMaxMb`/`videosPorSinistro` por plano — depende do multi-tenant
 - [ ] `firebase_options.dart` com o bucket antigo (`appspot.com`): regenerar com `flutterfire configure` (hoje só os vídeos usam o SDK do Storage, com o bucket fixo)
 - [ ] Assistências: vídeos (mesmo componente)
@@ -812,7 +818,7 @@ apolices: [
 - [x] 🟠 S3 — Login obrigatório nas Functions de arquivo (Etapa 15)
 - [ ] 🟠 S4 — Restringir e centralizar a chave do Google Maps/Places
 - [x] 🟠 S5 — Regras do Firestore no repositório (Etapa 15)
-- [ ] 🟠 S6 — Anexos com URL assinada em vez de pública
+- [x] 🟠 S6 — Anexos sem link público, na pasta da corretora (Etapa 16c)
 - [x] 🟠 S7 — `node_modules/` fora do git (Etapa 06)
 
 ### ⏳ Próximo
@@ -830,7 +836,7 @@ apolices: [
 - [ ] Reorganização do Dashboard (prioridades + tarefas)
 
 ### 🌍 Expansão Europa (a planejar)
-- [ ] Adequação GDPR: região dos dados (Firestore/Storage na UE), consentimento, exportação e exclusão de dados do titular, registro de acesso — depende de S5 e S6
+- [ ] Adequação GDPR: região dos dados (Firestore/Storage na UE), consentimento, exportação e exclusão de dados do titular, registro de acesso, talvez link com validade nos anexos — S5 e S6 feitos
 - [ ] Internacionalização (idiomas, moeda, formatos de data e documento — hoje CNPJ/CPF e R$)
 
 ### 📋 Futuro

@@ -18,6 +18,7 @@ import 'package:upgrade_seguros/utils/gatilho.dart';
 import 'package:upgrade_seguros/utils/videos.dart';
 import 'package:upgrade_seguros/widgets/tarefas_evento_dialog.dart'; // Etapa 14
 import 'package:upgrade_seguros/widgets/migracao_empresa_card.dart'; // Etapa 16
+import 'package:upgrade_seguros/widgets/arquivos_empresa_card.dart'; // Etapa 16c
 import '../models/seguradora_model.dart';
 import '../services/seguradora_service.dart';
 import 'package:upgrade_seguros/models/pdf_signature_model.dart';
@@ -1791,6 +1792,9 @@ class _AbaAjustesState extends State<_AbaAjustes> {
 
           // Etapa 16: passagem dos dados para a pasta da corretora (só admin).
           const CartaoMigracaoEmpresa(),
+
+          // Etapa 16c: arquivos para a pasta da corretora + links protegidos (só admin).
+          const CartaoArquivosEmpresa(),
 
           // ─── SEÇÃO: NOTIFICAÇÕES ───────────────────────────────────────────────
           const SizedBox(height: 32),

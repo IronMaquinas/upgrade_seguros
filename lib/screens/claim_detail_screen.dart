@@ -47,6 +47,7 @@ import 'package:upgrade_seguros/services/tarefas_evento_service.dart'; // Etapa 
 import 'package:upgrade_seguros/utils/tarefas_evento.dart'; // Etapa 14
 import 'package:upgrade_seguros/widgets/tarefas_evento_dialog.dart'; // Etapa 14
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
+import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
 
 class ClaimDetailScreen extends StatefulWidget {
   final Claim claim;
@@ -1971,7 +1972,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
         try {
           for (String url in terceiro.fotosUrls!) {
             // Para URLs, criamos XFile com a URL como path
-            _thirdPartyPhotos.add(XFile(url, name: Uri.parse(url).pathSegments.last));
+            _thirdPartyPhotos.add(XFile(url, name: Arquivos.nomeDoArquivo(url)));
           }
         } catch (e) {
           print('Erro ao carregar fotos: $e');
@@ -2592,15 +2593,8 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
   // WIDGET PARA PADRONIZAR O BOTÃO '+'
 
   String getFileNameFromUrl(String url) {
-    try {
-      final String path = url.split('?').first;
-      final String rawName = path.split('/').last;
-      final String decodedName = Uri.decodeComponent(rawName);
-      return decodedName.trim().replaceAll(RegExp(r'\s+'), ' ');
-    } catch (e) {
-      final rawName = url.split('/').last.split('?').first;
-      return rawName.trim().replaceAll(RegExp(r'\s+'), ' ');
-    }
+    // Etapa 16c: entende o link antigo e o novo (com %2F e ?token=…)
+    return Arquivos.nomeDoArquivo(url).trim().replaceAll(RegExp(r'\s+'), ' ');
   }
 
   Color _getStatusColor(String status) {
@@ -4363,7 +4357,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                                 crossAxisAlignment: CrossAxisAlignment.start,
                                                 children: [
                                                   ...dano.documentosUrls!.map((url) {
-                                                    final fileName = url.split('/').last;
+                                                    final fileName = Arquivos.nomeDoArquivo(url);
                                                     return Padding(
                                                       padding: const EdgeInsets.symmetric(vertical: 2),
                                                       child: Row(
@@ -4566,7 +4560,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                                 crossAxisAlignment: CrossAxisAlignment.start,
                                                 children: [
                                                   ...dano.documentosUrls!.map((url) {
-                                                    final fileName = url.split('/').last;
+                                                    final fileName = Arquivos.nomeDoArquivo(url);
                                                     return Padding(
                                                       padding: const EdgeInsets.symmetric(vertical: 2),
                                                       child: Row(

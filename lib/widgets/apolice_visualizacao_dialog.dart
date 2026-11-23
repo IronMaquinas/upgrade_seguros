@@ -19,6 +19,7 @@ import '../models/apolice_model.dart';
 import '../models/bem_segurado_model.dart';
 import '../utils/formatters.dart';
 import '../utils/gatilho.dart';
+import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
 
 Future<bool> mostrarApoliceVisualizacao(
   BuildContext context, {
@@ -340,7 +341,7 @@ class _BemCard extends StatelessWidget {
               spacing: 4,
               runSpacing: 4,
               children: docs.map((url) {
-                final nome = Uri.decodeComponent(url.split('/').last.split('?').first).split('/').last;
+                final nome = Arquivos.nomeDoArquivo(url);
                 final ext = nome.split('.').last.toLowerCase();
                 final icone = ext == 'pdf'
                     ? Icons.picture_as_pdf

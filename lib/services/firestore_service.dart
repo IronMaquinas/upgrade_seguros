@@ -27,6 +27,7 @@ import 'package:upgrade_seguros/services/tarefas_evento_service.dart'; // Etapa 
 import 'package:upgrade_seguros/utils/tarefas_evento.dart'; // Etapa 14
 import 'package:upgrade_seguros/services/funcoes_nuvem.dart'; // Etapa 15
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
+import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
 
 
 const String _cloudFunctionUrl = 'https://uploadfile-hwtlk2s4qq-uc.a.run.app'; // uploadFile (exige login desde a Etapa 15)
@@ -341,42 +342,15 @@ class FirestoreService {
   }
 
   // ✅ Extrai o caminho do arquivo a partir da URL
-  String? _extractFilePathFromUrl(String url) {
-    try {
-      final uri = Uri.parse(url);
-      
-      if (uri.host == 'storage.googleapis.com') {
-        // Remove o nome do bucket do caminho
-        final pathSegments = uri.pathSegments;
-        if (pathSegments.length >= 2) {
-          // Pula o primeiro segmento (nome do bucket) e junta o resto
-          return pathSegments.sublist(1).join('/');
-        }
-      }
-      
-      // Para URLs antigas ou outros formatos, tenta extrair de outra forma
-      return uri.path;
-    } catch (e) {
-      print('Erro ao extrair caminho da URL: $e');
-      return null;
-    }
-  }
-
-  // FUNÇÃO AUXILIAR PARA EXCLUIR ARQUIVOS EM CLAIM EDIT
-  String _extractPathFromUrl(String url) {
-    final uri = Uri.parse(url);
-
-    final fullPath = uri.pathSegments
-        .skipWhile((e) => e != 'o')
-        .skip(1)
-        .join('/');
-
-    return Uri.decodeComponent(fullPath);
-  }
+  // Etapa 16c: um só leitor para os dois formatos de link (o antigo,
+  // storage.googleapis.com/…, e o novo, firebasestorage…/o/…?token=…).
+  // Antes o formato novo virava "/v0/b/…" e a exclusão não achava o arquivo.
+  String? _extractFilePathFromUrl(String url) => Arquivos.caminhoDoArquivo(url);
 
   // DELETE BY URL
   Future<void> deleteFileByUrl(String url) async {
-    final path = _extractPathFromUrl(url);
+    final path = _extractFilePathFromUrl(url);
+    if (path == null) return;
     await _deleteFilesFromStorage([path]);
   }
 

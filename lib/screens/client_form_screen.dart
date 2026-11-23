@@ -38,6 +38,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../widgets/vigencia_date_range_widget.dart';
 import '../widgets/apolice_visualizacao_dialog.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
+import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
+import 'package:upgrade_seguros/utils/videos.dart' show Videos; // Etapa 16c (bucket)
 
 class ClientFormScreen extends StatefulWidget {
   final Client? clientToEdit;
@@ -869,9 +871,11 @@ Future<bool> _mostrarDialogoClienteExistente(Client cliente, ContratoDTO contrat
       );
       if (compressed == null) return null;
 
-      final ref = FirebaseStorage.instance
+      // Etapa 16c: mesmo bucket das fotos e dentro da pasta da corretora
+      // (o bucket padrão do firebase_options ainda é o nome antigo, appspot.com).
+      final ref = FirebaseStorage.instanceFor(bucket: 'gs://${Videos.bucket}')
           .ref()
-          .child('veiculos/${DateTime.now().millisecondsSinceEpoch}.jpg');
+          .child('corretoras/${EmpresaAtual.id}/veiculos/${DateTime.now().millisecondsSinceEpoch}.jpg');
 
       await ref.putFile(File(compressed.path));
 
@@ -3804,7 +3808,7 @@ Widget build(BuildContext context) {
                                                   // Determina ícone baseado na extensão
                                                   IconData icon = Icons.insert_drive_file;
                                                   Color iconColor = Colors.grey.shade700;
-                                                  final ext = url.split('.').last.toLowerCase();
+                                                  final ext = Arquivos.extensao(url);
                                                   if (ext == 'pdf') {
                                                     icon = Icons.picture_as_pdf;
                                                     iconColor = Colors.red;
@@ -3855,7 +3859,7 @@ Widget build(BuildContext context) {
                                                           Icon(icon, size: 12, color: iconColor),
                                                           const SizedBox(width: 2),
                                                           Text(
-                                                            url.split('/').last.split('?').first.substring(0, 10) + '…',
+                                                            Arquivos.abreviado(url, 10),
                                                             style: TextStyle(fontSize: 9, color: Colors.grey.shade700),
                                                           ),
                                                         ],

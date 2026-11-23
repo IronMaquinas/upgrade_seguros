@@ -30,6 +30,7 @@ import 'package:upgrade_seguros/widgets/selectable_text_helper.dart';
 import 'package:upgrade_seguros/utils/filtro_status.dart'; // Etapa 14
 import 'package:upgrade_seguros/widgets/tarefas_evento_dialog.dart'; // Etapa 14
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
+import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
 
 class AssistDetailScreen extends StatefulWidget {
   final String assistId;
@@ -2173,8 +2174,7 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                     const SizedBox(height: 8),
                     ..._assist!.arquivosLaudosUrls.map((url) {
                       final cleanedUrl = url.trim();
-                      final nome = Uri.decodeFull(
-                          cleanedUrl.split('/').last.split('?').first);
+                      final nome = Arquivos.nomeDoArquivo(cleanedUrl);
                       return ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,

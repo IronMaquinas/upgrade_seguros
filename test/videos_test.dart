@@ -65,9 +65,9 @@ void main() {
       expect(Videos.contentType('x.MOV'), 'video/quicktime');
       expect(Videos.contentType('x.webm'), 'video/webm');
     });
-    test('caminho com prefixo videos/ e nome sem caracteres estranhos', () {
-      final c = Videos.caminho('SN2026/11', 'Vídeo do acidente (1).mp4', DateTime.fromMillisecondsSinceEpoch(1700000000000));
-      expect(c, 'videos/sinistros/SN2026_11/1700000000000_V_deo_do_acidente_1_.mp4');
+    test('caminho na pasta da corretora (16c) e nome sem caracteres estranhos', () {
+      final c = Videos.caminho('SN2026/11', 'Vídeo do acidente (1).mp4', DateTime.fromMillisecondsSinceEpoch(1700000000000), empresaId: 'emp1');
+      expect(c, 'corretoras/emp1/videos/sinistros/SN2026_11/1700000000000_V_deo_do_acidente_1_.mp4');
     });
     test('iPhone .mov pode não tocar antes da conversão', () {
       expect(Videos.podeNaoTocarNoNavegador('IMG_1234.MOV'), true);
