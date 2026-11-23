@@ -9,7 +9,6 @@ import '../utils/filtro_status.dart';
 import '../screens/claim_detail_screen.dart';
 import '../screens/spreadsheet_claim_screen.dart';
 import 'package:upgrade_seguros/widgets/relatorios_modelos.dart'; // Etapa 19b
-import 'package:upgrade_seguros/widgets/botao_com_texto.dart'; // Etapa 19b
 
 class ClaimListScreen extends StatefulWidget {
   const ClaimListScreen({
@@ -916,15 +915,21 @@ class ClaimListScreenState extends State<ClaimListScreen> {
           ),
         ),
         actions: [
-          // Etapa 19b: relatórios com modelos salvos (PDF / Excel)
-          InkWell(
-            borderRadius: BorderRadius.circular(20),
-            onTap: () => abrirRelatoriosComModelos(context, tipo: 'sinistro'),
-            child: Tooltip(
-              message: 'Relatório por modelo (PDF ou Excel)',
-              child: BotaoComTexto(
-                icone: Icons.file_download_outlined,
-                texto: MediaQuery.of(context).size.width < 600 ? 'Exportar' : 'Exportar relatório',
+          // Etapa 19b: relatórios com modelos salvos (PDF / Excel).
+          // 19b.1: centralizado na barra (antes era esticado e o texto cortava).
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: OutlinedButton.icon(
+                onPressed: () => abrirRelatoriosComModelos(context, tipo: 'sinistro'),
+                icon: const Icon(Icons.file_download_outlined, size: 20),
+                label: Text(MediaQuery.of(context).size.width < 600 ? 'Exportar' : 'Exportar relatório'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF1A1A2E),
+                  side: BorderSide(color: const Color(0xFF1A1A2E).withOpacity(0.35)),
+                  shape: const StadiumBorder(),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                ),
               ),
             ),
           ),

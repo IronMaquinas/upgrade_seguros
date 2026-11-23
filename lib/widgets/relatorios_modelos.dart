@@ -76,6 +76,8 @@ class _ModelosDialogState extends State<_ModelosDialog> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
+        backgroundColor: Colors.white, // 19b.1: padrão dos modais do app
+        surfaceTintColor: Colors.transparent,
         title: const Text('Excluir modelo?'),
         content: Text('"${m.nome}" deixa de aparecer para toda a equipe. Os relatórios já exportados não mudam.'),
         actions: [
@@ -101,6 +103,8 @@ class _ModelosDialogState extends State<_ModelosDialog> {
   Widget build(BuildContext context) {
     final modelos = _modelos;
     return AlertDialog(
+      backgroundColor: Colors.white, // 19b.1: padrão dos modais do app
+      surfaceTintColor: Colors.transparent,
       title: Text('Relatório de ${_nomeTipo(widget.tipo)}'),
       content: SizedBox(
         width: 560,
@@ -352,7 +356,10 @@ class _EditorModeloRelatorioScreenState extends State<EditorModeloRelatorioScree
     );
 
     return Scaffold(
+      backgroundColor: Colors.white, // 19b.1
       appBar: AppBar(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
         title: Text(widget.modelo.id.isEmpty ? 'Novo modelo de relatório' : 'Editar modelo'),
         actions: [
           Padding(
@@ -445,11 +452,84 @@ class _ExportarDialogState extends State<_ExportarDialog> {
     );
   }
 
-  String _nomeCliente(String? id) {
-    for (final r in _registros ?? const <RegistroRelatorio>[]) {
-      if (r.clienteId == id) return r.clienteNome;
+  // ─── 19b.1: cliente por busca (nome ou CNPJ/CPF) ───────────────────────
+  static List<ClienteDoRelatorio> _clientesDe(List<RegistroRelatorio> regs) {
+    final m = <String, ClienteDoRelatorio>{};
+    for (final r in regs) {
+      if (r.clienteId.isEmpty || m.containsKey(r.clienteId)) continue;
+      m[r.clienteId] = ClienteDoRelatorio(
+        r.clienteId,
+        r.clienteNome.isEmpty ? r.clienteId : r.clienteNome,
+        (r.valores['cliente_documento'] ?? '').toString(),
+      );
     }
-    return id ?? '';
+    return m.values.toList()..sort((a, b) => a.nome.toLowerCase().compareTo(b.nome.toLowerCase()));
+  }
+
+  ClienteDoRelatorio? get _cliente {
+    final regs = _registros;
+    if (_clienteId == null || regs == null) return null;
+    for (final c in _clientesDe(regs)) {
+      if (c.id == _clienteId) return c;
+    }
+    return null;
+  }
+
+  Widget _campoCliente(List<ClienteDoRelatorio> clientes) {
+    return Autocomplete<ClienteDoRelatorio>(
+      displayStringForOption: (c) => c.nome,
+      optionsBuilder: (v) => ClienteDoRelatorio.buscar(clientes, v.text),
+      onSelected: (c) => setState(() => _clienteId = c.id),
+      fieldViewBuilder: (context, ctrl, foco, aoEnviar) {
+        return TextField(
+          controller: ctrl,
+          focusNode: foco,
+          decoration: InputDecoration(
+            labelText: 'Cliente',
+            hintText: 'Todos os clientes — digite o nome ou o CNPJ',
+            isDense: true,
+            prefixIcon: const Icon(Icons.search, size: 20),
+            suffixIcon: _clienteId == null
+                ? null
+                : IconButton(
+                    tooltip: 'Todos os clientes',
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () {
+                      ctrl.clear();
+                      setState(() => _clienteId = null);
+                    },
+                  ),
+          ),
+          onChanged: (t) {
+            if (_clienteId != null) setState(() => _clienteId = null);
+          },
+        );
+      },
+      optionsViewBuilder: (context, aoEscolher, opcoes) => Align(
+        alignment: Alignment.topLeft,
+        child: Material(
+          color: Colors.white,
+          elevation: 4,
+          borderRadius: BorderRadius.circular(8),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 280, maxWidth: 520),
+            child: ListView(
+              padding: EdgeInsets.zero,
+              shrinkWrap: true,
+              children: [
+                for (final c in opcoes)
+                  ListTile(
+                    dense: true,
+                    title: Text(c.nome),
+                    subtitle: c.documento.isEmpty ? null : Text(PerfilCorretora.formatarCnpj(c.documento)),
+                    onTap: () => aoEscolher(c),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _escolherIntervalo() async {
@@ -475,20 +555,33 @@ class _ExportarDialogState extends State<_ExportarDialog> {
     try {
       final filtro = _filtro;
       final r = RelatorioMontado.montar(widget.modelo, regs, filtro);
-      final descricao = filtro.descrever(nomeCliente: _nomeCliente(_clienteId));
+      // 19b.1: o cliente vai em linha própria no cabeçalho (nome + CNPJ),
+      // fora da descrição dos filtros.
+      final cliente = _cliente;
+      final descricao = filtro.descrever(incluirCliente: false);
       final marca = await MarcaPdf.carregar();
-      final h = DateTime.now();
-      final data = '${h.year}-${h.month.toString().padLeft(2, '0')}-${h.day.toString().padLeft(2, '0')}';
+      // Arquivo: corretora - cliente - modelo - data (para achar entre vários)
+      final resto = nomeDoRelatorio(
+        cliente: cliente?.nome,
+        modelo: widget.modelo.nome,
+        quando: DateTime.now(),
+      );
       if (pdf) {
         await Printing.sharePdf(
-          bytes: await RelatorioAtendimentosPdf.gerar(r, marca: marca, filtro: descricao),
-          filename: PerfilCorretora.nomeArquivo(marca.corretora, '${widget.modelo.nome} - $data', 'pdf'),
+          bytes: await RelatorioAtendimentosPdf.gerar(
+            r,
+            marca: marca,
+            filtro: descricao,
+            clienteNome: cliente?.nome,
+            clienteDocumento: cliente == null ? null : PerfilCorretora.formatarCnpj(cliente.documento),
+          ),
+          filename: PerfilCorretora.nomeArquivo(marca.corretora, resto, 'pdf'),
         );
       } else {
         // Mesmo caminho dos outros CSV do app: baixa no navegador.
         await Printing.sharePdf(
           bytes: utf8.encode(r.paraCsv()),
-          filename: PerfilCorretora.nomeArquivo(marca.corretora, '${widget.modelo.nome} - $data', 'csv'),
+          filename: PerfilCorretora.nomeArquivo(marca.corretora, resto, 'csv'),
         );
       }
     } catch (e) {
@@ -507,11 +600,7 @@ class _ExportarDialogState extends State<_ExportarDialog> {
     } else if (regs == null) {
       corpo = const SizedBox(height: 160, child: Center(child: CircularProgressIndicator()));
     } else {
-      final clientes = <String, String>{
-        for (final r in regs)
-          if (r.clienteId.isNotEmpty) r.clienteId: r.clienteNome.isEmpty ? r.clienteId : r.clienteNome,
-      };
-      final nomesClientes = clientes.entries.toList()..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()));
+      final clientes = _clientesDe(regs);
       final status = {for (final r in regs) if (r.status.isNotEmpty) r.status}.toList()..sort();
       final seguradoras = {for (final r in regs) if (r.seguradora.trim().isNotEmpty) r.seguradora}.toList()..sort();
       final tipos = {for (final r in regs) if (r.tipoAtendimento.isNotEmpty) r.tipoAtendimento}.toList()..sort();
@@ -562,16 +651,9 @@ class _ExportarDialogState extends State<_ExportarDialog> {
                 ),
               ),
             const SizedBox(height: 14),
-            DropdownButtonFormField<String?>(
-              value: _clienteId,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: 'Cliente', isDense: true),
-              items: [
-                const DropdownMenuItem<String?>(value: null, child: Text('Todos os clientes')),
-                for (final e in nomesClientes) DropdownMenuItem<String?>(value: e.key, child: Text(e.value, overflow: TextOverflow.ellipsis)),
-              ],
-              onChanged: (v) => setState(() => _clienteId = v),
-            ),
+            // 19b.1: digitar e escolher (nome + CNPJ), como no resto do app —
+            // com 160+ clientes a lista suspensa ficava inviável.
+            _campoCliente(clientes),
             const SizedBox(height: 10),
             Row(children: [
               Expanded(
@@ -629,6 +711,8 @@ class _ExportarDialogState extends State<_ExportarDialog> {
     }
 
     return AlertDialog(
+      backgroundColor: Colors.white, // 19b.1
+      surfaceTintColor: Colors.transparent,
       title: Text('Exportar: ${widget.modelo.nome}'),
       content: SizedBox(width: 560, child: corpo),
       actions: [

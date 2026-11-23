@@ -23,6 +23,8 @@ class RelatorioAtendimentosPdf {
     RelatorioMontado r, {
     required MarcaPdf marca,
     String filtro = '',
+    String? clienteNome, // 19b.1: cliente em destaque no cabeçalho
+    String? clienteDocumento,
   }) async {
     final layout = OcupacaoPdf.de(r.colunas).layout;
     final fonte = layout == LayoutPdf.tabela ? 7.0 : 6.0;
@@ -127,12 +129,24 @@ class RelatorioAtendimentosPdf {
     doc.addPage(pw.MultiPage(
       pageFormat: PdfPageFormat.a4.landscape,
       margin: const pw.EdgeInsets.all(24),
+      // 19b.1: título diz do que se trata; cliente (nome + CNPJ) em destaque.
       header: (ctx) => marca.cabecalho(
-        titulo: r.modelo.nome,
-        subtitulo: [
-          '$tipoNome: ${r.quantidade}',
-          if (filtro.isNotEmpty) filtro,
-        ].join(' · '),
+        titulo: 'Relatório de $tipoNome',
+        subtitulo: r.modelo.nome,
+        direita: [
+          if ((clienteNome ?? '').isNotEmpty)
+            pw.Text(
+              'Cliente: $clienteNome${(clienteDocumento ?? '').isEmpty ? '' : ' · CNPJ/CPF $clienteDocumento'}',
+              style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold),
+            ),
+          pw.Text(
+            [
+              '${r.quantidade} ${r.quantidade == 1 ? (r.modelo.tipo == 'assistencia' ? 'assistência' : 'sinistro') : tipoNome.toLowerCase()}',
+              if (filtro.isNotEmpty) filtro,
+            ].join(' · '),
+            style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700),
+          ),
+        ],
       ),
       footer: (ctx) => marca.rodape(ctx),
       build: (ctx) => conteudo,

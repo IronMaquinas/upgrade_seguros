@@ -162,4 +162,31 @@ void main() {
       expect(rotuloTipoAssistencia(''), '');
     });
   });
+
+  group('19b.1: cliente e nome do arquivo', () {
+    const clientes = [
+      ClienteDoRelatorio('1', 'Águia Branca Transportes', '12.345.678/0001-90'),
+      ClienteDoRelatorio('2', 'JPC LOG LTDA', '98765432000110'),
+      ClienteDoRelatorio('3', 'Aguiar Comércio', ''),
+    ];
+    test('busca por nome sem acento e sem maiúscula', () {
+      expect(ClienteDoRelatorio.buscar(clientes, 'aguia br').map((c) => c.id).toList(), ['1']);
+      expect(ClienteDoRelatorio.buscar(clientes, 'AGUI').map((c) => c.id).toList(), ['1', '3']);
+      expect(ClienteDoRelatorio.buscar(clientes, 'log').single.id, '2');
+    });
+    test('busca pelo CNPJ com ou sem pontuação', () {
+      expect(ClienteDoRelatorio.buscar(clientes, '12345678').single.id, '1');
+      expect(ClienteDoRelatorio.buscar(clientes, '98.765').single.id, '2');
+      expect(ClienteDoRelatorio.buscar(clientes, '').isEmpty, true);
+    });
+    test('nome do arquivo: cliente - modelo - data', () {
+      expect(nomeDoRelatorio(cliente: 'Águia Branca', modelo: 'Mensal ', quando: DateTime(2026, 11, 3)),
+          'Águia Branca - Mensal - 2026-11-03');
+      expect(nomeDoRelatorio(modelo: 'Mensal', quando: DateTime(2026, 11, 3)), 'Todos os clientes - Mensal - 2026-11-03');
+    });
+    test('descrição sem o cliente quando ele vai em linha própria', () {
+      final f = FiltroRelatorio(de: DateTime(2026, 11, 1), ate: DateTime(2026, 11, 30), clienteId: 'AB');
+      expect(f.descrever(incluirCliente: false), 'Abertura: 01/11/2026 a 30/11/2026');
+    });
+  });
 }

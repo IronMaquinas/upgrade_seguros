@@ -297,12 +297,13 @@ class FiltroRelatorio {
   }
 
   /// Texto para o cabeçalho do PDF / nome do arquivo.
-  String descrever({String? nomeCliente}) {
+  /// [incluirCliente]: false quando o cliente vai em linha própria (19b.1).
+  String descrever({String? nomeCliente, bool incluirCliente = true}) {
     String f(DateTime d) => '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
     final partes = <String>[
       if (de != null || ate != null)
         '${pelaOcorrencia ? 'Ocorrência' : 'Abertura'}: ${de == null ? 'início' : f(de!)} a ${ate == null ? 'hoje' : f(ate!)}',
-      if ((clienteId ?? '').isNotEmpty) 'Cliente: ${nomeCliente ?? clienteId}',
+      if (incluirCliente && (clienteId ?? '').isNotEmpty) 'Cliente: ${nomeCliente ?? clienteId}',
       if (status.isNotEmpty) 'Status: ${status.join(', ')}',
       if ((seguradora ?? '').isNotEmpty) 'Seguradora: $seguradora',
       if ((tipoAtendimento ?? '').isNotEmpty) 'Tipo: $tipoAtendimento',
@@ -448,4 +449,45 @@ String rotuloTipoAssistencia(String? codigo, {String? outro}) {
   if (n != null) return n;
   final s = c.replaceAll('_', ' ');
   return s[0].toUpperCase() + s.substring(1);
+}
+
+/// 19b.1: cliente na busca do relatório (digitar nome ou CNPJ/CPF).
+class ClienteDoRelatorio {
+  final String id;
+  final String nome;
+  final String documento;
+  const ClienteDoRelatorio(this.id, this.nome, this.documento);
+
+  static String _semAcento(String s) {
+    const de = 'áàâãäéèêëíìîïóòôõöúùûüçÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ';
+    const para = 'aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC';
+    final b = StringBuffer();
+    for (final ch in s.split('')) {
+      final i = de.indexOf(ch);
+      b.write(i < 0 ? ch : para[i]);
+    }
+    return b.toString().toLowerCase();
+  }
+
+  /// Até [limite] clientes cujo nome contém o texto (sem acento/maiúscula) ou
+  /// cujo CNPJ/CPF contém os dígitos digitados. Texto vazio: nenhum.
+  static List<ClienteDoRelatorio> buscar(List<ClienteDoRelatorio> todos, String texto, {int limite = 20}) {
+    final t = _semAcento(texto.trim());
+    if (t.isEmpty) return const [];
+    final digitos = texto.replaceAll(RegExp(r'\D'), '');
+    return todos
+        .where((c) =>
+            _semAcento(c.nome).contains(t) ||
+            (digitos.length >= 3 && c.documento.replaceAll(RegExp(r'\D'), '').contains(digitos)))
+        .take(limite)
+        .toList();
+  }
+}
+
+/// 19b.1: parte do nome do arquivo depois da corretora:
+/// "Águia Branca - Mensal - 2026-11-23" (sem cliente: "Todos os clientes - …").
+String nomeDoRelatorio({String? cliente, required String modelo, required DateTime quando}) {
+  final d = '${quando.year}-${quando.month.toString().padLeft(2, '0')}-${quando.day.toString().padLeft(2, '0')}';
+  final c = (cliente ?? '').trim().isEmpty ? 'Todos os clientes' : cliente!.trim();
+  return '$c - ${modelo.trim()} - $d';
 }
