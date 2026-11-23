@@ -32,6 +32,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:upgrade_seguros/models/workshop_model.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
+import 'package:upgrade_seguros/services/marca_pdf.dart'; // Etapa 17
 
 class SpreadsheetAssistScreen extends StatefulWidget {
   final String tipoAssistencia;
@@ -596,6 +597,7 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
   }
 
   Future<void> _abrirWhatsApp(String docId, String numeroAssistencia) async {
+    final nomeCorretora = await MarcaPdf.nomeDaCorretora(); // Etapa 17 (antes: "Upgrade Seguros" fixo)
     final telefone = _cliente?.contatoTelefone ?? _cliente?.contato ?? '';
     final numeroLimpo = telefone.replaceAll(RegExp(r'\D'), '');
 
@@ -625,7 +627,7 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
         '$tempoStr'
         'Em caso de dúvidas, entre em contato conosco.\n\n'
         'Atenciosamente,\n'
-        'Upgrade Seguros';
+        '$nomeCorretora';
 
     final encoded = Uri.encodeComponent(texto);
     final url = numeroLimpo.isNotEmpty

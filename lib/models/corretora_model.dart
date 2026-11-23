@@ -10,6 +10,11 @@ class Corretora {
   String? logo; // URL da logo
   String? endereco;
   String? cnpj;
+  // Etapa 17: perfil completo da corretora (cabeçalho dos PDFs)
+  String? razaoSocial;
+  String? susep;
+  String? site;
+  String? logoCaminho; // caminho no Storage (para apagar a logo anterior)
   bool ativa;
   DateTime dataCriacao;
 
@@ -21,6 +26,10 @@ class Corretora {
     this.logo,
     this.endereco,
     this.cnpj,
+    this.razaoSocial,
+    this.susep,
+    this.site,
+    this.logoCaminho,
     this.ativa = true,
     DateTime? dataCriacao,
   }) : dataCriacao = dataCriacao ?? DateTime.now();
@@ -34,6 +43,10 @@ class Corretora {
       'logo': logo,
       'endereco': endereco,
       'cnpj': cnpj,
+      'razaoSocial': razaoSocial,
+      'susep': susep,
+      'site': site,
+      'logoCaminho': logoCaminho,
       'ativa': ativa,
       'dataCriacao': Timestamp.fromDate(dataCriacao),
     };
@@ -49,8 +62,12 @@ class Corretora {
       logo: map['logo'],
       endereco: map['endereco'],
       cnpj: map['cnpj'],
+      razaoSocial: map['razaoSocial'],
+      susep: map['susep'],
+      site: map['site'],
+      logoCaminho: map['logoCaminho'],
       ativa: map['ativa'] ?? true,
-      dataCriacao: (map['dataCriacao'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      dataCriacao: map['dataCriacao'] is Timestamp ? (map['dataCriacao'] as Timestamp).toDate() : DateTime.now(),
     );
   }
 
@@ -68,6 +85,10 @@ class Corretora {
     String? logo,
     String? endereco,
     String? cnpj,
+    String? razaoSocial,
+    String? susep,
+    String? site,
+    String? logoCaminho,
     bool? ativa,
     DateTime? dataCriacao,
   }) {
@@ -79,10 +100,29 @@ class Corretora {
       logo: logo ?? this.logo,
       endereco: endereco ?? this.endereco,
       cnpj: cnpj ?? this.cnpj,
+      razaoSocial: razaoSocial ?? this.razaoSocial,
+      susep: susep ?? this.susep,
+      site: site ?? this.site,
+      logoCaminho: logoCaminho ?? this.logoCaminho,
       ativa: ativa ?? this.ativa,
       dataCriacao: dataCriacao ?? this.dataCriacao,
     );
   }
+
+  /// Etapa 17: só os campos do perfil (o que a tela "Dados da corretora"
+  /// grava). Não leva dataCriacao/ativa nem os campos da migração.
+  Map<String, dynamic> dadosPerfil() => {
+        'nome': nome.trim(),
+        'razaoSocial': (razaoSocial ?? '').trim(),
+        'cnpj': (cnpj ?? '').trim(),
+        'susep': (susep ?? '').trim(),
+        'endereco': (endereco ?? '').trim(),
+        'telefone': telefone.trim(),
+        'email': email.trim(),
+        'site': (site ?? '').trim(),
+        'logo': logo,
+        'logoCaminho': logoCaminho,
+      };
 
   @override
   String toString() => 'Corretora(id: $id, nome: $nome)';

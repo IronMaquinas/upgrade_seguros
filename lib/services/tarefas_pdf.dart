@@ -11,6 +11,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../utils/tarefas.dart';
+import 'marca_pdf.dart'; // Etapa 17: cabeçalho e rodapé da corretora
 
 class TarefasPdf {
   static const _roxo = PdfColor.fromInt(0xFF6A1B9A);
@@ -34,9 +35,11 @@ class TarefasPdf {
     required bool maisRecentePrimeiro,
     String? filtro,
     DateTime? agora,
+    MarcaPdf? marca, // Etapa 17
   }) async {
     final hoje = agora ?? DateTime.now();
-    final doc = pw.Document(title: 'Tarefas por funcionário', author: 'Upgrade Seguros');
+    final m = marca ?? MarcaPdf(geradoEm: hoje);
+    final doc = pw.Document(title: 'Tarefas por funcionário', author: m.nome);
     final total = grupos.fold<int>(0, (s, g) => s + g.total);
 
     const titulos = ['Atendimento', 'Cliente', 'Descrição', 'Status', 'Criada em', 'Prazo', 'Concluída em', 'Prazo cumprido?'];
@@ -120,29 +123,16 @@ class TarefasPdf {
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4.landscape,
         margin: const pw.EdgeInsets.all(24),
-        header: (ctx) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Text('Tarefas por funcionário',
-                style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: _roxo)),
-            pw.Text(
-              'Gerado em $quando - $total tarefas - ${maisRecentePrimeiro ? 'mais recentes' : 'mais antigas'} primeiro'
+        header: (ctx) => m.cabecalho(
+          titulo: 'Tarefas por funcionário',
+          subtitulo: 'Gerado em $quando - $total tarefas - ${maisRecentePrimeiro ? 'mais recentes' : 'mais antigas'} primeiro'
               '${filtro == null || filtro.isEmpty ? '' : ' - $filtro'}',
-              style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
-            ),
-            pw.SizedBox(height: 4),
-          ],
+          cor: _roxo,
         ),
-        footer: (ctx) => pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-          children: [
-            pw.Text(
+        footer: (ctx) => m.rodape(
+          ctx,
+          observacao:
               'Prazo vale até o fim do dia. Concluídas antes da data de conclusão ser registrada aparecem como "Sem data de conclusão".',
-              style: const pw.TextStyle(fontSize: 6.5, color: PdfColors.grey600),
-            ),
-            pw.Text('Página ${ctx.pageNumber} de ${ctx.pagesCount}',
-                style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey600)),
-          ],
         ),
         build: (ctx) => conteudo,
       ),

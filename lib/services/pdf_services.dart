@@ -10,6 +10,7 @@ import '../models/claim_model.dart';
 import '../models/client_model.dart';
 import '../models/third_party_model.dart';
 import '../models/lancamento_model.dart';
+import 'marca_pdf.dart';
 
 class PdfService {
   // ── Paleta de Cores (conforme projeto) ──────────────────────────────────
@@ -21,16 +22,11 @@ class PdfService {
   static const PdfColor _colorGrayLight = PdfColor.fromInt(0xFFF4F6F9);
   static const PdfColor _colorGrayBorder = PdfColor.fromInt(0xFFE0E0E0);
 
-  Future<Uint8List> loadLogo() async {
-    final data = await rootBundle.load('lib/assets/logo_upgrade.png');
-    return data.buffer.asUint8List();
-  }
-
   Future<Uint8List> generateClaimPdf(
     Claim claim,
     Client? client,
     List<ThirdParty> terceiros,
-    Uint8List? logoBytes,
+    MarcaPdf marca, // Etapa 17: logo, dados da corretora e rodapé (antes: logo fixa)
     {
       String? usuarioNome,
       String? usuarioEmail,
@@ -57,101 +53,26 @@ class PdfService {
         pageTheme: pw.PageTheme(
           margin: const pw.EdgeInsets.fromLTRB(32, 28, 32, 32),
         ),
-        footer: (context) => pw.Container(
-          alignment: pw.Alignment.center,
-          margin: const pw.EdgeInsets.only(top: 16),
-          child: pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text(
-                'Upgrade Corretora de Seguros',
-                style: pw.TextStyle(
-                  fontSize: 8,
-                  color: _colorGray,
-                  fontWeight: pw.FontWeight.normal,
-                ),
-              ),
-              pw.Text(
-                'Página ${context.pageNumber} de ${context.pagesCount}',
-                style: pw.TextStyle(
-                  fontSize: 8,
-                  color: _colorGray,
-                  fontWeight: pw.FontWeight.normal,
-                ),
-              ),
-            ],
-          ),
-        ),
+        footer: (context) => marca.rodape(context), // Etapa 17
         build: (context) => [
           // ═════════════════════════════════════════════════════════════════════════
-          // CABEÇALHO PREMIUM
+          // CABEÇALHO PADRÃO DA CORRETORA (Etapa 17: logo e dados do cadastro)
           // ═════════════════════════════════════════════════════════════════════════
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              if (logoBytes != null)
-                pw.Image(
-                  pw.MemoryImage(logoBytes),
-                  height: 50,
-                  width: 50,
-                ),
-              pw.SizedBox(width: 16),
-              pw.Expanded(
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text(
-                      'Upgrade Corretora de Seguros',
-                      style: pw.TextStyle(
-                        fontSize: 18,
-                        fontWeight: pw.FontWeight.bold,
-                        color: _colorBlue,
-                      ),
-                    ),
-                    pw.Text(
-                      'Relatório de Sinistro',
-                      style: pw.TextStyle(
-                        fontSize: 11,
-                        color: _colorGray,
-                        fontWeight: pw.FontWeight.normal,
-                      ),
-                    ),
-                  ],
-                ),
+          marca.cabecalho(
+            titulo: 'Relatório de Sinistro',
+            direita: [
+              pw.Text(
+                'ID: ${claim.numeroSinistro}',
+                style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: _colorBlue),
               ),
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.end,
-                children: [
-                  pw.Text(
-                    'ID: ${claim.numeroSinistro}',
-                    style: pw.TextStyle(
-                      fontSize: 10,
-                      fontWeight: pw.FontWeight.bold,
-                      color: _colorBlue,
-                    ),
-                  ),
-                  pw.Text(
-                    dateFormat.format(claim.dataOcorrencia),
-                    style: pw.TextStyle(
-                      fontSize: 9,
-                      color: _colorGray,
-                    ),
-                  ),
-                ],
+              pw.Text(
+                dateFormat.format(claim.dataOcorrencia),
+                style: pw.TextStyle(fontSize: 9, color: _colorGray),
               ),
             ],
           ),
 
-          pw.SizedBox(height: 20),
-
-          // ─ Linha Decorativa ─────────────────────────────────────────────────────
-          pw.Container(
-            height: 2,
-            color: _colorBlue,
-          ),
-
-          pw.SizedBox(height: 20),
+          pw.SizedBox(height: 10),
 
           // ═════════════════════════════════════════════════════════════════════════
           // SEÇÃO 1: INFORMAÇÕES PRINCIPAIS (Cards)

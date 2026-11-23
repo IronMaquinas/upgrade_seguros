@@ -25,6 +25,7 @@ import 'package:upgrade_seguros/models/pdf_signature_model.dart';
 import 'package:upgrade_seguros/services/pdf_signature_service.dart';
 import 'package:upgrade_seguros/models/workshop_model.dart';
 import 'package:upgrade_seguros/services/workshop_service.dart';
+import 'package:upgrade_seguros/widgets/perfil_corretora_card.dart'; // Etapa 17
 
 // ─── Paleta ──────────────────────────────────────────────────────────────────
 const _kBlue  = Color(0xFF1565C0);
@@ -1143,67 +1144,9 @@ class _AbaAjustesState extends State<_AbaAjustes> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ─── CADASTRO DADOS DA SEGURADORA ──────────────────────────────
-              const Text(
-                '🏢 Dados da Seguradora/Corretora',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 12),
-
-              // Nome
-              TextField(
-                controller: _seguradoraNomeController,
-                decoration: InputDecoration(
-                  labelText: 'Nome da Seguradora',
-                  hintText: 'Ex: Seguradora XYZ',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  isDense: true,
-                ),
-                onChanged: (value) {
-                  // Salva em tempo real (você pode debounce se quiser)
-                  _saveSeguradoraData();
-                },
-              ),
-              const SizedBox(height: 12),
-
-              // Telefone
-              TextField(
-                controller: _seguradoraTelefoneController,
-                decoration: InputDecoration(
-                  labelText: 'Telefone de Contato',
-                  hintText: 'Ex: (11) 3000-0000',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  isDense: true,
-                ),
-                onChanged: (value) {
-                  _saveSeguradoraData();
-                },
-              ),
-              const SizedBox(height: 12),
-
-              // Email
-              TextField(
-                controller: _seguradoraEmailController,
-                decoration: InputDecoration(
-                  labelText: 'Email de Contato',
-                  hintText: 'Ex: contato@seguradora.com.br',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  isDense: true,
-                ),
-                onChanged: (value) {
-                  _saveSeguradoraData();
-                },
-              ),
-
-              const SizedBox(height: 24),
-              const Divider(),
-              const SizedBox(height: 24),
+              // Etapa 17: nome/telefone/e-mail da corretora saíram daqui e foram
+              // para o cartão "🏢 Dados da corretora" (acima), com o perfil completo.
+              // Antes cada letra digitada gravava no banco.
 
               // ─── SELEÇÃO DE FONTES PARA ASSINATURA ─────────────────────────
               const Text(
@@ -1392,39 +1335,6 @@ class _AbaAjustesState extends State<_AbaAjustes> {
           content: Text('✅ Configuração atualizada'),
           duration: Duration(seconds: 2),
         ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('❌ Erro: $e'),
-          backgroundColor: Colors.red.shade600,
-        ),
-      );
-    }
-  }
-
-  // ─── Salva dados da seguradora ───────────────────────────────────────────────
-  Future<void> _saveSeguradoraData() async {
-    if (_corretora == null) return;  // ← ADICIONE ISTO
-    
-    try {
-      await _firestoreService.updateCorretoraContactInfo(
-        corretoraId: _corretora!.id,
-        nome: _seguradoraNomeController.text,
-        telefone: _seguradoraTelefoneController.text,
-        email: _seguradoraEmailController.text,
-      );
-
-      setState(() {
-        _corretora = _corretora!.copyWith(
-          nome: _seguradoraNomeController.text,
-          telefone: _seguradoraTelefoneController.text,
-          email: _seguradoraEmailController.text,
-        );
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Dados da corretora atualizados')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1961,6 +1871,16 @@ class _AbaAjustesState extends State<_AbaAjustes> {
                   ),
               ],
             ),
+          ),
+
+          // Etapa 17: perfil da corretora (cabeçalho dos PDFs)
+          CartaoPerfilCorretora(
+            onSalvo: (c) => setState(() {
+              _corretora = c;
+              _seguradoraNomeController.text = c.nome;
+              _seguradoraTelefoneController.text = c.telefone;
+              _seguradoraEmailController.text = c.email;
+            }),
           ),
 
           _buildPdfSignatureSection(),

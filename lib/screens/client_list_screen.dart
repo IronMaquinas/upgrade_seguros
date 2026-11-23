@@ -15,6 +15,7 @@ import '../utils/relatorio_clientes.dart';
 import '../widgets/botao_com_texto.dart';
 import '../widgets/recomendacao_chip.dart';
 import '../utils/recomendacao_cliente.dart';
+import 'package:upgrade_seguros/services/marca_pdf.dart'; // Etapa 17
 
 class ClientListScreen extends StatefulWidget {
   const ClientListScreen({super.key, this.onNavigate});
@@ -272,7 +273,7 @@ class _ClientListScreenState extends State<ClientListScreen> {
       final sufixo = _filtroRecomendacao == null ? '' : '_${_slug(_filtroRecomendacao!)}';
       if (formato == 'pdf') {
         await Printing.sharePdf(
-          bytes: await RelatorioClientesPdf.gerar(relatorio, filtro: filtros),
+          bytes: await RelatorioClientesPdf.gerar(relatorio, filtro: filtros, marca: await MarcaPdf.carregar()),
           filename: 'relatorio_clientes${sufixo}_$data.pdf',
         );
       } else {

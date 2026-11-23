@@ -11,6 +11,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../utils/relatorio_clientes.dart';
+import 'marca_pdf.dart'; // Etapa 17: cabeçalho e rodapé da corretora
 
 class RelatorioClientesPdf {
   static const _azul = PdfColor.fromInt(0xFF1565C0);
@@ -20,9 +21,11 @@ class RelatorioClientesPdf {
   static String _p(double? v) => v == null ? '-' : '${_pct.format(v)}%';
 
   /// [filtro]: descrição do filtro da lista (ex.: "Recomendação: Não recomendado"), no cabeçalho.
-  static Future<Uint8List> gerar(RelatorioClientes r, {DateTime? geradoEm, String? filtro}) async {
+  /// [marca]: cabeçalho/rodapé da corretora (Etapa 17); sem ela, só o nome genérico.
+  static Future<Uint8List> gerar(RelatorioClientes r, {DateTime? geradoEm, String? filtro, MarcaPdf? marca}) async {
+    final m = marca ?? MarcaPdf(geradoEm: geradoEm);
     final quando = DateFormat('dd/MM/yyyy HH:mm').format(geradoEm ?? DateTime.now());
-    final doc = pw.Document(title: 'Relatório de clientes', author: 'Upgrade Seguros');
+    final doc = pw.Document(title: 'Relatório de clientes', author: m.nome);
 
     const titulos = [
       'Cliente',
@@ -114,28 +117,15 @@ class RelatorioClientesPdf {
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4.landscape,
         margin: const pw.EdgeInsets.all(24),
-        header: (ctx) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Text('Relatório de clientes',
-                style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: _azul)),
-            pw.Text(
-                'Gerado em $quando - ordenado pelo valor total das apólices'
-                '${filtro == null || filtro.isEmpty ? '' : ' - $filtro'}',
-                style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700)),
-            pw.SizedBox(height: 8),
-          ],
+        header: (ctx) => m.cabecalho(
+          titulo: 'Relatório de clientes',
+          subtitulo: 'Gerado em $quando - ordenado pelo valor total das apólices'
+              '${filtro == null || filtro.isEmpty ? '' : ' - $filtro'}',
         ),
-        footer: (ctx) => pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-          children: [
-            pw.Text(
+        footer: (ctx) => m.rodape(
+          ctx,
+          observacao:
               'Valor utilizado = soma dos sinistros sem Cancelado/Negado. % usada = valor utilizado / valor total das apólices.',
-              style: const pw.TextStyle(fontSize: 6.5, color: PdfColors.grey600),
-            ),
-            pw.Text('Página ${ctx.pageNumber} de ${ctx.pagesCount}',
-                style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey600)),
-          ],
         ),
         build: (ctx) => [
           pw.Table(

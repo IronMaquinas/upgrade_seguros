@@ -12,6 +12,7 @@ import '../screens/claim_detail_screen.dart';
 import '../services/tarefas_pdf.dart';
 import '../utils/tarefas.dart';
 import '../widgets/botao_com_texto.dart';
+import 'package:upgrade_seguros/services/marca_pdf.dart'; // Etapa 17
 
 class TaskListScreen extends StatefulWidget {
   const TaskListScreen({super.key});
@@ -256,7 +257,8 @@ class _TaskListScreenState extends State<TaskListScreen> {
       final data = DateFormat('yyyy-MM-dd').format(DateTime.now());
       if (formato == 'pdf') {
         await Printing.sharePdf(
-          bytes: await TarefasPdf.gerar(grupos, maisRecentePrimeiro: _maisRecentePrimeiro, filtro: filtros),
+          bytes: await TarefasPdf.gerar(grupos,
+              maisRecentePrimeiro: _maisRecentePrimeiro, filtro: filtros, marca: await MarcaPdf.carregar()),
           filename: 'tarefas_por_funcionario_$data.pdf',
         );
       } else {

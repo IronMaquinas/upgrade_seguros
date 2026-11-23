@@ -24,6 +24,8 @@ import 'package:upgrade_seguros/widgets/tarefas_funcionarios_card.dart';
 import 'package:upgrade_seguros/utils/tarefas.dart';
 import 'package:upgrade_seguros/utils/sinistralidade.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
+import 'package:upgrade_seguros/services/marca_pdf.dart'; // Etapa 17
+import 'package:upgrade_seguros/utils/perfil_corretora.dart'; // Etapa 17
 
 // ─── Helper para converter datas (Timestamp ou String) ───────────────────────
 DateTime _parseDate(dynamic value) {
@@ -3197,7 +3199,9 @@ Widget _buildContratosAnualChart() {
           imagemSinistros = await _capturarWidget(_sinistrosSectionKey, height: 400); // altura maior
         } catch (e) { print('Erro sinistros: $e'); }
 
+      final marca = await MarcaPdf.carregar(); // Etapa 17
       final pdf = await PdfReportService().generateReport(
+        marca: marca,
         data: _data!,
         dataInicio: _dataInicio,
         dataFim: _dataFim,
@@ -3212,7 +3216,7 @@ Widget _buildContratosAnualChart() {
       );
       await Printing.sharePdf(
         bytes: await pdf.save(),
-        filename: 'Upgrade_Relatorio_${_fmtDate.format(DateTime.now()).replaceAll('/', '-')}.pdf',
+        filename: PerfilCorretora.nomeArquivo(marca.corretora, 'Relatório ${_fmtDate.format(DateTime.now()).replaceAll('/', '-')}', 'pdf'),
       );
     } catch (e) {
       if (mounted) {

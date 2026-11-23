@@ -48,6 +48,8 @@ import 'package:upgrade_seguros/utils/tarefas_evento.dart'; // Etapa 14
 import 'package:upgrade_seguros/widgets/tarefas_evento_dialog.dart'; // Etapa 14
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
+import 'package:upgrade_seguros/services/marca_pdf.dart'; // Etapa 17
+import 'package:upgrade_seguros/utils/perfil_corretora.dart'; // Etapa 17
 
 class ClaimDetailScreen extends StatefulWidget {
   final Claim claim;
@@ -1358,7 +1360,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     setState(() => _isLoading = true);
     try {
       final pdfService = PdfService();
-      final logoBytes = await pdfService.loadLogo();
+      final marca = await MarcaPdf.carregar(); // Etapa 17: cabeçalho/rodapé da corretora
 
       // 1️⃣ Usuário logado
       final usuarioLogado = await _obterDadosUsuarioLogado();
@@ -1407,13 +1409,13 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
         _currentClaim,
         _client,
         _currentClaim.terceiros,
-        logoBytes,
+        marca,
         usuarioNome: signatureData['nome'],
         usuarioEmail: signatureData['email'],
         usuarioTelefone: signatureData['telefone'],
       );
 
-      final fileName = 'Upgrade Seguros - ${_currentClaim.numeroSinistro}.pdf';
+      final fileName = PerfilCorretora.nomeArquivo(marca.corretora, _currentClaim.numeroSinistro, 'pdf');
       await Printing.sharePdf(bytes: pdfBytes, filename: fileName);
 
     } catch (e) {

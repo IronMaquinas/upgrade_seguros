@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
 import '../models/report_data.dart';
+import 'marca_pdf.dart'; // Etapa 17: cabeçalho e rodapé da corretora
 
 class _CardData {
   final String label;
@@ -79,8 +80,10 @@ class PdfReportService {
     Uint8List? imagemPizza,
     required double slaSinistros,
     required double slaAssistencias,
+    MarcaPdf? marca, // Etapa 17
   }) async {
     await _loadEmojiFont();
+    final m = marca ?? MarcaPdf();
     final pdf = pw.Document();
     final periodo = dataInicio != null && dataFim != null
         ? '${_fmtDate.format(dataInicio)} a ${_fmtDate.format(dataFim)}'
@@ -90,8 +93,13 @@ class PdfReportService {
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(32),
+        // Etapa 17: cabeçalho e rodapé padrão (antes: "Upgrade Corretora de Seguros" fixo)
+        header: (ctx) => m.cabecalho(
+          titulo: 'Relatório Executivo',
+          subtitulo: 'Período: $periodo · gerado em ${_fmtDate.format(m.geradoEm)}',
+        ),
+        footer: (ctx) => m.rodape(ctx, observacao: 'Relatório gerado automaticamente pelo sistema de gestão'),
         build: (pw.Context ctx) => [
-          _buildHeader(periodo),
           _buildKpiGrid(data, totalClientes, slaGeral),
 
           if (imagemPizza != null) _buildGraficoSection('Sinistros vs Assistências', imagemPizza),
@@ -108,7 +116,6 @@ class PdfReportService {
           _buildNPS(data),
           _buildTempoMedio(data),
           _buildEvolucaoMensal(data),
-          _buildFooter(),
         ],
       ),
     );
@@ -117,49 +124,6 @@ class PdfReportService {
   }
 
   // ─── Seções (mesmo código, apenas substitua as referências de _ReportData por ReportData) ───
-
-  // --- SEÇÃO 1 ---
-  pw.Widget _buildHeader(String periodo) {
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-          children: [
-            pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Text(
-                  'Relatório Executivo',
-                  style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: _corBlue),
-                ),
-                pw.Text(
-                  'Upgrade Corretora de Seguros',
-                  style: pw.TextStyle(fontSize: 12, color: _corGray),
-                ),
-                pw.SizedBox(height: 2),
-                pw.Text(
-                  'Período: $periodo',
-                  style: pw.TextStyle(fontSize: 9, color: _corGray),
-                ),
-              ],
-            ),
-            pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.end,
-              children: [
-                pw.Text(
-                  'Gerado em ${_fmtDate.format(DateTime.now())}',
-                  style: pw.TextStyle(fontSize: 8, color: _corGray),
-                ),
-              ],
-            ),
-          ],
-        ),
-        pw.Divider(color: _corBlue, height: 20, thickness: 2),
-      ],
-    );
-  }
-
 
   pw.Widget _buildKpiGrid(ReportData d, int totalClientes, double slaGeral) {
     // Ticket Médio: apenas sinistros
@@ -726,18 +690,6 @@ pw.Widget _kpiCard(_KpiItem item) {
           ],
         ),
         pw.SizedBox(height: 16),
-      ],
-    );
-  }
-
-  pw.Widget _buildFooter() {
-    return pw.Column(
-      children: [
-        pw.Divider(color: PdfColors.grey300),
-        pw.Text(
-          'Upgrade Corretora de Seguros · Relatório gerado automaticamente pelo sistema de gestão',
-          style: pw.TextStyle(fontSize: 7, color: _corGray),
-        ),
       ],
     );
   }

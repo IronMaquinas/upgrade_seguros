@@ -126,7 +126,7 @@
 | `screens/` | Telas (19): dashboard, sinistros, assistências veicular/residencial, clientes, tarefas, relatórios, NPS, usuários, configurações, login/cadastro |
 | `widgets/` | Componentes reutilizáveis (timer de SLA, busca de cliente, oficina, NPS, desempenho por funcionário, vigência) |
 | `models/` | Modelos de dados (claim, client, apólice, veículo, residência, vida, transporte, máquinas, terceiros, oficina, config de SLA…) |
-| `services/` | Firestore, Storage, Auth, biometria, PDF (relatório, admin, assinatura), NPS, monitor de SLA, notificações, imagem (mobile/web) |
+| `services/` | Firestore, Storage, Auth, biometria, PDF (sinistro, relatório, assinatura; cabeçalho/rodapé padrão em `marca_pdf.dart`), NPS, monitor de SLA, notificações, imagem (mobile/web) |
 | `parsers/` | Leitura de apólice em PDF por seguradora: Tokio Marine, Porto Seguro, Ezze, AXA (`ParserFactory` escolhe pelo texto) |
 | `helpers/`, `dialogs/`, `formatter/`, `utils/` | Assinatura em PDF, seleção de apólice, máscaras e formatação, constantes |
 
@@ -502,6 +502,14 @@ Sistema salva em avaliacoes + atualiza claim + recalcula NPS do cliente
 ### Exportação
 - **PDF** com todas as seções — gerado via `pdf` + `printing`
 
+### Cabeçalho e rodapé padrão dos PDFs (Etapa 17)
+Todos os PDFs (sinistro, Relatório Executivo, relatório de clientes, tarefas por funcionário) usam `lib/services/marca_pdf.dart`:
+- **Cabeçalho:** logo + nome + razão social · CNPJ · SUSEP / endereço / telefone · e-mail · site, do cadastro da corretora (**Configurações → 🏢 Dados da corretora**, só o gestor altera). Textos montados em `lib/utils/perfil_corretora.dart` (teste `test/perfil_corretora_test.dart`).
+- **Rodapé:** "Nome da corretora · Gerado por {assinatura} · data/hora" + "Página X de Y". A assinatura segue **📝 Assinatura em PDF** (nome/telefone/e-mail do funcionário logado ou da corretora).
+- **Logo:** PNG/JPG até 2 MB, em `corretoras/{id}/perfil/` no Storage. Sem logo enviada: a corretora que recebeu os dados antigos usa `lib/assets/logo_upgrade.png` (como antes); corretora nova sai sem logo.
+- Nome do arquivo e assinatura da mensagem de WhatsApp da assistência também saem do cadastro (antes "Upgrade Seguros" fixo).
+- Novo PDF: `final marca = await MarcaPdf.carregar();` e `header: (ctx) => marca.cabecalho(titulo: …)`, `footer: (ctx) => marca.rodape(ctx)`.
+
 ### Relatório de clientes (auditoria)
 Lista de clientes → filtro por **recomendação** (seletor ao lado da busca, com a cor e a quantidade de cada uma — Etapa 10, visual da Etapa 11) → botão **Exportar relatório** (barra superior) → **Planilha (CSV / Excel)** ou **PDF** (Etapa 08). Exporta os clientes da lista (todos, ou só os da busca), **ordenados pelo valor total das apólices**, com uma linha de TOTAL no final. Regra única em `lib/utils/relatorio_clientes.dart` (teste `test/relatorio_clientes_test.dart`); PDF em `lib/services/relatorio_clientes_pdf.dart`.
 
@@ -528,7 +536,7 @@ Lista de clientes → filtro por **recomendação** (seletor ao lado da busca, c
 | Onde | Coleção | Conteúdo |
 |---|---|---|
 | raiz | `users` | Usuários (login, papel, `ativo`, **`empresaId`**) |
-| raiz | `corretoras` | Cadastro de cada corretora (nome, logo, CNPJ…; `migradoEtapa16`) |
+| raiz | `corretoras` | Cadastro de cada corretora: perfil (`nome`, `razaoSocial`, `cnpj`, `susep`, `endereco`, `telefone`, `email`, `site`, `logo` + `logoCaminho` — Etapa 17) e controle da migração (`migradoEtapa16`, `migradoEm`, `arquivosConvertidosEm`…) |
 | raiz | `nps_indice` | `{claimId}` → `empresaId` (o cliente responde o NPS sem login; Etapa 16) |
 | corretora | `sinistros` | Registros de sinistros |
 | corretora | `assistencias` | Registros de assistências veiculares e residenciais |
@@ -709,6 +717,8 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 | 16 | 10/11/2026 | `0d24d50` | **Multi-tenant (preparação):** cada corretora com a própria pasta no banco (`corretoras/{id}/…`); app lê/grava pela corretora do usuário (`EmpresaAtual`), listas de usuários só da corretora; `PortaoEmpresa` antes do Dashboard (segura as telas até a migração); Function `migrarEmpresa` (diagnóstico + cópia idempotente, raiz preservada); NPS e Telegram por corretora; Configurações somente leitura para funcionário. Testes: `functions/testes/empresa.teste.js` (+ `firebase-falso.js`). |
 | 16b | 23/11/2026 | `99cc809` | **Multi-tenant, trava:** regras do banco por corretora (membro lê/grava a própria pasta; excluir atendimento/cliente e configurações só gestor; `users` só da mesma corretora; raiz antiga bloqueada); "Apagar dados antigos" (`migrarEmpresa` `apagarRaiz`: 7 dias após a migração, só o que tem cópia, confirmação digitada); data da 1ª migração preservada. Migração feita em 23/11/2026. |
 | 16c | 23/11/2026 | `81e6d14` | **Multi-tenant, arquivos:** `uploadFile` grava em `corretoras/{id}/…` e devolve link com chave (fim do `makePublic`, S6); `deleteFiles` só na pasta da corretora; regras do Storage por corretora (pastas antigas só leitura/exclusão); vídeos e fotos de veículo na pasta da corretora; Function `arquivosEmpresa` + cartão 📁 em Configurações (passar arquivos antigos em lotes, trocar os links, apagar originais após 7 dias). Nome/extensão de arquivo lidos por `lib/utils/arquivos.dart` (o formato novo quebrava `split('/')`). Testes novos: `functions/testes/arquivos.teste.js`, `test/arquivos_test.dart`. |
+| 16c.1 | 23/11/2026 | Etapa 16c | `storage.rules`: regra das pastas antigas reescrita (lê o cadastro do usuário uma vez com `let`); a versão da 16c dava erro no Playground. |
+| 17 | 23/11/2026 | `701591d` | **Perfil da corretora:** cartão 🏢 Dados da corretora em Configurações (nome, razão social, CNPJ, SUSEP, endereço, telefone, e-mail, site e logo; só o gestor altera; salva com botão — antes nome/telefone/e-mail da assinatura gravavam a cada letra). **Cabeçalho e rodapé padrão** em todos os PDFs (`marca_pdf.dart`): logo e dados do cadastro em cima; quem gerou, data e página embaixo. Nome do arquivo e assinatura do WhatsApp da assistência pelo cadastro. Removido `pdf_services_admin.dart` (cópia antiga sem uso). Teste novo: `perfil_corretora_test.dart`. |
 | 11 | 08/11/2026 | `9159bd1` | **Busca de Sinistros** também por terceiros (proprietário, motorista, contato, registro na seguradora deles), proprietário/condutor do veículo segurado e contato do segurado; sem acento, várias palavras, telefone sem máscara (`lib/utils/busca.dart`). **Filtro de recomendação** da lista de clientes vira seletor no padrão dos filtros de Sinistros, ao lado da busca. **Sinistralidade Mensal** recalculada (sinistros ocorridos ÷ prêmio ganho), com linha acumulada e linha do gatilho (`lib/utils/sinistralidade.dart`). Testes novos: `busca_test.dart`, `sinistralidade_test.dart`. |
 | 10 | 08/11/2026 | `44f5c8f` | **Top 10 de risco** com a regra da recomendação (vigentes, sem vínculo por ramo + data) e os mesmos nomes. **Lista de clientes:** filtro por recomendação ligado à exportação, que passa a trazer recomendação, uso do gatilho e contato (nome, telefone, e-mail). **Tarefas:** ordenar Mais recente/Mais antiga; exportar agrupado por funcionário (CSV/PDF); `concluida_em` gravado ao concluir; "no prazo / fora do prazo" pela regra única (antes concluída no prazo com data vencida contava como fora); editar não troca mais o responsável; o filtro por funcionário pelo id passou a funcionar (o campo não vinha na lista). **Relatórios:** Tarefas por Funcionário (abertas, concluídas %, no prazo × fora). Testes novos: `tarefas_test.dart` (+1 em `relatorio_clientes_test.dart`). |
 | 09 | 08/11/2026 | `4d14169` | **Recomendação do cliente unificada pelo uso do gatilho** (pior apólice vigente; faixas 60/80/100%; sinistros sem vínculo ligados por ramo + data; "Sem apólice vigente" e "Apólice sem valor" em cinza; Detalhes mostra uso do gatilho e % do valor da apólice). Substitui 4 contas diferentes. Botões com texto: **"Exportar relatório"** na lista de clientes e **"Importar contrato (PDF)"** no cadastro. Teste novo: `recomendacao_cliente_test.dart`. |
@@ -807,6 +817,9 @@ apolices: [
 - [x] Multi-tenant, preparação: dados por corretora (`corretoras/{id}/…`), migração, Configurações só leitura para funcionário (Etapa 16)
 - [x] Multi-tenant, trava (16b): regras isolando cada corretora; excluir e configurar só gestor nas regras; limpeza das coleções antigas da raiz
 - [x] Multi-tenant, arquivos (16c): Storage por corretora, links com chave no lugar dos públicos (S6), passagem dos arquivos antigos e limpeza dos originais; leitura única de nome/extensão dos links
+- [x] Perfil da corretora (Etapa 17): dados e logo no cadastro; cabeçalho e rodapé padrão em todos os PDFs
+- [ ] **Etapa 18 — Relatórios de sinistros e assistências com modelos salvos** (pedido da cliente): "Exportar relatório" nas listas → modelos da corretora (todos veem e usam) → campos por seção (ocorrência, bem, condutor, proprietário, terceiros, valores…) + filtros (período, cliente, status, seguradora); PDF e Excel; indicador de largura para o PDF paisagem (tabela × ficha por ocorrência). Aguardando o modelo da funcionária
+- [ ] Marca da corretora na tela (white-label): nome "Upgrade Corretora" no menu e logo da tela de login ainda fixos (o login vem antes de saber a corretora — depende do domínio próprio)
 - [ ] Planos de armazenamento (bronze/prata/ouro ou por GB): medir uso por corretora (soma de `tamanho_bytes` / Storage) e aplicar `videoMaxMb`/`videosPorSinistro` por plano — depende do multi-tenant
 - [ ] `firebase_options.dart` com o bucket antigo (`appspot.com`): regenerar com `flutterfire configure` (hoje só os vídeos usam o SDK do Storage, com o bucket fixo)
 - [ ] Assistências: vídeos (mesmo componente)
