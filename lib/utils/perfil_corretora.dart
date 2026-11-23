@@ -74,10 +74,76 @@ class PerfilCorretora {
     return '$base.$extensao';
   }
 
+  /// Etapa 17.1: CNPJ com 14 dígitos e dígitos verificadores certos
+  /// (pega erro de digitação antes de consultar a Receita).
+  static bool cnpjValido(String? cnpj) {
+    final d = (cnpj ?? '').replaceAll(RegExp(r'\D'), '');
+    if (d.length != 14 || RegExp(r'^(\d)\1{13}$').hasMatch(d)) return false;
+    int dv(String base, List<int> pesos) {
+      var soma = 0;
+      for (var i = 0; i < pesos.length; i++) {
+        soma += int.parse(base[i]) * pesos[i];
+      }
+      final r = soma % 11;
+      return r < 2 ? 0 : 11 - r;
+    }
+    final d1 = dv(d, const [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+    final d2 = dv(d, const [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+    return d1 == int.parse(d[12]) && d2 == int.parse(d[13]);
+  }
+
+  /// Etapa 17.1: lê a resposta da consulta de CNPJ (BrasilAPI, a mesma do
+  /// cadastro de clientes). Devolve só o que veio preenchido.
+  static DadosReceita lerReceita(Map<String, dynamic> j) {
+    String t(Object? v) => (v ?? '').toString().trim();
+    final logradouro = [t(j['descricao_tipo_de_logradouro']), t(j['logradouro'])]
+        .where((s) => s.isNotEmpty)
+        .join(' ');
+    final rua = [logradouro, t(j['numero']), t(j['complemento'])].where((s) => s.isNotEmpty).join(', ');
+    final cidade = [t(j['municipio']), t(j['uf'])].where((s) => s.isNotEmpty).join('/');
+    final cep = t(j['cep']).replaceAll(RegExp(r'\D'), '');
+    final endereco = [
+      rua,
+      t(j['bairro']),
+      cidade,
+      if (cep.length == 8) 'CEP ${cep.substring(0, 5)}-${cep.substring(5)}',
+    ].where((s) => s.isNotEmpty).join(' - ');
+    final tel = t(j['ddd_telefone_1']).replaceAll(RegExp(r'\D'), '');
+    String telefone = '';
+    if (tel.length == 10) telefone = '(${tel.substring(0, 2)}) ${tel.substring(2, 6)}-${tel.substring(6)}';
+    if (tel.length == 11) telefone = '(${tel.substring(0, 2)}) ${tel.substring(2, 7)}-${tel.substring(7)}';
+    return DadosReceita(
+      razaoSocial: t(j['razao_social']),
+      nomeFantasia: t(j['nome_fantasia']).isNotEmpty ? t(j['nome_fantasia']) : t(j['nome_Fantasia']),
+      situacao: t(j['descricao_situacao_cadastral']),
+      endereco: endereco,
+      telefone: telefone,
+    );
+  }
+
   /// Logo aceita no PDF: PNG ou JPG, até 2 MB.
   static const maxBytesLogo = 2 * 1024 * 1024;
   static bool logoAceita(String nomeArquivo, int bytes) {
     final ext = nomeArquivo.toLowerCase().split('.').last;
     return ['png', 'jpg', 'jpeg'].contains(ext) && bytes > 0 && bytes <= maxBytesLogo;
   }
+}
+
+/// Etapa 17.1: o que a consulta de CNPJ trouxe.
+class DadosReceita {
+  final String razaoSocial;
+  final String nomeFantasia;
+  final String situacao; // "ATIVA", "BAIXADA", "INAPTA"…
+  final String endereco;
+  final String telefone;
+
+  const DadosReceita({
+    this.razaoSocial = '',
+    this.nomeFantasia = '',
+    this.situacao = '',
+    this.endereco = '',
+    this.telefone = '',
+  });
+
+  bool get ativa => situacao.isEmpty || situacao.toUpperCase() == 'ATIVA';
 }

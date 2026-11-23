@@ -40,6 +40,44 @@ void main() {
     });
   });
 
+  group('CNPJ (17.1)', () {
+    test('dígitos verificadores', () {
+      expect(PerfilCorretora.cnpjValido('11.222.333/0001-81'), true);
+      expect(PerfilCorretora.cnpjValido('11222333000181'), true);
+      expect(PerfilCorretora.cnpjValido('11.222.333/0001-82'), false); // erro de digitação
+      expect(PerfilCorretora.cnpjValido('00.000.000/0000-00'), false); // todos iguais
+      expect(PerfilCorretora.cnpjValido('123'), false);
+      expect(PerfilCorretora.cnpjValido(null), false);
+    });
+    test('resposta da Receita → razão social, endereço e telefone', () {
+      final d = PerfilCorretora.lerReceita({
+        'razao_social': 'UPGRADE CORRETORA DE SEGUROS LTDA',
+        'nome_fantasia': 'UPGRADE SEGUROS',
+        'descricao_situacao_cadastral': 'ATIVA',
+        'descricao_tipo_de_logradouro': 'AVENIDA',
+        'logradouro': 'NOSSA SENHORA DA PENHA',
+        'numero': '100',
+        'complemento': 'SALA 2',
+        'bairro': 'PRAIA DO CANTO',
+        'municipio': 'VITORIA',
+        'uf': 'ES',
+        'cep': '29055000',
+        'ddd_telefone_1': '2733334444',
+      });
+      expect(d.razaoSocial, 'UPGRADE CORRETORA DE SEGUROS LTDA');
+      expect(d.nomeFantasia, 'UPGRADE SEGUROS');
+      expect(d.endereco, 'AVENIDA NOSSA SENHORA DA PENHA, 100, SALA 2 - PRAIA DO CANTO - VITORIA/ES - CEP 29055-000');
+      expect(d.telefone, '(27) 3333-4444');
+      expect(d.ativa, true);
+    });
+    test('campos ausentes e empresa baixada', () {
+      final d = PerfilCorretora.lerReceita({'razao_social': 'X LTDA', 'descricao_situacao_cadastral': 'BAIXADA', 'numero': null});
+      expect(d.endereco, '');
+      expect(d.telefone, '');
+      expect(d.ativa, false);
+    });
+  });
+
   group('rodapé', () {
     final quando = DateTime(2026, 11, 23, 9, 5);
     test('com funcionário', () {

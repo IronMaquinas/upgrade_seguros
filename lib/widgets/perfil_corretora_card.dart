@@ -7,8 +7,11 @@
 // funcionário vê somente leitura (mesma regra do banco, Etapa 16b).
 // A logo vai para a pasta da corretora no Storage (corretoras/{id}/perfil/).
 
+import 'dart:convert';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../models/corretora_model.dart';
 import '../services/auth_service.dart';
@@ -44,6 +47,7 @@ class _CartaoPerfilCorretoraState extends State<CartaoPerfilCorretora> {
   bool _carregando = true;
   bool _salvando = false;
   bool _enviandoLogo = false;
+  bool _buscandoCnpj = false;
   bool _gestor = false;
   bool _alterado = false;
 
@@ -126,6 +130,47 @@ class _CartaoPerfilCorretoraState extends State<CartaoPerfilCorretora> {
     }
   }
 
+  /// Etapa 17.1: confere o CNPJ (dígitos e Receita) e preenche a razão social.
+  /// Nome fantasia, endereço e telefone só são preenchidos se estiverem vazios.
+  Future<void> _buscarCnpj() async {
+    final cnpj = _cnpj.text.replaceAll(RegExp(r'\D'), '');
+    if (!PerfilCorretora.cnpjValido(cnpj)) {
+      _aviso('CNPJ inválido — confira os 14 dígitos.', erro: true);
+      return;
+    }
+    setState(() => _buscandoCnpj = true);
+    try {
+      final r = await http
+          .get(Uri.parse('https://brasilapi.com.br/api/cnpj/v1/$cnpj'))
+          .timeout(const Duration(seconds: 15));
+      if (r.statusCode == 404) {
+        _aviso('CNPJ não encontrado na Receita Federal.', erro: true);
+        return;
+      }
+      if (r.statusCode != 200) {
+        _aviso('A consulta não respondeu agora (${r.statusCode}). Tente de novo ou preencha à mão.', erro: true);
+        return;
+      }
+      final d = PerfilCorretora.lerReceita(Map<String, dynamic>.from(jsonDecode(r.body) as Map));
+      setState(() {
+        _cnpj.text = PerfilCorretora.formatarCnpj(cnpj);
+        if (d.razaoSocial.isNotEmpty) _razao.text = d.razaoSocial;
+        if (_nome.text.trim().isEmpty) _nome.text = d.nomeFantasia.isNotEmpty ? d.nomeFantasia : d.razaoSocial;
+        if (_endereco.text.trim().isEmpty) _endereco.text = d.endereco;
+        if (_telefone.text.trim().isEmpty) _telefone.text = d.telefone;
+        _alterado = true;
+      });
+      _aviso(d.ativa
+          ? '✅ Empresa encontrada: ${d.razaoSocial}. Confira e clique em "Salvar".'
+          : '⚠️ ${d.razaoSocial}: situação na Receita "${d.situacao}". Confira o CNPJ.',
+          erro: !d.ativa);
+    } catch (e) {
+      _aviso('Erro ao consultar o CNPJ: $e', erro: true);
+    } finally {
+      if (mounted) setState(() => _buscandoCnpj = false);
+    }
+  }
+
   Future<void> _salvar() async {
     if (!(_form.currentState?.validate() ?? false)) return;
     final antes = _corretora;
@@ -165,7 +210,8 @@ class _CartaoPerfilCorretoraState extends State<CartaoPerfilCorretora> {
     }
   }
 
-  Widget _campo(TextEditingController c, String rotulo, {String? dica, bool obrigatorio = false, int linhas = 1}) {
+  Widget _campo(TextEditingController c, String rotulo,
+      {String? dica, bool obrigatorio = false, int linhas = 1, Widget? sufixo, String? Function(String?)? validar}) {
     return TextFormField(
       controller: c,
       readOnly: !_gestor,
@@ -173,10 +219,11 @@ class _CartaoPerfilCorretoraState extends State<CartaoPerfilCorretora> {
       onChanged: (_) {
         if (!_alterado) setState(() => _alterado = true);
       },
-      validator: obrigatorio ? (v) => (v ?? '').trim().isEmpty ? 'Obrigatório' : null : null,
+      validator: validar ?? (obrigatorio ? (v) => (v ?? '').trim().isEmpty ? 'Obrigatório' : null : null),
       decoration: InputDecoration(
         labelText: rotulo,
         hintText: dica,
+        suffixIcon: sufixo,
         isDense: true,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
       ),
@@ -282,14 +329,34 @@ class _CartaoPerfilCorretoraState extends State<CartaoPerfilCorretora> {
                     ],
                   ),
                   const SizedBox(height: 16),
+                  // Etapa 17.1: CNPJ primeiro, com consulta à Receita (preenche a razão social)
                   _linha([
-                    _campo(_nome, 'Nome (fantasia)', dica: 'Ex.: Upgrade Seguros', obrigatorio: true),
-                    _campo(_razao, 'Razão social', dica: 'Ex.: Upgrade Corretora de Seguros Ltda.'),
+                    _campo(
+                      _cnpj,
+                      'CNPJ',
+                      dica: '00.000.000/0000-00',
+                      validar: (v) => (v ?? '').trim().isEmpty || PerfilCorretora.cnpjValido(v)
+                          ? null
+                          : 'CNPJ inválido — confira os dígitos',
+                      sufixo: !_gestor
+                          ? null
+                          : _buscandoCnpj
+                              ? const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                                )
+                              : IconButton(
+                                  tooltip: 'Consultar na Receita e preencher',
+                                  icon: const Icon(Icons.search),
+                                  onPressed: _salvando ? null : _buscarCnpj,
+                                ),
+                    ),
+                    _campo(_susep, 'Registro SUSEP'),
                   ]),
                   const SizedBox(height: 12),
                   _linha([
-                    _campo(_cnpj, 'CNPJ', dica: '00.000.000/0000-00'),
-                    _campo(_susep, 'Registro SUSEP'),
+                    _campo(_razao, 'Razão social', dica: 'Preenchida pela consulta do CNPJ'),
+                    _campo(_nome, 'Nome (fantasia)', dica: 'Ex.: Upgrade Seguros', obrigatorio: true),
                   ]),
                   const SizedBox(height: 12),
                   _campo(_endereco, 'Endereço', dica: 'Rua, número, bairro, cidade/UF, CEP', linhas: 2),
