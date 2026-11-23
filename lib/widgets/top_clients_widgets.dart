@@ -9,164 +9,211 @@ import '../models/client_model.dart';
 import '../models/claim_model.dart';
 import '../utils/gatilho.dart';
 import '../services/recomendacao_service.dart';
+import '../utils/rankings_clientes.dart'; // Etapa 18
 
 class TopClientsWidgets {
   static final _fmtCurrency = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
 
   /// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  /// Top 10 Clientes por Receita (Valor de Apólices)
+  /// Top 10 Clientes por VALOR DE SINISTROS (Etapa 18)
+  /// Antes: "Top 10 Clientes por Receita", lido do campo total_receita do
+  /// cliente (soma de sinistros, desatualizada e com Cancelado/Negado).
+  /// Regra em lib/utils/rankings_clientes.dart.
   /// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  static Widget buildTopClientesPorReceita(List<Client> clientes) {
-    if (clientes.isEmpty) return const SizedBox.shrink();
+  static Widget buildTopClientesPorValorSinistros(List<Client> clientes, List<Claim> sinistros) {
+    final top10 = RankingsClientes.porValorSinistros(
+      [for (final c in clientes) ClienteRanking(id: c.id, nome: c.nome, qtdApolices: c.apolices.length)],
+      [
+        for (final s in sinistros)
+          SinistroRanking(idCliente: s.idCliente, tipo: s.tipo, status: s.statusAtual, valor: s.valorTotalSinistro),
+      ],
+    );
+    if (top10.isEmpty) return const SizedBox.shrink();
 
-    // Ordena por valor total de receita
-    final clientesOrdenados = List<Client>.from(clientes)
-      ..sort((a, b) => b.totalReceita.compareTo(a.totalReceita));
+    return _cartao(
+      icone: Icons.trending_up,
+      cor: const Color(0xFF1565C0),
+      titulo: '💰 Top 10 Clientes por Valor de Sinistros',
+      subtitulo: 'Soma do valor dos sinistros de cada cliente (todos os períodos), sem Cancelado/Negado. '
+          'Não é receita da corretora.',
+      filhos: [
+        for (var index = 0; index < top10.length; index++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    _posicao(index),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(top10[index].cliente.nome,
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis),
+                          Text(
+                            '${top10[index].qtdSinistros} sinistro${top10[index].qtdSinistros != 1 ? 's' : ''} · '
+                            '${top10[index].cliente.qtdApolices} apólice${top10[index].cliente.qtdApolices != 1 ? 's' : ''}',
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Text(_fmtCurrency.format(top10[index].valor),
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF1565C0))),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: (top10[index].percentual / 100).clamp(0.0, 1.0),
+                    minHeight: 6,
+                    backgroundColor: Colors.grey.shade100,
+                    valueColor: AlwaysStoppedAnimation<Color>(_getTopRankColor(index)),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text('${top10[index].percentual.toStringAsFixed(1)}% do valor de todos os sinistros',
+                    style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
 
-    final top10 = clientesOrdenados.take(10).toList();
+  /// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  /// Maiores apólices vigentes (Etapa 18) — para conferir o gráfico
+  /// "Valor Apólices Mensais" e achar valor digitado errado.
+  /// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  static Widget buildMaioresApolices(List<Client> clientes, {DateTime? hoje}) {
+    final itens = RankingsClientes.maioresApolicesVigentes(
+      [
+        for (final c in clientes)
+          for (final a in c.apolices)
+            ApoliceRanking(
+              clienteNome: c.nome,
+              numero: a.numeroApolice,
+              ramo: a.ramo,
+              inicio: a.dataInicio,
+              fim: a.dataFim,
+              valor: a.valorApolice,
+            ),
+      ],
+      hoje ?? DateTime.now(),
+    );
+    if (itens.isEmpty) return const SizedBox.shrink();
+    final data = DateFormat('dd/MM/yyyy');
+    final suspeitas = itens.where((i) => i.suspeita).length;
 
+    return _cartao(
+      icone: Icons.policy_outlined,
+      cor: const Color(0xFF7B1FA2),
+      titulo: '📄 Maiores Apólices Vigentes',
+      subtitulo: suspeitas == 0
+          ? 'As 10 apólices vigentes de maior valor (as que mais pesam no gráfico acima).'
+          : '⚠️ $suspeitas apólice${suspeitas != 1 ? 's' : ''} com valor muito acima das demais — '
+              'confira se foi digitado certo (Clientes → cliente → apólice → Editar).',
+      filhos: [
+        for (var i = 0; i < itens.length; i++)
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: itens[i].suspeita ? Colors.red.shade50 : Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: itens[i].suspeita ? Colors.red.shade200 : Colors.grey.shade200),
+            ),
+            child: Row(
+              children: [
+                _posicao(i),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(itens[i].apolice.clienteNome,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                      Text(
+                        'Apólice ${itens[i].apolice.numero.isEmpty ? '(sem número)' : itens[i].apolice.numero}'
+                        '${itens[i].apolice.ramo.isEmpty ? '' : ' · ${itens[i].apolice.ramo}'}'
+                        ' · ${data.format(itens[i].apolice.inicio)} a ${data.format(itens[i].apolice.fim)}',
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(_fmtCurrency.format(itens[i].apolice.valor),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: itens[i].suspeita ? Colors.red.shade700 : const Color(0xFF7B1FA2),
+                        )),
+                    if (itens[i].suspeita)
+                      Text('⚠️ confira o valor', style: TextStyle(fontSize: 10, color: Colors.red.shade700)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  static Widget _posicao(int index) => Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(color: _getTopRankColor(index), borderRadius: BorderRadius.circular(6)),
+        alignment: Alignment.center,
+        child: Text('${index + 1}',
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)),
+      );
+
+  static Widget _cartao({
+    required IconData icone,
+    required Color cor,
+    required String titulo,
+    required String subtitulo,
+    required List<Widget> filhos,
+  }) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 2))],
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
             Row(
               children: [
                 Container(
                   padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1565C0).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(Icons.trending_up, color: Color(0xFF1565C0), size: 20),
+                  decoration: BoxDecoration(color: cor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                  child: Icon(icone, color: cor, size: 20),
                 ),
                 const SizedBox(width: 12),
-                const Text(
-                  '💰 Top 10 Clientes por Receita',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-                ),
+                Expanded(child: Text(titulo, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700))),
               ],
             ),
-
+            const SizedBox(height: 6),
+            Text(subtitulo, style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
             const SizedBox(height: 16),
-
-            // Lista
-            ...List.generate(
-              top10.length,
-              (index) {
-                final cliente = top10[index];
-                final valor = cliente.totalReceita;
-                final totalClientes = clientesOrdenados.fold<double>(0, (sum, c) => sum + c.totalReceita);
-                final percentual = (valor > 0 && totalClientes > 0) 
-                  ? (valor / totalClientes * 100).clamp(0.0, 100.0) 
-                  : 0.0;
-
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Nome + Posição + Valor
-                      Row(
-                        children: [
-                          // Posição
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              color: _getTopRankColor(index),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              '${index + 1}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          // Nome
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  cliente.nome,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                Text(
-                                    '${cliente.apolices?.length ?? 0} apólice${(cliente.apolices?.length ?? 0) != 1 ? 's' : ''}',                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          // Valor
-                          Text(
-                            _fmtCurrency.format(valor),
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF1565C0),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      // Barra de progresso
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: percentual / 100,
-                          minHeight: 6,
-                          backgroundColor: Colors.grey.shade100,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            _getTopRankColor(index),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 6),
-
-                      // Percentual
-                      Text(
-                        '${percentual.toStringAsFixed(1)}% da receita total',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey.shade500,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+            ...filhos,
           ],
         ),
       ),

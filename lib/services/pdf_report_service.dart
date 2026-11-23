@@ -662,7 +662,8 @@ pw.Widget _kpiCard(_KpiItem item) {
                 child: pw.Text(h, style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
               )).toList(),
             ),
-            ...List.generate(12, (i) {
+            // Etapa 18: só até o mês atual (antes os meses futuros saíam zerados)
+            ...List.generate(DateTime.now().month, (i) {
               final mes = i + 1;
               final sin = d.sinistrosPoMes[mes] ?? 0;
               final ass = d.assistenciasPoMes[mes] ?? 0;

@@ -1953,6 +1953,10 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
 
   // ── Gráfico de evolução de NPS ──────────────────────────────────────────────
   // ── Gráfico de evolução de NPS ──────────────────────────────────────────────
+  // Etapa 18: os gráficos mensais param no mês atual. Antes os meses que
+  // ainda não chegaram entravam como 0 e a linha "despencava" em dezembro.
+  int get _ultimoMesDoAno => DateTime.now().month;
+
   Widget _buildNpsAnualChart() {
     if (_data == null || _data!.npsPoMes.isEmpty) return const SizedBox();
     
@@ -1960,6 +1964,7 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
     final spots = <FlSpot>[];
     
     for (int mes = 1; mes <= 12; mes++) {
+      if (mes > _ultimoMesDoAno) break; // Etapa 18: mês que ainda não chegou não vira 0 no gráfico
       final nps = npsData[mes] ?? 0.0;
       spots.add(FlSpot(mes.toDouble(), nps));
     }
@@ -1984,6 +1989,8 @@ Future<Uint8List> _capturarWidget(GlobalKey key, {double width = 700, double hei
             height: 300,
             child: LineChart(
               LineChartData(
+                minX: 1, // Etapa 18: eixo do ano inteiro, sem desenhar os meses que não chegaram
+                maxX: 12,
                 lineTouchData: LineTouchData(
                   enabled: true,
                   touchTooltipData: LineTouchTooltipData(
@@ -2463,6 +2470,7 @@ Widget _buildContratosAnualChart() {
   final data = _data!.contratosAtivosPoMes;
   final spots = <FlSpot>[];
   for (int mes = 1; mes <= 12; mes++) {
+    if (mes > _ultimoMesDoAno) break; // Etapa 18: mês que ainda não chegou não vira 0 no gráfico
     final valor = (data[mes] ?? 0).toDouble();
     spots.add(FlSpot(mes.toDouble(), valor));
   }
@@ -2488,6 +2496,8 @@ Widget _buildContratosAnualChart() {
           Expanded(
             child: LineChart(
               LineChartData(
+                minX: 1, // Etapa 18: eixo do ano inteiro, sem desenhar os meses que não chegaram
+                maxX: 12,
                 lineTouchData: LineTouchData(
                   enabled: true,
                   touchTooltipData: LineTouchTooltipData(
@@ -2571,6 +2581,7 @@ Widget _buildContratosAnualChart() {
 
     double maxValor = 0.0;
     for (int mes = 1; mes <= 12; mes++) {
+      if (mes > _ultimoMesDoAno) break; // Etapa 18: mês que ainda não chegou não vira 0 no gráfico
       final valor = data[mes] ?? 0.0;
       spots.add(FlSpot(mes.toDouble(), valor));
       if (valor > maxValor) maxValor = valor;
@@ -2609,6 +2620,8 @@ Widget _buildContratosAnualChart() {
             height: 300,
             child: LineChart(
               LineChartData(
+                minX: 1, // Etapa 18: eixo do ano inteiro, sem desenhar os meses que não chegaram
+                maxX: 12,
                 lineTouchData: LineTouchData(
                   enabled: true,
                   touchTooltipData: LineTouchTooltipData(
@@ -2704,6 +2717,7 @@ Widget _buildContratosAnualChart() {
     final spots = <FlSpot>[];
     
     for (int mes = 1; mes <= 12; mes++) {
+      if (mes > _ultimoMesDoAno) break; // Etapa 18: mês que ainda não chegou não vira 0 no gráfico
       final valor = (data[mes] ?? 0.0) / 1000; // Converter para milhares
       spots.add(FlSpot(mes.toDouble(), valor));
     }
@@ -2727,6 +2741,8 @@ Widget _buildContratosAnualChart() {
             height: 300,
             child: LineChart(
               LineChartData(
+                minX: 1, // Etapa 18: eixo do ano inteiro, sem desenhar os meses que não chegaram
+                maxX: 12,
                 lineTouchData: LineTouchData(
                   enabled: true,
                   touchTooltipData: LineTouchTooltipData(
@@ -2807,6 +2823,7 @@ Widget _buildContratosAnualChart() {
     double maxValor = 100.0; // Padrão 100%
 
     for (int mes = 1; mes <= 12; mes++) {
+      if (mes > _ultimoMesDoAno) break; // Etapa 18: mês que ainda não chegou não vira 0 no gráfico
       final valor = data[mes] ?? 0.0;
       // Limita a 100% para exibição, mas mantém o valor original para tooltip
       spots.add(FlSpot(mes.toDouble(), valor));
@@ -2834,6 +2851,8 @@ Widget _buildContratosAnualChart() {
             height: 300,
             child: LineChart(
               LineChartData(
+                minX: 1, // Etapa 18: eixo do ano inteiro, sem desenhar os meses que não chegaram
+                maxX: 12,
                 lineTouchData: LineTouchData(
                   enabled: true,
                   touchTooltipData: LineTouchTooltipData(
@@ -2988,6 +3007,7 @@ Widget _buildContratosAnualChart() {
     final spots = <FlSpot>[];
     
     for (int mes = 1; mes <= 12; mes++) {
+      if (mes > _ultimoMesDoAno) break; // Etapa 18: mês que ainda não chegou não vira 0 no gráfico
       final valor = data[mes] ?? 0.0;
       spots.add(FlSpot(mes.toDouble(), valor));
     }
@@ -3011,6 +3031,8 @@ Widget _buildContratosAnualChart() {
             height: 300,
             child: LineChart(
               LineChartData(
+                minX: 1, // Etapa 18: eixo do ano inteiro, sem desenhar os meses que não chegaram
+                maxX: 12,
                 lineTouchData: LineTouchData(
                   enabled: true,
                   touchTooltipData: LineTouchTooltipData(
@@ -3084,6 +3106,7 @@ Widget _buildContratosAnualChart() {
     final spots = <FlSpot>[];
     
     for (int mes = 1; mes <= 12; mes++) {
+      if (mes > _ultimoMesDoAno) break; // Etapa 18: mês que ainda não chegou não vira 0 no gráfico
       final valor = data[mes] ?? 0.0;
       spots.add(FlSpot(mes.toDouble(), valor));
     }
@@ -3107,6 +3130,8 @@ Widget _buildContratosAnualChart() {
             height: 300,
             child: LineChart(
               LineChartData(
+                minX: 1, // Etapa 18: eixo do ano inteiro, sem desenhar os meses que não chegaram
+                maxX: 12,
                 lineTouchData: LineTouchData(
                   enabled: true,
                   touchTooltipData: LineTouchTooltipData(
@@ -3332,7 +3357,7 @@ Widget _buildContratosAnualChart() {
                           // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                           _buildSectionDivider('👥 CLIENTES', _C.blue),
                           const SizedBox(height: 12),
-                          TopClientsWidgets.buildTopClientesPorReceita(_allClients),
+                          TopClientsWidgets.buildTopClientesPorValorSinistros(_allClients, _sinistros), // Etapa 18 (antes: "por Receita")
                           const SizedBox(height: 16),
                           TopClientsWidgets.buildTopClientesPorRisco(_allClients, _sinistros, percentualGatilho: _percentualGatilho),
                           const SizedBox(height: 16),
@@ -3341,6 +3366,8 @@ Widget _buildContratosAnualChart() {
                           _buildContratosAnualChart(),
                           const SizedBox(height: 16),
                           _buildValorApolicesAnualChart(),
+                          const SizedBox(height: 16),
+                          TopClientsWidgets.buildMaioresApolices(_allClients), // Etapa 18
                           const SizedBox(height: 16),
                           _buildTaxaRetencaoAnualChart(),
                           const SizedBox(height: 28),
