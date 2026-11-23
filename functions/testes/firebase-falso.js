@@ -24,6 +24,7 @@ function docRef(path) {
       if (!store[path]) throw new Error('NOT_FOUND ' + path);
       store[path] = { ...store[path], ...v };
     },
+    async delete() { delete store[path]; },
     collection: (nome) => colRef(`${path}/${nome}`),
   };
 }
@@ -62,6 +63,7 @@ function batch() {
   return {
     set(ref, v) { ops.push(() => ref.set(v)); },
     update(ref, v) { ops.push(() => ref.update(v)); },
+    delete(ref) { ops.push(() => ref.delete()); },
     async commit() { for (const o of ops) await o(); },
   };
 }

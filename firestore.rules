@@ -1,22 +1,23 @@
 rules_version = '2';
 
-// firestore.rules — Upgrade Seguros (Etapa 15)
+// firestore.rules — Upgrade Seguros
 //
-// ANTES (até 09/11/2026, só no console): `allow read, write: if true` —
-// qualquer pessoa na internet podia ler, alterar e apagar tudo.
+// Etapa 15: só USUÁRIO ATIVO (logado + cadastro em users/{uid} + ativo != false).
+// Etapa 16b: cada usuário só enxerga a PRÓPRIA corretora.
 //
-// AGORA:
-//  • Só USUÁRIO ATIVO lê e grava: logado E com documento em users/{uid} que
-//    não esteja desativado (ativo == false). Conta criada por fora do app
-//    (sem documento em users) não acessa nada.
-//  • users/{uid}: só administrador cria, apaga ou muda papel/ativo/empresa.
-//    O próprio usuário pode atualizar os outros campos do seu documento
-//    (ex.: último login, telefone).
-//  • Pesquisa NPS pública e "entrar com usuário/matrícula" não acessam mais o
-//    banco direto: passam pelas Cloud Functions npsPublico e apoioLogin
-//    (functions/seguranca.js), que conferem o token / devolvem só o e-mail.
+//   users/{uid}                    cadastro de login (empresaId = a corretora)
+//   corretoras/{e}                 cadastro da corretora
+//   corretoras/{e}/<coleção>/…     dados da corretora (Etapa 16)
+//   nps_indice/{claimId}           claimId → empresaId (só o app grava; o
+//                                  servidor lê para o NPS sem login)
 //
-// Próxima etapa (multi-tenant): cada usuário só enxerga a própria corretora.
+// Quem pode o quê dentro da corretora:
+//   • ler e gravar sinistros, assistências, clientes, tarefas…: membro
+//   • EXCLUIR sinistro, assistência ou cliente: só gestor (administrador)
+//   • configurações (app_config, sla_configs, pdf_signatures, seguradoras,
+//     workshops) e o cadastro da corretora: só gestor; o membro só lê
+// As coleções antigas da raiz (sinistros/, clientes/ …) ficam bloqueadas:
+// nenhuma regra as libera.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -28,14 +29,32 @@ service cloud.firestore {
       return /databases/$(database)/documents/users/$(request.auth.uid);
     }
 
+    function perfil() {
+      return get(docUsuario()).data;
+    }
+
     function ativo() {
       return logado()
         && exists(docUsuario())
-        && get(docUsuario()).data.get('ativo', true) != false;
+        && perfil().get('ativo', true) != false;
     }
 
     function admin() {
-      return ativo() && get(docUsuario()).data.get('role', '') == 'admin';
+      return ativo() && perfil().get('role', '') == 'admin';
+    }
+
+    function minhaEmpresa() {
+      return perfil().get('empresaId', '');
+    }
+
+    // Usuário ativo ligado à corretora [e].
+    function membro(e) {
+      return ativo() && e != '' && minhaEmpresa() == e;
+    }
+
+    // Gestor (administrador) da corretora [e].
+    function gestor(e) {
+      return membro(e) && perfil().get('role', '') == 'admin';
     }
 
     // Campos do próprio cadastro que só o administrador muda.
@@ -44,18 +63,50 @@ service cloud.firestore {
         .hasAny(['role', 'ativo', 'empresaId', 'corretoraId', 'matricula', 'username']);
     }
 
+    // ── users ──────────────────────────────────────────────────────────────
     match /users/{uid} {
-      allow read: if ativo();
-      allow create, delete: if admin();
-      allow update: if admin()
+      // o próprio cadastro, ou colegas da mesma corretora (as listas do app
+      // filtram por empresaId — a regra exige esse filtro)
+      allow get: if ativo()
+        && (uid == request.auth.uid || resource.data.get('empresaId', '') == minhaEmpresa());
+      allow list: if ativo() && resource.data.get('empresaId', '') == minhaEmpresa();
+
+      // administrador só cria/edita/apaga usuários da PRÓPRIA corretora
+      allow create: if admin() && request.resource.data.get('empresaId', '') == minhaEmpresa();
+      allow delete: if admin() && resource.data.get('empresaId', '') == minhaEmpresa();
+      allow update: if (admin()
+          && resource.data.get('empresaId', '') == minhaEmpresa()
+          && request.resource.data.get('empresaId', '') == minhaEmpresa())
         || (ativo() && request.auth.uid == uid && !mexeEmCampoProtegido());
     }
 
-    // Todas as outras coleções (sinistros, assistencias, clientes, tasks,
-    // workshops, seguradoras, app_config, nps_pesquisas, avaliacoes, …):
-    // usuário ativo. O "!= 'users'" impede que esta regra libere users/.
-    match /{colecao}/{documento=**} {
-      allow read, write: if colecao != 'users' && ativo();
+    // ── corretoras ─────────────────────────────────────────────────────────
+    match /corretoras/{e} {
+      allow read: if membro(e);
+      allow write: if gestor(e);
+
+      match /{colecao}/{documento=**} {
+        allow read: if membro(e);
+
+        // configurações e cadastros de apoio: só o gestor altera
+        allow create, update: if colecao in ['app_config', 'sla_configs', 'pdf_signatures', 'seguradoras', 'workshops']
+          ? gestor(e)
+          : membro(e);
+
+        // excluir atendimento/cliente e configurações: só o gestor
+        allow delete: if colecao in ['sinistros', 'assistencias', 'clientes',
+                                     'app_config', 'sla_configs', 'pdf_signatures', 'seguradoras', 'workshops']
+          ? gestor(e)
+          : membro(e);
+      }
     }
+
+    // ── índice do NPS (Etapa 16) ───────────────────────────────────────────
+    match /nps_indice/{claimId} {
+      allow create, update: if ativo() && request.resource.data.get('empresaId', '') == minhaEmpresa();
+      // leitura só pelo servidor (Function npsPublico)
+    }
+
+    // Qualquer outro caminho (inclusive as coleções antigas da raiz): bloqueado.
   }
 }

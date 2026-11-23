@@ -2,7 +2,7 @@
 
 > Plataforma web/mobile para corretoras de seguros gerenciarem sinistros, assistências, clientes, tarefas e métricas de desempenho em tempo real.
 
-**Versão do documento:** Etapa 16 (GitHub `0d24d50` = Etapas 01–15.1)
+**Versão do documento:** Etapa 16b (GitHub `99cc809` = Etapas 01–16)
 **Última atualização:** 08/11/2026
 **Status:** app em uso; ciclo de entregas com verificação por md5 em andamento. Etapa 02: terceiros identificados por personagem (proprietário / motorista / contato) e **histórico de valores do sinistro** (lançamentos com nota fiscal, segurado + terceiros). Pendências de segurança abertas — ver [🔐 Pendências de Segurança](#-pendências-de-segurança).
 
@@ -538,7 +538,9 @@ Lista de clientes → filtro por **recomendação** (seletor ao lado da busca, c
 | corretora | `nps_pesquisas`, `avaliacoes` | Pesquisas NPS enviadas e respostas |
 | corretora | `cotacoes`, `employees` | Cotações; funcionários (cadastro antigo) |
 
-A lista das coleções da corretora está em `EmpresaAtual.colecoes` (app) e `COLECOES` (`functions/empresa.js`) — **as duas precisam ser iguais**. As coleções antigas da raiz continuam no banco como cópia de segurança até a Etapa 16b.
+A lista das coleções da corretora está em `EmpresaAtual.colecoes` (app) e `COLECOES` (`functions/empresa.js`) — **as duas precisam ser iguais**.
+
+**Regras por corretora (Etapa 16b, `firestore.rules`):** cada usuário só lê e grava em `corretoras/{o empresaId dele}/…`; em `users/` só vê colegas da mesma corretora (as listas do app filtram por `empresaId`) e o administrador só cria/edita usuários da própria corretora. Dentro da corretora: excluir sinistro, assistência ou cliente e alterar `app_config`, `sla_configs`, `pdf_signatures`, `seguradoras`, `workshops` e o cadastro da corretora = **só gestor (administrador)**. As coleções antigas da raiz ficam bloqueadas e podem ser apagadas pelo cartão 🏢 Dados da corretora → "Apagar dados antigos" (só 7 dias depois da migração; apaga apenas o que tem cópia na pasta).
 
 ### Campos Chave do Claim (sinistro ou assistência)
 
@@ -619,7 +621,7 @@ A lista das coleções da corretora está em `EmpresaAtual.colecoes` (app) e `CO
 | `npsPublico` | HTTP (público) | Etapa 15: pesquisa NPS do cliente final — confere o token, devolve só o necessário para a tela, grava a avaliação e recalcula o NPS do cliente |
 | `apoioLogin` | HTTP (público) | Etapa 15: "usuário" ou "matrícula" → e-mail (só o e-mail) para o login |
 | `criarUsuario` | HTTP (só admin) | Etapa 15: cria a conta (senha aleatória) e o cadastro em `users/`, herdando a empresa do administrador; o app manda o e-mail de definir senha |
-| `migrarEmpresa` | HTTP (só admin) | Etapa 16: `diagnostico` (raiz × pasta da corretora, usuários) e `copiar` (raiz → `corretoras/{empresaId}/…`, só o que falta; índice do NPS; usuários sem empresa) |
+| `migrarEmpresa` | HTTP (só admin) | Etapa 16: `diagnostico` (raiz × pasta da corretora, usuários, dias desde a migração) e `copiar` (raiz → `corretoras/{empresaId}/…`, só o que falta; índice do NPS; usuários sem empresa). Etapa 16b: `apagarRaiz` (confirmação `APAGAR`, 7 dias após a migração, só documentos com cópia) |
 | `converterVideo` | Storage (arquivo finalizado em `videos/`) | Etapa 12: converte para MP4 720p no mesmo caminho (ffmpeg-static) |
 | `verificarAssistenciasAtradasTelegram` | Agendada (a cada 10 min) | Lê `app_config/config` e avisa no Telegram as assistências com SLA atrasado, respeitando horário configurado. Token do bot no Secret Manager (`TELEGRAM_BOT_TOKEN`, Etapa 15) |
 
@@ -700,6 +702,7 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 | 15 | 09/11/2026 | `ec4a608` | **Segurança:** regras do Firestore no repositório (só usuário ativo; `users/` protegido) e Storage com a mesma regra; Functions `npsPublico`, `apoioLogin` e `criarUsuario` (fluxos sem login e criação de usuário pelo servidor); `uploadFile`/`deleteFiles` exigem login; token do Telegram como segredo do Firebase e arquivos `.env` fora do projeto. Teste novo: `functions/testes/seguranca.teste.js`. |
 | 15.1 | 09/11/2026 | Etapa 15 | Endereço das Functions: as de 2ª geração respondem no Cloud Run (`https://<nome>-hwtlk2s4qq-uc.a.run.app`), não em `…cloudfunctions.net/<nome>` (404) — afetava `apoioLogin`, `npsPublico`, `criarUsuario` e `deleteFiles`. |
 | 16 | 10/11/2026 | `0d24d50` | **Multi-tenant (preparação):** cada corretora com a própria pasta no banco (`corretoras/{id}/…`); app lê/grava pela corretora do usuário (`EmpresaAtual`), listas de usuários só da corretora; `PortaoEmpresa` antes do Dashboard (segura as telas até a migração); Function `migrarEmpresa` (diagnóstico + cópia idempotente, raiz preservada); NPS e Telegram por corretora; Configurações somente leitura para funcionário. Testes: `functions/testes/empresa.teste.js` (+ `firebase-falso.js`). |
+| 16b | 23/11/2026 | `99cc809` | **Multi-tenant, trava:** regras do banco por corretora (membro lê/grava a própria pasta; excluir atendimento/cliente e configurações só gestor; `users` só da mesma corretora; raiz antiga bloqueada); "Apagar dados antigos" (`migrarEmpresa` `apagarRaiz`: 7 dias após a migração, só o que tem cópia, confirmação digitada); data da 1ª migração preservada. Migração feita em 23/11/2026. |
 | 11 | 08/11/2026 | `9159bd1` | **Busca de Sinistros** também por terceiros (proprietário, motorista, contato, registro na seguradora deles), proprietário/condutor do veículo segurado e contato do segurado; sem acento, várias palavras, telefone sem máscara (`lib/utils/busca.dart`). **Filtro de recomendação** da lista de clientes vira seletor no padrão dos filtros de Sinistros, ao lado da busca. **Sinistralidade Mensal** recalculada (sinistros ocorridos ÷ prêmio ganho), com linha acumulada e linha do gatilho (`lib/utils/sinistralidade.dart`). Testes novos: `busca_test.dart`, `sinistralidade_test.dart`. |
 | 10 | 08/11/2026 | `44f5c8f` | **Top 10 de risco** com a regra da recomendação (vigentes, sem vínculo por ramo + data) e os mesmos nomes. **Lista de clientes:** filtro por recomendação ligado à exportação, que passa a trazer recomendação, uso do gatilho e contato (nome, telefone, e-mail). **Tarefas:** ordenar Mais recente/Mais antiga; exportar agrupado por funcionário (CSV/PDF); `concluida_em` gravado ao concluir; "no prazo / fora do prazo" pela regra única (antes concluída no prazo com data vencida contava como fora); editar não troca mais o responsável; o filtro por funcionário pelo id passou a funcionar (o campo não vinha na lista). **Relatórios:** Tarefas por Funcionário (abertas, concluídas %, no prazo × fora). Testes novos: `tarefas_test.dart` (+1 em `relatorio_clientes_test.dart`). |
 | 09 | 08/11/2026 | `4d14169` | **Recomendação do cliente unificada pelo uso do gatilho** (pior apólice vigente; faixas 60/80/100%; sinistros sem vínculo ligados por ramo + data; "Sem apólice vigente" e "Apólice sem valor" em cinza; Detalhes mostra uso do gatilho e % do valor da apólice). Substitui 4 contas diferentes. Botões com texto: **"Exportar relatório"** na lista de clientes e **"Importar contrato (PDF)"** no cadastro. Teste novo: `recomendacao_cliente_test.dart`. |
@@ -796,7 +799,8 @@ apolices: [
 - [x] Tarefas ligadas ao atendimento: concluir ao encerrar/excluir, contato substituído, "já informei por outro meio", limpeza das esquecidas, alerta de atraso funcionando (Etapa 14)
 - [x] Segurança: regras do Firestore e do Storage (só usuário ativo), Functions com login, NPS/login/criação de usuário pelo servidor, token do Telegram como segredo (Etapa 15)
 - [x] Multi-tenant, preparação: dados por corretora (`corretoras/{id}/…`), migração, Configurações só leitura para funcionário (Etapa 16)
-- [ ] Multi-tenant, trava (16b): regras isolando cada corretora; excluir e configurar só gestor nas regras; pastas do Storage por corretora; URLs assinadas (S6); apagar as coleções antigas da raiz
+- [x] Multi-tenant, trava (16b): regras isolando cada corretora; excluir e configurar só gestor nas regras; limpeza das coleções antigas da raiz
+- [ ] 16c: arquivos (Storage) por corretora e links protegidos do Firebase no lugar dos links públicos (S6) — corrige também imagens que às vezes não aparecem no Chrome
 - [ ] Planos de armazenamento (bronze/prata/ouro ou por GB): medir uso por corretora (soma de `tamanho_bytes` / Storage) e aplicar `videoMaxMb`/`videosPorSinistro` por plano — depende do multi-tenant
 - [ ] `firebase_options.dart` com o bucket antigo (`appspot.com`): regenerar com `flutterfire configure` (hoje só os vídeos usam o SDK do Storage, com o bucket fixo)
 - [ ] Assistências: vídeos (mesmo componente)

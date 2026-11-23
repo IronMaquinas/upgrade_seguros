@@ -5,6 +5,8 @@
 // Chama a Function migrarEmpresa (functions/empresa.js):
 //   • Diagnóstico → mostra o que existe, sem mudar nada.
 //   • Copiar → copia o que ainda não está na pasta (pode repetir).
+//   • Apagar dados antigos (Etapa 16b) → apaga da raiz só o que já tem cópia
+//     na pasta; o servidor só aceita 7 dias depois da migração.
 
 import 'dart:convert';
 
@@ -80,6 +82,9 @@ class _CartaoMigracaoEmpresaState extends State<CartaoMigracaoEmpresa> {
       Text('Sua corretora (empresaId): ${d['empresa']}', style: _negrito),
       const SizedBox(height: 8),
       Text('Corretoras cadastradas: ${(d['corretoras'] as List).join(', ')}'),
+      if (d['diasDesdeMigracao'] != null)
+        Text('Migrada há ${d['diasDesdeMigracao']} dia(s). '
+            '${d['podeApagarRaiz'] == true ? 'Já é possível apagar os dados antigos (faça o backup antes).' : 'Os dados antigos só podem ser apagados depois de ${d['diasMinimos']} dias.'}'),
       const SizedBox(height: 12),
       const Text('Documentos por coleção (raiz → pasta da corretora):', style: _negrito),
       for (final e in colecoes.entries) Text('  ${e.key}: ${e.value['raiz']} → ${e.value['naCorretora']}'),
@@ -134,6 +139,63 @@ class _CartaoMigracaoEmpresaState extends State<CartaoMigracaoEmpresa> {
     ]);
   }
 
+  Future<void> _apagarRaiz() async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          title: const Text('Apagar os dados antigos da raiz?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Apaga as coleções antigas da raiz do banco (sinistros/, clientes/ …), mas SÓ os documentos que já '
+                'têm cópia na pasta da corretora. Os dados da corretora não são tocados.\n\n'
+                'Não dá para desfazer. Faça o backup do LEIA-ME 16b antes.',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'Digite APAGAR para confirmar'),
+                onChanged: (_) => setS(() {}),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade600, foregroundColor: Colors.white),
+              onPressed: ctrl.text.trim() == 'APAGAR' ? () => Navigator.pop(ctx, true) : null,
+              child: const Text('Apagar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _ocupado = true);
+    Map<String, dynamic>? r;
+    try {
+      final resp = await FuncoesNuvem.post('migrarEmpresa', {'acao': 'apagarRaiz', 'confirmacao': 'APAGAR'});
+      if (resp.statusCode != 200) throw Exception(FuncoesNuvem.erro(resp));
+      r = Map<String, dynamic>.from(jsonDecode(resp.body) as Map);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: $e')));
+    } finally {
+      if (mounted) setState(() => _ocupado = false);
+    }
+    if (r == null || !mounted) return;
+    final colecoes = Map<String, dynamic>.from(r['colecoes'] as Map);
+    await _mostrar('Dados antigos apagados', [
+      for (final e in colecoes.entries)
+        Text('  ${e.key}: ${e.value['apagados']} apagado(s)'
+            '${(e.value['semCopia'] as List).isEmpty ? '' : ' — ${(e.value['semCopia'] as List).length} SEM cópia (mantidos)'}'),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_admin != true) return const SizedBox.shrink();
@@ -171,6 +233,12 @@ class _CartaoMigracaoEmpresaState extends State<CartaoMigracaoEmpresa> {
                     ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.drive_file_move_outline, size: 18),
                 label: const Text('Copiar'),
+              ),
+              // Etapa 16b
+              TextButton.icon(
+                onPressed: _ocupado ? null : _apagarRaiz,
+                icon: Icon(Icons.delete_sweep_outlined, size: 18, color: Colors.red.shade400),
+                label: Text('Apagar dados antigos', style: TextStyle(color: Colors.red.shade400)),
               ),
             ],
           ),

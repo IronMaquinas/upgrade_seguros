@@ -64,5 +64,28 @@ const { ok, fim } = F.placar();
   store['corretoras/emp1/app_config/config'].percentualGatilhoPadrao = 80; // gestor mudou depois da migração
   r = await chamar(migrarEmpresa, { acao: 'copiar' }, 'tok-admin');
   ok(store['corretoras/emp1/app_config/config'].percentualGatilhoPadrao === 80, 'copiar de novo: não desfaz configuração alterada depois');
+
+  // ── Etapa 16b: apagar a raiz ──
+  r = await chamar(migrarEmpresa, { acao: 'apagarRaiz' }, 'tok-admin');
+  ok(r.code === 400, 'apagarRaiz: sem a confirmação = 400');
+  r = await chamar(migrarEmpresa, { acao: 'apagarRaiz', confirmacao: 'APAGAR' }, 'tok-user');
+  ok(r.code === 403, 'apagarRaiz: usuário comum = 403');
+  store['corretoras/emp1'].migradoEm = { toDate: () => new Date(Date.now() - 2 * 86400000) };
+  await chamar(migrarEmpresa, { acao: 'copiar' }, 'tok-admin');
+  ok(store['corretoras/emp1'].migradoEm.toDate, 'copiar de novo: mantém a data da primeira migração');
+  r = await chamar(migrarEmpresa, { acao: 'diagnostico' }, 'tok-admin');
+  ok(r.body.diasDesdeMigracao === 2 && r.body.podeApagarRaiz === false, 'diagnóstico: 2 dias, ainda não pode apagar');
+  r = await chamar(migrarEmpresa, { acao: 'apagarRaiz', confirmacao: 'APAGAR' }, 'tok-admin');
+  ok(r.code === 409 && store['sinistros/S1'], 'apagarRaiz: antes de 7 dias = 409 e nada apagado');
+  store['corretoras/emp1'].migradoEm = { toDate: () => new Date(Date.now() - 8 * 86400000) };
+  store['clientes/K9'] = { nome: 'Só na raiz' }; // sem cópia
+  r = await chamar(migrarEmpresa, { acao: 'diagnostico' }, 'tok-admin');
+  ok(r.body.podeApagarRaiz === true, 'diagnóstico: 8 dias, pode apagar');
+  r = await chamar(migrarEmpresa, { acao: 'apagarRaiz', confirmacao: 'APAGAR' }, 'tok-admin');
+  ok(r.code === 200 && !store['sinistros/S1'] && !store['sinistros/S3'] && !store['app_config/config'], 'apagarRaiz: apaga da raiz o que tem cópia');
+  ok(store['clientes/K9'] && r.body.colecoes.clientes.semCopia.includes('K9'), 'apagarRaiz: o que NÃO tem cópia fica e é listado');
+  ok(store['corretoras/emp1/sinistros/S1'] && store['corretoras/emp1/clientes/K1'], 'apagarRaiz: pasta da corretora intacta');
+  ok(store['corretoras/emp1'].nome === 'Corretora 1' && store['corretoras/emp1'].raizApagadaEm, 'apagarRaiz: registra quando apagou');
+  ok(store['nps_indice/S1'] && store['users/uUser'], 'apagarRaiz: não mexe em users nem no índice do NPS');
   fim();
 })();

@@ -15,6 +15,10 @@
 //       índice do NPS (nps_indice/{id}) e liga à corretora os usuários sem
 //       empresaId. Pode rodar quantas vezes precisar: o que já foi copiado é
 //       pulado. A raiz NÃO é apagada (fica de cópia de segurança até a 16b).
+//   { acao: 'apagarRaiz', confirmacao: 'APAGAR' } → Etapa 16b: apaga da RAIZ
+//       só os documentos que JÁ TÊM cópia na pasta da corretora (os demais
+//       ficam e aparecem no relatório). Só depois de DIAS_ANTES_DE_APAGAR dias
+//       da migração. Faça um backup antes (LEIA-ME 16b).
 
 const { onRequest } = require('firebase-functions/v2/https');
 const logger = require('firebase-functions/logger');
@@ -42,6 +46,9 @@ const COLECOES = [
   'employees',
 ];
 
+// Etapa 16b: prazo mínimo entre a migração e a limpeza da raiz.
+const DIAS_ANTES_DE_APAGAR = 7;
+
 async function contar(ref) {
   const r = await ref.count().get();
   return r.data().count;
@@ -62,7 +69,60 @@ async function diagnostico(empresa) {
   }
   const cadastro = await db().collection('corretoras').doc(empresa).get();
   const migrada = cadastro.exists && cadastro.data().migradoEtapa16 === true;
-  return { empresa, migrada, usuarios, corretoras, colecoes };
+  const dias = diasDesdeMigracao(cadastro);
+  return {
+    empresa,
+    migrada,
+    diasDesdeMigracao: dias,
+    podeApagarRaiz: migrada && dias !== null && dias >= DIAS_ANTES_DE_APAGAR,
+    diasMinimos: DIAS_ANTES_DE_APAGAR,
+    usuarios,
+    corretoras,
+    colecoes,
+  };
+}
+
+function diasDesdeMigracao(cadastro) {
+  const quando = cadastro.exists ? cadastro.data().migradoEm : null;
+  if (!quando || typeof quando.toDate !== 'function') return null;
+  return Math.floor((Date.now() - quando.toDate().getTime()) / 86400000);
+}
+
+async function apagarRaiz(empresa) {
+  const cadastro = await db().collection('corretoras').doc(empresa).get();
+  if (!cadastro.exists || cadastro.data().migradoEtapa16 !== true) {
+    return { erro: 'A corretora ainda não foi migrada.' };
+  }
+  const dias = diasDesdeMigracao(cadastro);
+  if (dias === null || dias < DIAS_ANTES_DE_APAGAR) {
+    return { erro: `Aguarde ${DIAS_ANTES_DE_APAGAR} dias depois da migração (hoje: ${dias ?? '?'}).` };
+  }
+  const destino = db().collection('corretoras').doc(empresa);
+  const relatorio = { empresa, colecoes: {} };
+  for (const c of COLECOES) {
+    const origem = await db().collection(c).get();
+    let apagados = 0;
+    const semCopia = [];
+    let lote = db().batch();
+    let noLote = 0;
+    for (const d of origem.docs) {
+      if (!(await destino.collection(c).doc(d.id).get()).exists) {
+        semCopia.push(d.id); // sem cópia na pasta: NÃO apaga
+        continue;
+      }
+      lote.delete(d.ref);
+      apagados++;
+      if (++noLote === 400) {
+        await lote.commit();
+        lote = db().batch();
+        noLote = 0;
+      }
+    }
+    if (noLote) await lote.commit();
+    relatorio.colecoes[c] = { apagados, semCopia };
+  }
+  await destino.set({ ...cadastro.data(), raizApagadaEm: admin.firestore.FieldValue.serverTimestamp() });
+  return relatorio;
 }
 
 async function copiar(empresa) {
@@ -128,10 +188,12 @@ async function copiar(empresa) {
   // depois disso — evita alguém trabalhar com a pasta ainda vazia.
   const cad = db().collection('corretoras').doc(empresa);
   const atual = await cad.get();
+  const dados = atual.exists ? atual.data() : {};
   await cad.set({
-    ...(atual.exists ? atual.data() : {}),
+    ...dados,
     migradoEtapa16: true,
-    migradoEm: admin.firestore.FieldValue.serverTimestamp(),
+    // Etapa 16b: guarda a data da PRIMEIRA cópia (o prazo para apagar a raiz conta dela).
+    migradoEm: dados.migradoEm || admin.firestore.FieldValue.serverTimestamp(),
   });
   return relatorio;
 }
@@ -156,7 +218,14 @@ exports.migrarEmpresa = onRequest({ timeoutSeconds: 540, memory: '1GiB' }, (req,
         logger.info(`migrarEmpresa: cópia para ${empresa} feita por ${quem.email}`, r);
         return res.json(r);
       }
-      return res.status(400).json({ erro: "acao deve ser 'diagnostico' ou 'copiar'" });
+      if (acao === 'apagarRaiz') {
+        if ((req.body || {}).confirmacao !== 'APAGAR') return res.status(400).json({ erro: 'Confirmação ausente' });
+        const r = await apagarRaiz(empresa);
+        if (r.erro) return res.status(409).json(r);
+        logger.info(`migrarEmpresa: raiz apagada para ${empresa} por ${quem.email}`, r);
+        return res.json(r);
+      }
+      return res.status(400).json({ erro: "acao deve ser 'diagnostico', 'copiar' ou 'apagarRaiz'" });
     } catch (e) {
       logger.error(e);
       return res.status(500).json({ erro: 'Erro interno' });
