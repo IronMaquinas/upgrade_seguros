@@ -42,6 +42,8 @@ import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
 import 'package:upgrade_seguros/utils/videos.dart' show Videos; // Etapa 16c (bucket)
 import 'package:upgrade_seguros/widgets/campo_seguradora.dart'; // Etapa 20
 import 'package:upgrade_seguros/services/seguradoras_cadastradas.dart'; // Etapa 20
+import 'package:upgrade_seguros/services/plano_atual.dart'; // Etapa 23
+import 'package:upgrade_seguros/screens/meu_plano_screen.dart'; // Etapa 23
 
 class ClientFormScreen extends StatefulWidget {
   final Client? clientToEdit;
@@ -1604,7 +1606,8 @@ Widget build(BuildContext context) {
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: OutlinedButton.icon(
-                  onPressed: _importarContrato,
+                  // Etapa 23: módulo "Importar contrato (PDF)"
+                  onPressed: PlanoAtual.tem('importar_contrato') ? _importarContrato : () => avisarForaDoPlano(context, 'importar_contrato'),
                   icon: const Icon(Icons.upload_file, size: 20),
                   label: Text(estreito ? 'Importar contrato' : 'Importar contrato (PDF)'),
                   style: OutlinedButton.styleFrom(

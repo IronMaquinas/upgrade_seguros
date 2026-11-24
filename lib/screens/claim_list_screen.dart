@@ -9,6 +9,8 @@ import '../utils/filtro_status.dart';
 import '../screens/claim_detail_screen.dart';
 import '../screens/spreadsheet_claim_screen.dart';
 import 'package:upgrade_seguros/widgets/relatorios_modelos.dart'; // Etapa 19b
+import 'package:upgrade_seguros/services/plano_atual.dart'; // Etapa 23
+import 'package:upgrade_seguros/screens/meu_plano_screen.dart'; // Etapa 23
 
 class ClaimListScreen extends StatefulWidget {
   const ClaimListScreen({
@@ -921,7 +923,9 @@ class ClaimListScreenState extends State<ClaimListScreen> {
             child: Padding(
               padding: const EdgeInsets.only(right: 4),
               child: OutlinedButton.icon(
-                onPressed: () => abrirRelatoriosComModelos(context, tipo: 'sinistro'),
+                onPressed: () => PlanoAtual.tem('relatorios_personalizados') // Etapa 23
+                    ? abrirRelatoriosComModelos(context, tipo: 'sinistro')
+                    : avisarForaDoPlano(context, 'relatorios_personalizados'),
                 icon: const Icon(Icons.file_download_outlined, size: 20),
                 label: Text(MediaQuery.of(context).size.width < 600 ? 'Exportar' : 'Exportar relatório'),
                 style: OutlinedButton.styleFrom(

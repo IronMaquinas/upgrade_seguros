@@ -33,6 +33,8 @@ import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
 import 'package:upgrade_seguros/widgets/lancamentos_widget.dart'; // Etapa 19a
 import 'package:upgrade_seguros/widgets/identificacao_atendimento.dart'; // Etapa 19b.4
+import 'package:upgrade_seguros/services/plano_atual.dart'; // Etapa 23
+import 'package:upgrade_seguros/screens/meu_plano_screen.dart'; // Etapa 23
 
 class AssistDetailScreen extends StatefulWidget {
   final String assistId;
@@ -1090,7 +1092,9 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                   final opcao = await _mostrarDialogoSalvar();
                   if (opcao == null) return;
                   await _salvar(notificarWhatsApp: opcao == 'whatsapp');
-                  if (opcao == 'nps' && mounted) {
+                  if (opcao == 'nps' && mounted && !PlanoAtual.tem('nps')) {
+                    avisarForaDoPlano(context, 'nps'); // Etapa 23
+                  } else if (opcao == 'nps' && mounted) {
                     NpsSendDialog.mostrar(
                       context,
                       claimId: _assist!.id,
@@ -2064,6 +2068,9 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
               color: Colors.orange,
               title: 'Tarefas',
               children: [
+                if (!PlanoAtual.tem('tarefas')) // Etapa 23
+                  const ModuloBloqueado('tarefas', telaInteira: false)
+                else
                 TaskListWidget(
                   numeroSinistro: _assist!.numeroSinistro,
                   clientId: _assist!.idCliente,
@@ -2341,7 +2348,9 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
                         final opcao = await _mostrarDialogoSalvar();
                         if (opcao == null) return;
                         await _salvar(notificarWhatsApp: opcao == 'whatsapp');
-                        if (opcao == 'nps' && mounted) {
+                        if (opcao == 'nps' && mounted && !PlanoAtual.tem('nps')) {
+                          avisarForaDoPlano(context, 'nps'); // Etapa 23
+                        } else if (opcao == 'nps' && mounted) {
                           NpsSendDialog.mostrar(
                             context,
                             claimId: _assist!.id,

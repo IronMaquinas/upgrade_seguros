@@ -19,6 +19,7 @@ import 'package:flutter/material.dart';
 import '../screens/auth_screen.dart';
 import '../services/auth_service.dart';
 import '../services/empresa_atual.dart';
+import '../services/plano_atual.dart'; // Etapa 23
 import 'migracao_empresa_card.dart';
 
 enum _Situacao { pronta, migracaoPendenteAdmin, migracaoPendente }
@@ -42,6 +43,7 @@ class _PortaoEmpresaState extends State<PortaoEmpresa> {
 
   Future<_Situacao> _verificar() async {
     final id = await EmpresaAtual.carregar(forcar: true);
+    await PlanoAtual.carregar(); // Etapa 23: módulos do plano (falha de leitura = tudo ligado)
     final cadastro = await FirebaseFirestore.instance.collection('corretoras').doc(id).get();
     if (cadastro.data()?['migradoEtapa16'] == true) return _Situacao.pronta;
     return await AuthService().isAdmin() ? _Situacao.migracaoPendenteAdmin : _Situacao.migracaoPendente;
@@ -51,6 +53,7 @@ class _PortaoEmpresaState extends State<PortaoEmpresa> {
 
   Future<void> _sair() async {
     EmpresaAtual.limpar();
+    PlanoAtual.limpar(); // Etapa 23
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(

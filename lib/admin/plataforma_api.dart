@@ -40,6 +40,15 @@ class PlataformaApi {
     return [for (final a in (j['acoes'] as List)) AcaoAuditoria.deJson(Map<String, dynamic>.from(a as Map))];
   }
 
+  // ── Etapa 23: módulos ──
+  /// [modulos] null = tudo ligado.
+  static Future<void> contaDefinirModulos(String empresaId, List<String>? modulos) => _chamar({
+        'acao': 'contaDefinirModulos',
+        'empresaId': empresaId,
+        'tipo': modulos == null ? 'tudo_ligado' : 'personalizado',
+        if (modulos != null) 'modulos': modulos,
+      });
+
   // ── Etapa 22: catálogo de seguradoras ──
   static Future<List<SeguradoraCatalogo>> catalogo() async {
     final j = await _chamar({'acao': 'catalogo'});

@@ -87,6 +87,28 @@ service cloud.firestore {
     }
 
     // ── corretoras ─────────────────────────────────────────────────────────
+    // ── Etapa 23: módulos do plano ─────────────────────────────────────────
+    // plataforma_contas/{e}: sem conta ou plano "tudo_ligado" = tudo liberado;
+    // "personalizado" = só os ids de "modulos" (catálogo em lib/utils/modulos.dart).
+    function contaPath(e) {
+      return /databases/$(database)/documents/plataforma_contas/$(e);
+    }
+    function moduloLigado(e, m) {
+      return m == ''
+        || !exists(contaPath(e))
+        || get(contaPath(e)).data.get('plano', {}).get('tipo', 'tudo_ligado') == 'tudo_ligado'
+        || m in get(contaPath(e)).data.get('modulos', []);
+    }
+    // Coleção da corretora → módulo que ela exige para GRAVAR ('' = sempre).
+    function moduloDaColecao(c) {
+      return c == 'assistencias' ? 'assistencias'
+        : c == 'tasks' ? 'tarefas'
+        : c == 'workshops' ? 'oficinas'
+        : c == 'modelos_relatorio' ? 'relatorios_personalizados'
+        : c == 'nps_pesquisas' ? 'nps'
+        : '';
+    }
+
     match /corretoras/{e} {
       allow read: if membro(e);
       allow write: if gestor(e);
@@ -95,9 +117,10 @@ service cloud.firestore {
         allow read: if membro(e);
 
         // configurações e cadastros de apoio: só o gestor altera
-        allow create, update: if colecao in ['app_config', 'sla_configs', 'pdf_signatures', 'seguradoras', 'workshops']
+        allow create, update: if (colecao in ['app_config', 'sla_configs', 'pdf_signatures', 'seguradoras', 'workshops']
           ? gestor(e)
-          : membro(e);
+          : membro(e))
+          && moduloLigado(e, moduloDaColecao(colecao)); // Etapa 23
 
         // excluir atendimento/cliente e configurações: só o gestor
         allow delete: if colecao in ['sinistros', 'assistencias', 'clientes',

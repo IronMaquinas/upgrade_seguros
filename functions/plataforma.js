@@ -28,6 +28,7 @@ const admin = require('firebase-admin');
 const cors = require('cors')({ origin: true });
 
 const cat = require('./catalogo'); // Etapa 22
+const mod = require('./modulos'); // Etapa 23
 
 if (!admin.apps.length) admin.initializeApp();
 const db = () => admin.firestore();
@@ -88,6 +89,7 @@ function resumoConta(c) {
     situacao: c.situacao || '',
     plano: c.plano || null,
     cortesia: c.cortesia === true,
+    modulos: Array.isArray(c.modulos) ? c.modulos : null, // Etapa 23 (null = tudo ligado)
     observacao: c.observacao || '',
     testeAte: data(c.testeAte),
     criadaEm: data(c.criadaEm),
@@ -164,6 +166,36 @@ async function ultimasAcoes(limite = 100) {
     const a = d.data() || {};
     return { id: d.id, em: data(a.em), email: a.email || '', acao: a.acao || '', alvoTipo: a.alvoTipo || '', alvoId: a.alvoId || '', detalhes: a.detalhes || {} };
   });
+}
+
+// ── Etapa 23: módulos da corretora ───────────────────────────────────────────
+
+/** Define os módulos de uma corretora: "tudo ligado" ou a lista escolhida.
+ *  A conta precisa existir (portal → "Criar contas que faltam"). */
+async function definirModulos(quem, { empresaId, tipo, modulos }) {
+  const e = String(empresaId || '');
+  if (!e) throw new ErroDeUso('Informe a corretora.');
+  if (!['tudo_ligado', 'personalizado'].includes(tipo)) throw new ErroDeUso('Tipo de plano inválido.');
+  const ref = db().collection('plataforma_contas').doc(e);
+  const atual = await ref.get();
+  if (!atual.exists) throw new ErroDeUso('Esta corretora ainda não tem conta. Use "Criar contas que faltam".', 409);
+  const antes = atual.data() || {};
+  const lista = tipo === 'tudo_ligado' ? null : [...mod.efetivos(Array.isArray(modulos) ? modulos : [])].sort();
+  const plano = { ...(antes.plano || {}), tipo, nome: tipo === 'tudo_ligado' ? 'Tudo ligado' : 'Personalizado' };
+  await ref.update({
+    plano,
+    modulos: lista === null ? admin.firestore.FieldValue.delete() : lista,
+    atualizadaEm: agora(),
+  });
+  await ref.collection('historico').doc().set({
+    em: agora(),
+    email: quem.email,
+    acao: 'modulos',
+    de: { plano: antes.plano || null, modulos: Array.isArray(antes.modulos) ? antes.modulos : null },
+    para: { plano, modulos: lista },
+  });
+  await auditar(quem, 'modulos_definidos', { alvoTipo: 'corretora', alvoId: e, detalhes: { tipo, modulos: lista } });
+  return { ok: true, modulos: lista };
 }
 
 // ── Etapa 22: catálogo global de seguradoras ─────────────────────────────────
@@ -400,6 +432,8 @@ async function recusar(quem, { id, motivo }) {
  *   catalogoAprovar  { id, nome? }  · catalogoEditar { id, nome?, cnpj?, susep?, apelidos?, ativa? }
  *   catalogoJuntar   { de, para }   · catalogoRecusar { id, motivo }
  *   catalogoCriar    { cnpj, nome, razaoSocial?, susep? }   (22.1: o admin cria direto)
+ *   Etapa 23 — módulos:
+ *   contaDefinirModulos { empresaId, tipo: 'tudo_ligado' | 'personalizado', modulos: [ids] }
  */
 const plataforma = onRequest((req, res) =>
   cors(req, res, async () => {
@@ -424,6 +458,8 @@ const plataforma = onRequest((req, res) =>
           return res.json(await importarDasCorretoras(quem));
         case 'catalogoUso':
           return res.json(await cat.usoDoNome((await entrada(corpo.id)).nome));
+        case 'contaDefinirModulos':
+          return res.json(await definirModulos(quem, corpo));
         case 'catalogoCriar':
           return res.json(await criar(quem, corpo));
         case 'catalogoAprovar':

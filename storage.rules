@@ -51,10 +51,19 @@ service firebase.storage {
         && !request.resource.contentType.matches('video/.*');
     }
 
+    // Etapa 23: sem conta da plataforma, ou plano "tudo_ligado", ou "videos" na lista.
+    function videosLigado(e) {
+      let p = /databases/(default)/documents/plataforma_contas/$(e);
+      return !firestore.exists(p)
+        || firestore.get(p).data.get('plano', {}).get('tipo', 'tudo_ligado') == 'tudo_ligado'
+        || 'videos' in firestore.get(p).data.get('modulos', []);
+    }
+
     // Vídeos dos sinistros — só vídeo e até 100 MB (teto de qualquer plano;
     // o limite do plano é conferido no app).
     match /corretoras/{e}/videos/{todos=**} {
       allow create, update: if membro(e)
+        && videosLigado(e) // Etapa 23: módulo "Vídeos do sinistro"
         && request.resource.contentType.matches('video/.*')
         && request.resource.size <= 100 * 1024 * 1024;
     }

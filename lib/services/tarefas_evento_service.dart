@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../utils/tarefas_evento.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
+import 'package:upgrade_seguros/services/plano_atual.dart'; // Etapa 23
 
 class TarefasEventoService {
   final FirebaseFirestore _db;
@@ -33,6 +34,7 @@ class TarefasEventoService {
   /// Conclui as tarefas [ids] com o [motivo]. [automatica] = concluída pelo
   /// sistema (fora da conta de prazo). Grava em lotes de 400.
   Future<int> concluir(Iterable<String> ids, {required String motivo, bool automatica = true}) async {
+    if (!PlanoAtual.tem('tarefas')) return 0; // Etapa 23: módulo desligado = nada a concluir
     final lista = ids.where((id) => id.isNotEmpty).toSet().toList();
     for (var i = 0; i < lista.length; i += 400) {
       final lote = _db.batch();
@@ -52,6 +54,7 @@ class TarefasEventoService {
   /// Excluir o atendimento: conclui todas as tarefas abertas dele.
   /// Nunca impede a exclusão (erro só vai para o log).
   Future<int> concluirTodasDoEvento(String claimId, {required String motivo}) async {
+    if (!PlanoAtual.tem('tarefas')) return 0; // Etapa 23
     try {
       final abertas = await abertasDoEvento(claimId);
       return await concluir(abertas.map((t) => t.id), motivo: motivo);
@@ -64,6 +67,7 @@ class TarefasEventoService {
   /// Nova comunicação de status/previsão: conclui as tarefas de contato
   /// anteriores do sinistro. Nunca impede a atualização.
   Future<int> concluirContatosAnteriores(String claimId, {required String motivo}) async {
+    if (!PlanoAtual.tem('tarefas')) return 0; // Etapa 23
     try {
       final abertas = await abertasDoEvento(claimId);
       return await concluir(TarefasEvento.contatosASubstituir(abertas).map((t) => t.id), motivo: motivo);
@@ -100,6 +104,7 @@ class TarefasEventoService {
 
   /// Conclui o que [analisarLimpeza] encontrou, cada uma com o seu motivo.
   Future<int> executarLimpeza(List<ItemLimpeza> itens) async {
+    if (!PlanoAtual.tem('tarefas')) return 0; // Etapa 23
     var total = 0;
     final porMotivo = <String, List<String>>{};
     for (final i in itens) {

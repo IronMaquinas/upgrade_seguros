@@ -48,6 +48,7 @@ import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
 import 'package:upgrade_seguros/widgets/campo_seguradora.dart'; // Etapa 20
 import 'package:upgrade_seguros/services/seguradoras_cadastradas.dart'; // Etapa 20
+import 'package:upgrade_seguros/services/plano_atual.dart'; // Etapa 23
 
  enum RelatoStep {
     situacao,
@@ -4107,7 +4108,7 @@ Future<void> _uploadDocumentoMaterialDamage(int danoIndex) async {
                   setState(() => _dragOver[cat] = val),
               isImageFile: _isImageFile,
               // Etapa 12: bloco de vídeos dentro de "Anexos e Documentos"
-              videos: PainelVideosAbertura(
+              videos: !PlanoAtual.tem('videos') ? null : PainelVideosAbertura( // Etapa 23
                 enviados: _videosEnviados,
                 pendentes: _videosPendentes,
                 progresso: _progressoVideos,

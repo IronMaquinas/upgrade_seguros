@@ -12,6 +12,8 @@ import 'assist_detail_screen.dart';
 import 'spreadsheet_assist_screen.dart';
 import 'spreadsheet_assist_residencial_screen.dart';
 import 'package:upgrade_seguros/widgets/relatorios_modelos.dart'; // Etapa 19b
+import 'package:upgrade_seguros/services/plano_atual.dart'; // Etapa 23
+import 'package:upgrade_seguros/screens/meu_plano_screen.dart'; // Etapa 23
 
 class AssistListScreen extends StatefulWidget {
   final List<String>? initialStatusFilter;
@@ -844,7 +846,9 @@ class AssistListScreenState extends State<AssistListScreen> {
             child: Padding(
               padding: const EdgeInsets.only(right: 4),
               child: OutlinedButton.icon(
-                onPressed: () => abrirRelatoriosComModelos(context, tipo: 'assistencia'),
+                onPressed: () => PlanoAtual.tem('relatorios_personalizados') // Etapa 23
+                    ? abrirRelatoriosComModelos(context, tipo: 'assistencia')
+                    : avisarForaDoPlano(context, 'relatorios_personalizados'),
                 icon: const Icon(Icons.file_download_outlined, size: 20),
                 label: Text(MediaQuery.of(context).size.width < 600 ? 'Exportar' : 'Exportar relatório'),
                 style: OutlinedButton.styleFrom(

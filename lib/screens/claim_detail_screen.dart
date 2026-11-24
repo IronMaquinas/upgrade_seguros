@@ -53,6 +53,8 @@ import 'package:upgrade_seguros/utils/perfil_corretora.dart'; // Etapa 17
 import 'package:upgrade_seguros/widgets/identificacao_atendimento.dart'; // Etapa 19b.4
 import 'package:upgrade_seguros/widgets/campo_seguradora.dart'; // Etapa 20
 import 'package:upgrade_seguros/services/seguradoras_cadastradas.dart'; // Etapa 20
+import 'package:upgrade_seguros/services/plano_atual.dart'; // Etapa 23
+import 'package:upgrade_seguros/screens/meu_plano_screen.dart'; // Etapa 23
 
 class ClaimDetailScreen extends StatefulWidget {
   final Claim claim;
@@ -3933,6 +3935,9 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                   const SizedBox(height: 16),
 
                                   // 🎬 VÍDEOS — Etapa 12: tocam numa janela sobre esta tela.
+                                  if (!PlanoAtual.tem('videos')) // Etapa 23
+                                    const ModuloBloqueado('videos', telaInteira: false)
+                                  else
                                   GaleriaVideosSinistro(
                                     documento: _currentClaim.id.isEmpty
                                         ? null
@@ -4664,7 +4669,9 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                               title: 'Lista de Tarefas',
                               icon: Icons.checklist,
                               color: Colors.orange,
-                              child: TaskListWidget(
+                              child: !PlanoAtual.tem('tarefas') // Etapa 23
+                                  ? const ModuloBloqueado('tarefas', telaInteira: false)
+                                  : TaskListWidget(
                                 numeroSinistro: _currentClaim.numeroSinistro.isNotEmpty
                                     ? _currentClaim.numeroSinistro
                                     : 'SEM_NUMERO',
@@ -4679,7 +4686,9 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                               title: 'Oficinas Envolvidas',
                               icon: Icons.build,
                               color: Colors.blue,
-                              child: WorkshopWidget(
+                              child: !PlanoAtual.tem('oficinas') // Etapa 23
+                                  ? const ModuloBloqueado('oficinas', telaInteira: false)
+                                  : WorkshopWidget(
                                 claimId: _currentClaim.id!,
                                 oficinas: _currentClaim.oficinas,
                                 clientNome: '',

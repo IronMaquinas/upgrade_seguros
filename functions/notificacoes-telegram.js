@@ -7,6 +7,7 @@ if (!admin.apps.length) {
 }
 
 const { defineSecret } = require("firebase-functions/params");
+const { ligado } = require("./modulos"); // Etapa 23
 
 // Etapa 15: o token do bot é um SEGREDO do Firebase (Secret Manager), não fica
 // mais em arquivo .env nem no git. Para cadastrar/trocar:
@@ -73,6 +74,9 @@ exports.verificarAssistenciasAtradasTelegram = onSchedule(
     // listDocuments() traz também corretoras que só têm subcoleções.
     const corretoras = await admin.firestore().collection("corretoras").listDocuments();
     for (const corretora of corretoras) {
+      // Etapa 23: só corretoras com o módulo "Avisos no Telegram" ligado
+      const conta = await admin.firestore().collection("plataforma_contas").doc(corretora.id).get();
+      if (!ligado(conta.exists ? conta.data() : null, "telegram")) continue;
       await verificarCorretora(corretora);
     }
   }

@@ -30,6 +30,8 @@ import 'package:upgrade_seguros/widgets/corrigir_seguradoras_dialog.dart'; // Et
 import 'package:upgrade_seguros/services/catalogo_seguradoras_service.dart'; // Etapa 22
 import 'package:upgrade_seguros/services/seguradoras_cadastradas.dart'; // Etapa 22
 import 'package:upgrade_seguros/widgets/nova_seguradora_dialog.dart'; // Etapa 22
+import 'package:upgrade_seguros/services/plano_atual.dart'; // Etapa 23
+import 'package:upgrade_seguros/screens/meu_plano_screen.dart'; // Etapa 23
 
 // ─── Paleta ──────────────────────────────────────────────────────────────────
 const _kBlue  = Color(0xFF1565C0);
@@ -317,6 +319,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                 ),
                 
                 // ─── ABA OFICINAS (NOVA) ───
+                if (!PlanoAtual.tem('oficinas')) // Etapa 23
+                  const ModuloBloqueado('oficinas')
+                else
                 _AbaOfficinas(
                   service: _workshopService,
                   busca: _buscaOfficina,

@@ -9,6 +9,7 @@ const store = {};
 const tokens = {};
 const contas = {};
 const SV = { __serverTimestamp: true };
+const APAGAR = { __apagarCampo: true }; // Etapa 23: FieldValue.delete()
 let proximoId = 0; // Etapa 21: doc() sem id
 
 function docRef(path) {
@@ -24,6 +25,7 @@ function docRef(path) {
     async update(v) {
       if (!store[path]) throw new Error('NOT_FOUND ' + path);
       store[path] = { ...store[path], ...v };
+      for (const k of Object.keys(v)) if (v[k] === APAGAR) delete store[path][k];
     },
     async delete() { delete store[path]; },
     collection: (nome) => colRef(`${path}/${nome}`),
@@ -122,7 +124,7 @@ const balde = {
 
 const firestore = Object.assign(
   () => ({ collection: (n) => colRef(n), doc: (p) => docRef(p), batch, runTransaction }),
-  { FieldValue: { serverTimestamp: () => SV } },
+  { FieldValue: { serverTimestamp: () => SV, delete: () => APAGAR } },
 );
 
 const fakeAdmin = {

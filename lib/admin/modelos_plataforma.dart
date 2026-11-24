@@ -10,6 +10,8 @@ class ContaPlataforma {
   final bool cortesia;
   final String observacao;
   final DateTime? testeAte;
+  /// Etapa 23: módulos ligados (null = tudo ligado).
+  final List<String>? modulos;
 
   const ContaPlataforma({
     required this.situacao,
@@ -18,6 +20,7 @@ class ContaPlataforma {
     this.cortesia = false,
     this.observacao = '',
     this.testeAte,
+    this.modulos,
   });
 
   factory ContaPlataforma.deJson(Map<String, dynamic> j) {
@@ -29,6 +32,7 @@ class ContaPlataforma {
       cortesia: j['cortesia'] == true,
       observacao: (j['observacao'] ?? '') as String,
       testeAte: DateTime.tryParse((j['testeAte'] ?? '') as String),
+      modulos: j['modulos'] is List ? [for (final m in j['modulos'] as List) '$m'] : null,
     );
   }
 }
@@ -116,6 +120,7 @@ String rotuloAcao(String a) => switch (a) {
       'admin_adicionado' => 'Admin adicionado',
       'admin_removido' => 'Admin removido',
       'catalogo_importado' => 'Importou o catálogo de seguradoras',
+      'modulos_definidos' => 'Definiu os módulos de uma corretora',
       'seguradora_criada' => 'Criou seguradora',
       'seguradora_aprovada' => 'Aprovou seguradora',
       'seguradora_editada' => 'Editou seguradora',

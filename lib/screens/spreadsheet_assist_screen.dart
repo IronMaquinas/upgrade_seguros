@@ -37,6 +37,8 @@ import 'package:upgrade_seguros/models/lancamento_model.dart'; // Etapa 19a
 import 'package:upgrade_seguros/utils/gatilho.dart' show GatilhoApolice; // Etapa 19a
 import 'package:upgrade_seguros/widgets/campo_seguradora.dart'; // Etapa 20
 import 'package:upgrade_seguros/services/seguradoras_cadastradas.dart'; // Etapa 20
+import 'package:upgrade_seguros/services/plano_atual.dart'; // Etapa 23
+import 'package:upgrade_seguros/screens/meu_plano_screen.dart'; // Etapa 23
 
 class SpreadsheetAssistScreen extends StatefulWidget {
   final String tipoAssistencia;
@@ -2055,6 +2057,9 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
                 color: const Color(0xFF1565C0),
                 title: 'Tarefas & Agendamentos',
                 children: [
+                  if (!PlanoAtual.tem('tarefas')) // Etapa 23
+                    const ModuloBloqueado('tarefas', telaInteira: false)
+                  else
                   TaskListWidget(
                     numeroSinistro: _savedNumero ?? '',
                     clientId: _cliente?.id ?? '',

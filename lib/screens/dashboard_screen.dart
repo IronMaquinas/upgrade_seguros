@@ -24,6 +24,8 @@ import '../models/client_model.dart';
 import '../screens/claim_list_screen.dart';
 import '../screens/assist_list_screen.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
+import 'package:upgrade_seguros/services/plano_atual.dart'; // Etapa 23
+import 'package:upgrade_seguros/screens/meu_plano_screen.dart'; // Etapa 23
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -93,6 +95,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         initialSlaFilter: _claimListParams?['initialSlaFilter'] ?? 'Todos',
       );
     case 2:
+      if (!PlanoAtual.tem('assistencias')) return const ModuloBloqueado('assistencias'); // Etapa 23
       return AssistListScreen(
         key: ValueKey('assist_${DateTime.now().millisecondsSinceEpoch}'),
         initialStatusFilter: _assistListParams?['initialStatusFilter'],
@@ -106,8 +109,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           },
         );
       case 4:
+        if (!PlanoAtual.tem('tarefas')) return const ModuloBloqueado('tarefas'); // Etapa 23
         return TaskListScreen();
       case 5:
+        if (!PlanoAtual.tem('relatorios')) return const ModuloBloqueado('relatorios'); // Etapa 23
         return ReportsScreen();
       case 6:
         return const SettingsScreen();
@@ -135,6 +140,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
       debugPrint('Erro ao verificar apólices vencendo: $e');
     }
   }
+
+  /// Etapa 23: ícone do menu com cadeado quando o módulo está fora do plano.
+  Widget _iconeModulo(IconData icone, String modulo) => PlanoAtual.tem(modulo)
+      ? Icon(icone)
+      : Stack(clipBehavior: Clip.none, children: [
+          Icon(icone, color: Colors.grey.shade400),
+          Positioned(right: -4, bottom: -4, child: Icon(Icons.lock, size: 12, color: Colors.grey.shade600)),
+        ]);
 
   void _onItemTapped(int index) {
     setState(() {
@@ -607,6 +620,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // MODAL PARA ASSISTÊNCIA
   // Etapa 06: modal padrão compartilhado com a lista de Assistências.
   Future<void> _showAssistTipoPickerGlobal() async {
+    if (!PlanoAtual.tem('assistencias')) return avisarForaDoPlano(context, 'assistencias'); // Etapa 23
     final tipo = await mostrarSeletorTipoAssistencia(
       context,
       onVoltar: _showNewItemDialog, // reabre "Novo Registro"
@@ -650,6 +664,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     if (tipo == 'sinistro' && mounted) {
         await _showRamoPickerGlobal();
+      } else if (tipo == 'assistencia' && mounted && !PlanoAtual.tem('assistencias')) {
+        avisarForaDoPlano(context, 'assistencias'); // Etapa 23
       } else if (tipo == 'assistencia' && mounted) {
         await _showAssistTipoPickerGlobal();
       }
@@ -706,9 +722,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   color: Color(0xFF1565C0), size: 20),
               tooltip: 'Configurações',
               onPressed: () {
-                setState(() => _selectedIndex = 5);
+                setState(() => _selectedIndex = 6); // Etapa 23: era 5 (abria Relatórios)
               },
             ),
+          // Etapa 23: Meu plano
+          IconButton(
+            icon: const Icon(Icons.workspace_premium_outlined, color: Color(0xFF1565C0), size: 20),
+            tooltip: 'Meu plano',
+            onPressed: () => abrirMeuPlano(context),
+          ),
           // BOTÃO LOGOUT (EXISTENTE)
           IconButton(
             icon: const Icon(Icons.logout_outlined,
@@ -732,6 +754,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               );
               if (shouldLogout == true) {
                 EmpresaAtual.limpar(); // Etapa 16
+                PlanoAtual.limpar(); // Etapa 23
                 await FirebaseAuth.instance.signOut();
                 if (context.mounted) {
                   Navigator.of(context).pushAndRemoveUntil(
@@ -775,25 +798,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
 
                     // ASSISTÊNCIAS
-                    const NavigationRailDestination(
-                      icon: Icon(Icons.emergency_share_outlined),
-                      selectedIcon: Icon(Icons.emergency_share),
-                      label: Text('Assistências'),
+                    NavigationRailDestination(
+                      icon: _iconeModulo(Icons.emergency_share_outlined, 'assistencias'),
+                      selectedIcon: _iconeModulo(Icons.emergency_share, 'assistencias'),
+                      label: const Text('Assistências'),
                     ),
 
                     NavigationRailDestination(
                       icon: _clientesIcon(),
                       label: const Text('Clientes'),
                     ),
-                    const NavigationRailDestination(
-                      icon: Icon(Icons.checklist_outlined),
-                      selectedIcon: Icon(Icons.checklist),
-                      label: Text('Tarefas'),
+                    NavigationRailDestination(
+                      icon: _iconeModulo(Icons.checklist_outlined, 'tarefas'),
+                      selectedIcon: _iconeModulo(Icons.checklist, 'tarefas'),
+                      label: const Text('Tarefas'),
                     ),
-                    const NavigationRailDestination(
-                      icon: Icon(Icons.bar_chart_outlined),
-                      selectedIcon: Icon(Icons.bar_chart),
-                      label: Text('Relatórios'),
+                    NavigationRailDestination(
+                      icon: _iconeModulo(Icons.bar_chart_outlined, 'relatorios'),
+                      selectedIcon: _iconeModulo(Icons.bar_chart, 'relatorios'),
+                      label: const Text('Relatórios'),
                     ),
                     const NavigationRailDestination(
                       icon: Icon(Icons.settings_outlined),
@@ -832,22 +855,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
 
                 // ASSISTÊNCIAS
-                const BottomNavigationBarItem(
-                  icon: Icon(Icons.emergency_share_outlined),
-                  activeIcon: Icon(Icons.emergency_share),
+                BottomNavigationBarItem(
+                  icon: _iconeModulo(Icons.emergency_share_outlined, 'assistencias'),
+                  activeIcon: _iconeModulo(Icons.emergency_share, 'assistencias'),
                   label: 'Assistências',
                 ),
 
                 BottomNavigationBarItem(
                     icon: _clientesIcon(), label: 'Clientes'),
-                const BottomNavigationBarItem(
-                  icon: Icon(Icons.checklist_outlined),
-                  activeIcon: Icon(Icons.checklist),
+                BottomNavigationBarItem(
+                  icon: _iconeModulo(Icons.checklist_outlined, 'tarefas'),
+                  activeIcon: _iconeModulo(Icons.checklist, 'tarefas'),
                   label: 'Tarefas',
                 ),
-                const BottomNavigationBarItem(
-                  icon: Icon(Icons.bar_chart_outlined),
-                  activeIcon: Icon(Icons.bar_chart),
+                BottomNavigationBarItem(
+                  icon: _iconeModulo(Icons.bar_chart_outlined, 'relatorios'),
+                  activeIcon: _iconeModulo(Icons.bar_chart, 'relatorios'),
                   label: 'Relatórios',
                 ),
                 const BottomNavigationBarItem(

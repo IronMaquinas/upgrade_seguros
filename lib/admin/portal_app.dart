@@ -10,7 +10,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import 'package:upgrade_seguros/utils/modulos.dart';
+
 import 'aba_seguradoras_portal.dart'; // Etapa 22
+import 'modulos_corretora_dialog.dart'; // Etapa 23
 import 'plataforma_api.dart';
 
 const _kEscuro = Color(0xFF263238);
@@ -435,11 +438,29 @@ class _Corretoras extends StatelessWidget {
             const Divider(height: 20),
             linha('Situação', rotuloSituacao(c.conta?.situacao ?? '')),
             linha('Plano', c.conta == null ? '' : '${c.conta!.planoNome}${c.conta!.cortesia ? ' (cortesia)' : ''}'),
+            // Etapa 23
+            if (c.conta != null)
+              linha('Módulos', c.conta!.modulos == null
+                  ? 'todos'
+                  : c.conta!.modulos!.isEmpty
+                      ? 'só o básico'
+                      : c.conta!.modulos!.map((m) => Modulos.porId(m)?.nome ?? m).join(', ')),
             if (c.conta?.testeAte != null) linha('Teste até', d.format(c.conta!.testeAte!)),
             if ((c.conta?.observacao ?? '').isNotEmpty) linha('Observação', c.conta!.observacao),
           ]),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fechar'))],
+        actions: [
+          if (c.conta != null)
+            TextButton.icon(
+              icon: const Icon(Icons.tune, size: 18),
+              label: const Text('Módulos do plano'),
+              onPressed: () async {
+                Navigator.pop(ctx);
+                if (await abrirModulosDaCorretora(context, c)) await onRecarregar();
+              },
+            ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fechar')),
+        ],
       ),
     );
   }
