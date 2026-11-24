@@ -3,6 +3,8 @@
 // Dados que a Function "plataforma" devolve ao portal, rótulos e o resumo da
 // Visão geral. Sem Firebase: testado em test/modelos_plataforma_test.dart.
 
+import 'package:upgrade_seguros/utils/planos.dart';
+
 class ContaPlataforma {
   final String situacao;
   final String planoNome;
@@ -12,6 +14,11 @@ class ContaPlataforma {
   final DateTime? testeAte;
   /// Etapa 23: módulos ligados (null = tudo ligado).
   final List<String>? modulos;
+  // Etapa 24: plano-modelo (planoTipo 'modelo'), preço, franquias, cortesia com validade
+  final String planoId;
+  final int precoCentavos;
+  final Map<String, Franquia> franquias;
+  final DateTime? cortesiaAte;
 
   const ContaPlataforma({
     required this.situacao,
@@ -21,6 +28,10 @@ class ContaPlataforma {
     this.observacao = '',
     this.testeAte,
     this.modulos,
+    this.planoId = '',
+    this.precoCentavos = 0,
+    this.franquias = const {},
+    this.cortesiaAte,
   });
 
   factory ContaPlataforma.deJson(Map<String, dynamic> j) {
@@ -33,6 +44,10 @@ class ContaPlataforma {
       observacao: (j['observacao'] ?? '') as String,
       testeAte: DateTime.tryParse((j['testeAte'] ?? '') as String),
       modulos: j['modulos'] is List ? [for (final m in j['modulos'] as List) '$m'] : null,
+      planoId: (plano['planoId'] ?? '') as String,
+      precoCentavos: (plano['precoCentavos'] as num?)?.toInt() ?? 0,
+      franquias: Planos.franquiasDe(plano['franquias']),
+      cortesiaAte: DateTime.tryParse((j['cortesiaAte'] ?? '') as String)?.toLocal(),
     );
   }
 }
@@ -121,6 +136,10 @@ String rotuloAcao(String a) => switch (a) {
       'admin_removido' => 'Admin removido',
       'catalogo_importado' => 'Importou o catálogo de seguradoras',
       'modulos_definidos' => 'Definiu os módulos de uma corretora',
+      'plano_criado' => 'Criou plano',
+      'plano_editado' => 'Editou plano',
+      'plano_excluido' => 'Excluiu plano',
+      'plano_da_corretora' => 'Definiu o plano de uma corretora',
       'seguradora_criada' => 'Criou seguradora',
       'seguradora_aprovada' => 'Aprovou seguradora',
       'seguradora_editada' => 'Editou seguradora',
@@ -159,6 +178,42 @@ class ResumoPlataforma {
     }
     return ResumoPlataforma(corretoras: lista.length, semConta: sem, porSituacao: por, usuarios: usu, atendimentos: atd);
   }
+}
+
+// ── Etapa 24: planos-modelo ──────────────────────────────────────────────────
+
+class PlanoModelo {
+  final String id;
+  final String nome;
+  final String descricao;
+  final bool ativo;
+  final List<String> modulos;
+  final int precoCentavos;
+  final Map<String, Franquia> franquias;
+  /// Quantas corretoras estão neste plano.
+  final int corretoras;
+
+  const PlanoModelo({
+    this.id = '',
+    required this.nome,
+    this.descricao = '',
+    this.ativo = true,
+    this.modulos = const [],
+    this.precoCentavos = 0,
+    this.franquias = const {},
+    this.corretoras = 0,
+  });
+
+  factory PlanoModelo.deJson(Map<String, dynamic> j) => PlanoModelo(
+        id: (j['id'] ?? '') as String,
+        nome: (j['nome'] ?? '') as String,
+        descricao: (j['descricao'] ?? '') as String,
+        ativo: j['ativo'] != false,
+        modulos: j['modulos'] is List ? [for (final m in j['modulos'] as List) '$m'] : const [],
+        precoCentavos: (j['precoCentavos'] as num?)?.toInt() ?? 0,
+        franquias: Planos.franquiasDe(j['franquias']),
+        corretoras: (j['corretoras'] as num?)?.toInt() ?? 0,
+      );
 }
 
 // ── Etapa 22: catálogo global de seguradoras ─────────────────────────────────

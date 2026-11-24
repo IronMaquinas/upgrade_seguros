@@ -1,5 +1,6 @@
-// lib/screens/meu_plano_screen.dart — Etapa 23
+// lib/screens/meu_plano_screen.dart — Etapa 23 · Etapa 24: preço, franquias, cortesia
 //
+//   • BotaoMeuPlano    atalho na barra do topo (com o nome do plano)
 //   • MeuPlanoScreen   situação, plano e o que está ligado / fora do plano
 //   • ModuloBloqueado  o que aparece no lugar de uma tela fora do plano
 //   • abrirMeuPlano    atalho
@@ -8,12 +9,49 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:upgrade_seguros/services/plano_atual.dart';
 import 'package:upgrade_seguros/utils/modulos.dart';
+import 'package:upgrade_seguros/utils/planos.dart';
 
 const _kAzul = Color(0xFF1565C0);
 const _kVerde = Color(0xFF2E7D32);
 
 Future<void> abrirMeuPlano(BuildContext context) =>
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MeuPlanoScreen()));
+
+/// Etapa 24: na barra do topo — botão com o nome do plano (no celular, só o ícone).
+class BotaoMeuPlano extends StatelessWidget {
+  final bool compacto;
+  const BotaoMeuPlano({super.key, this.compacto = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: PlanoAtual.versao,
+      builder: (context, _, __) {
+        if (compacto) {
+          return IconButton(
+            icon: const Icon(Icons.workspace_premium_outlined, color: _kAzul, size: 24),
+            tooltip: 'Meu plano: ${PlanoAtual.nomePlano}',
+            onPressed: () => abrirMeuPlano(context),
+          );
+        }
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+          child: OutlinedButton.icon(
+            onPressed: () => abrirMeuPlano(context),
+            icon: const Icon(Icons.workspace_premium_outlined, size: 18),
+            label: Text('Plano: ${PlanoAtual.nomePlano}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _kAzul,
+              side: BorderSide(color: _kAzul.withOpacity(0.4)),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
 
 String rotuloSituacaoConta(String s) => switch (s) {
       'teste' => 'Em teste',
@@ -57,15 +95,54 @@ class MeuPlanoScreen extends StatelessWidget {
                     Text(
                       [
                         rotuloSituacaoConta(PlanoAtual.situacao),
-                        if (PlanoAtual.cortesia) 'cortesia',
+                        if (PlanoAtual.cortesia)
+                          PlanoAtual.cortesiaAte == null ? 'cortesia' : 'cortesia até ${f.format(PlanoAtual.cortesiaAte!)}',
                         if (PlanoAtual.testeAte != null) 'teste até ${f.format(PlanoAtual.testeAte!)}',
                       ].join(' · '),
                       style: TextStyle(color: Colors.grey.shade700),
                     ),
+                    if (PlanoAtual.descricao.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(PlanoAtual.descricao, style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700)),
+                    ],
                   ]),
                 ),
+                // Etapa 24: preço
+                if (PlanoAtual.precoCentavos > 0)
+                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                    Text(Planos.reais(PlanoAtual.precoCentavos),
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: PlanoAtual.cortesia ? Colors.grey.shade500 : _kAzul,
+                          decoration: PlanoAtual.cortesia ? TextDecoration.lineThrough : null,
+                        )),
+                    Text(PlanoAtual.cortesia ? 'por mês · cortesia' : 'por mês', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                  ]),
               ]),
             ),
+            // Etapa 24: franquias (só as que têm limite)
+            if (Planos.metricas.any((m) => !(PlanoAtual.franquias[m.id]?.semLimite ?? true))) ...[
+              const SizedBox(height: 18),
+              const Text('O plano inclui', style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF1A1A2E))),
+              const SizedBox(height: 6),
+              Container(
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
+                child: Column(children: [
+                  for (final m in Planos.metricas)
+                    if (!(PlanoAtual.franquias[m.id]?.semLimite ?? true))
+                      ListTile(
+                        dense: true,
+                        leading: Icon(
+                          switch (m.id) { 'usuarios' => Icons.people_outline, 'gb_video' => Icons.videocam_outlined, _ => Icons.cloud_outlined },
+                          color: _kAzul,
+                        ),
+                        title: Text(m.nome, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        subtitle: Text(Planos.descreverFranquia(m, PlanoAtual.franquias[m.id]!)),
+                      ),
+                ]),
+              ),
+            ],
             const SizedBox(height: 16),
             Text('Sempre incluído: Início, Sinistros, Clientes e apólices, Configurações e Usuários.',
                 style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700)),

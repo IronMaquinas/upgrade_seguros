@@ -725,12 +725,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 setState(() => _selectedIndex = 6); // Etapa 23: era 5 (abria Relatórios)
               },
             ),
-          // Etapa 23: Meu plano
-          IconButton(
-            icon: const Icon(Icons.workspace_premium_outlined, color: Color(0xFF1565C0), size: 20),
-            tooltip: 'Meu plano',
-            onPressed: () => abrirMeuPlano(context),
-          ),
+          // Etapa 23: Meu plano · Etapa 24: botão com o nome do plano (no celular, ícone maior)
+          BotaoMeuPlano(compacto: isMobileDevice),
           // BOTÃO LOGOUT (EXISTENTE)
           IconButton(
             icon: const Icon(Icons.logout_outlined,

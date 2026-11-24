@@ -7,9 +7,11 @@
 import 'dart:convert';
 
 import 'package:upgrade_seguros/services/funcoes_nuvem.dart';
+import 'package:upgrade_seguros/utils/planos.dart';
 
 import 'modelos_plataforma.dart';
 export 'modelos_plataforma.dart';
+export 'package:upgrade_seguros/utils/planos.dart';
 
 class AcessoNegado implements Exception {
   final String mensagem;
@@ -47,6 +49,63 @@ class PlataformaApi {
         'empresaId': empresaId,
         'tipo': modulos == null ? 'tudo_ligado' : 'personalizado',
         if (modulos != null) 'modulos': modulos,
+      });
+
+  // ── Etapa 24: planos ──
+  static Future<List<PlanoModelo>> planos() async {
+    final j = await _chamar({'acao': 'planos'});
+    return [for (final p in (j['planos'] as List)) PlanoModelo.deJson(Map<String, dynamic>.from(p as Map))];
+  }
+
+  /// Devolve quantas corretoras foram atualizadas (edição de um plano em uso).
+  static Future<int> planoSalvar({
+    String? id,
+    required String nome,
+    String descricao = '',
+    bool ativo = true,
+    required List<String> modulos,
+    required int precoCentavos,
+    required Map<String, Franquia> franquias,
+  }) async {
+    final j = await _chamar({
+      'acao': 'planoSalvar',
+      if (id != null && id.isNotEmpty) 'id': id,
+      'nome': nome,
+      'descricao': descricao,
+      'ativo': ativo,
+      'modulos': modulos,
+      'precoCentavos': precoCentavos,
+      'franquias': Planos.franquiasParaMapa(franquias),
+    });
+    return (j['contas'] as num?)?.toInt() ?? 0;
+  }
+
+  static Future<void> planoExcluir(String id) => _chamar({'acao': 'planoExcluir', 'id': id});
+
+  /// [tipo]: 'tudo_ligado' · 'modelo' (com [planoId]) · 'personalizado' (módulos, preço, franquias).
+  /// [cortesiaAte]: 'AAAA-MM-DD' ou null (sem validade).
+  static Future<void> contaDefinirPlano(
+    String empresaId, {
+    required String tipo,
+    String? planoId,
+    List<String>? modulos,
+    int? precoCentavos,
+    Map<String, Franquia>? franquias,
+    required bool cortesia,
+    String? cortesiaAte,
+    String motivo = '',
+  }) =>
+      _chamar({
+        'acao': 'contaDefinirPlano',
+        'empresaId': empresaId,
+        'tipo': tipo,
+        if (planoId != null) 'planoId': planoId,
+        if (modulos != null) 'modulos': modulos,
+        if (precoCentavos != null) 'precoCentavos': precoCentavos,
+        if (franquias != null) 'franquias': Planos.franquiasParaMapa(franquias),
+        'cortesia': cortesia,
+        'cortesiaAte': cortesiaAte,
+        'motivo': motivo,
       });
 
   // ── Etapa 22: catálogo de seguradoras ──

@@ -11,6 +11,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart';
 import 'package:upgrade_seguros/utils/modulos.dart';
+import 'package:upgrade_seguros/utils/planos.dart';
 
 class PlanoAtual {
   PlanoAtual._();
@@ -53,6 +54,24 @@ class PlanoAtual {
   static String get situacao => (_conta?['situacao'] ?? '') as String;
 
   static bool get cortesia => _conta?['cortesia'] == true;
+
+  // ── Etapa 24: tipo, preço, franquias e cortesia com validade ──
+  static Map<String, dynamic> get _plano =>
+      _conta?['plano'] is Map ? Map<String, dynamic>.from(_conta!['plano'] as Map) : const <String, dynamic>{};
+
+  /// 'tudo_ligado' · 'modelo' · 'personalizado'
+  static String get tipo => (_plano['tipo'] ?? 'tudo_ligado') as String;
+
+  static String get descricao => (_plano['descricao'] ?? '') as String;
+
+  static int get precoCentavos => tipo == 'tudo_ligado' ? 0 : (_plano['precoCentavos'] as num?)?.toInt() ?? 0;
+
+  static Map<String, Franquia> get franquias => Planos.franquiasDe(_plano['franquias']);
+
+  static DateTime? get cortesiaAte {
+    final v = _conta?['cortesiaAte'];
+    return v is Timestamp ? v.toDate() : null;
+  }
 
   static DateTime? get testeAte {
     final v = _conta?['testeAte'];

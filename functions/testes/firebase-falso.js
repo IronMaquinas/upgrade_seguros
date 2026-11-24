@@ -124,7 +124,10 @@ const balde = {
 
 const firestore = Object.assign(
   () => ({ collection: (n) => colRef(n), doc: (p) => docRef(p), batch, runTransaction }),
-  { FieldValue: { serverTimestamp: () => SV, delete: () => APAGAR } },
+  {
+    FieldValue: { serverTimestamp: () => SV, delete: () => APAGAR },
+    Timestamp: { fromDate: (d) => ({ toDate: () => d }) }, // Etapa 24
+  },
 );
 
 const fakeAdmin = {

@@ -29,6 +29,7 @@ const cors = require('cors')({ origin: true });
 
 const cat = require('./catalogo'); // Etapa 22
 const mod = require('./modulos'); // Etapa 23
+const planos = require('./planos'); // Etapa 24
 
 if (!admin.apps.length) admin.initializeApp();
 const db = () => admin.firestore();
@@ -89,6 +90,7 @@ function resumoConta(c) {
     situacao: c.situacao || '',
     plano: c.plano || null,
     cortesia: c.cortesia === true,
+    cortesiaAte: data(c.cortesiaAte), // Etapa 24
     modulos: Array.isArray(c.modulos) ? c.modulos : null, // Etapa 23 (null = tudo ligado)
     observacao: c.observacao || '',
     testeAte: data(c.testeAte),
@@ -434,6 +436,12 @@ async function recusar(quem, { id, motivo }) {
  *   catalogoCriar    { cnpj, nome, razaoSocial?, susep? }   (22.1: o admin cria direto)
  *   Etapa 23 — módulos:
  *   contaDefinirModulos { empresaId, tipo: 'tudo_ligado' | 'personalizado', modulos: [ids] }
+ *   Etapa 24 — planos (functions/planos.js):
+ *   planos                           → { planos: [...] }  (com nº de corretoras em cada)
+ *   planoSalvar  { id?, nome, descricao, ativo, modulos, precoCentavos, franquias }
+ *   planoExcluir { id }              (só sem corretoras)
+ *   contaDefinirPlano { empresaId, tipo: 'tudo_ligado'|'modelo'|'personalizado', planoId?, modulos?,
+ *                       precoCentavos?, franquias?, cortesia?, cortesiaAte? }
  */
 const plataforma = onRequest((req, res) =>
   cors(req, res, async () => {
@@ -460,6 +468,14 @@ const plataforma = onRequest((req, res) =>
           return res.json(await cat.usoDoNome((await entrada(corpo.id)).nome));
         case 'contaDefinirModulos':
           return res.json(await definirModulos(quem, corpo));
+        case 'planos':
+          return res.json({ planos: await planos.listar() });
+        case 'planoSalvar':
+          return res.json(await planos.salvar(quem, corpo, auditar));
+        case 'planoExcluir':
+          return res.json(await planos.excluir(quem, corpo, auditar));
+        case 'contaDefinirPlano':
+          return res.json(await planos.definirDaConta(quem, corpo, auditar));
         case 'catalogoCriar':
           return res.json(await criar(quem, corpo));
         case 'catalogoAprovar':
@@ -474,7 +490,7 @@ const plataforma = onRequest((req, res) =>
           return res.status(400).json({ erro: 'Ação desconhecida' });
       }
     } catch (e) {
-      if (e instanceof ErroDeUso) return res.status(e.codigo).json({ erro: e.message });
+      if (e instanceof ErroDeUso || e instanceof planos.ErroDePlano) return res.status(e.codigo).json({ erro: e.message });
       logger.error(e);
       if (!res.headersSent) res.status(500).json({ erro: 'Erro interno' });
     }

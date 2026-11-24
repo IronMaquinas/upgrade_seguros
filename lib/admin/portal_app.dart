@@ -1,7 +1,7 @@
 // lib/admin/portal_app.dart — Etapa 21: telas do portal da plataforma
 //
 //   PortaoPlataforma  login → confere no servidor se é admin → portal
-//   _Portal           menu lateral: Visão geral · Corretoras · Auditoria
+//   _Portal           menu lateral: Visão geral · Corretoras · Planos · Seguradoras · Auditoria
 //
 // Se a conta não for admin da plataforma (ou for usuário de uma corretora), o
 // servidor recusa e o portal sai na hora.
@@ -12,8 +12,9 @@ import 'package:intl/intl.dart';
 
 import 'package:upgrade_seguros/utils/modulos.dart';
 
+import 'aba_planos_portal.dart'; // Etapa 24
 import 'aba_seguradoras_portal.dart'; // Etapa 22
-import 'modulos_corretora_dialog.dart'; // Etapa 23
+import 'modulos_corretora_dialog.dart'; // Etapa 23 / 24: plano da corretora
 import 'plataforma_api.dart';
 
 const _kEscuro = Color(0xFF263238);
@@ -222,6 +223,7 @@ class _PortalState extends State<_Portal> {
     final telas = [
       _VisaoGeral(corretoras: _corretoras, erro: _erro, onRecarregar: _carregar),
       _Corretoras(corretoras: _corretoras, erro: _erro, onRecarregar: _carregar),
+      const AbaPlanosPortal(), // Etapa 24
       const AbaSeguradorasPortal(), // Etapa 22
       const _Auditoria(),
     ];
@@ -245,6 +247,7 @@ class _PortalState extends State<_Portal> {
           destinations: const [
             NavigationRailDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: Text('Visão geral')),
             NavigationRailDestination(icon: Icon(Icons.business_outlined), selectedIcon: Icon(Icons.business), label: Text('Corretoras')),
+            NavigationRailDestination(icon: Icon(Icons.workspace_premium_outlined), selectedIcon: Icon(Icons.workspace_premium), label: Text('Planos')),
             NavigationRailDestination(icon: Icon(Icons.shield_outlined), selectedIcon: Icon(Icons.shield), label: Text('Seguradoras')),
             NavigationRailDestination(icon: Icon(Icons.history), label: Text('Auditoria')),
           ],
@@ -365,7 +368,7 @@ class _VisaoGeralState extends State<_VisaoGeral> {
         ),
       ],
       const SizedBox(height: 24),
-      Text('Em breve: planos e módulos, cadastro de novas corretoras com teste grátis, receita.',
+      Text('Em breve: cadastro de novas corretoras com teste grátis, assinatura e receita.',
           style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
     ]);
   }
@@ -399,6 +402,7 @@ class _Corretoras extends StatelessWidget {
             leading: CircleAvatar(backgroundColor: _kEscuro.withOpacity(0.08), child: const Icon(Icons.business, color: _kEscuro)),
             title: Text(c.nome, style: const TextStyle(fontWeight: FontWeight.w600)),
             subtitle: Text([
+              if (c.conta != null) _rotuloPlano(c.conta!), // Etapa 24
               if (c.cnpj.isNotEmpty) c.cnpj,
               '${n(c.usuarios)} usuário(s)',
               '${n(c.sinistros)} sinistro(s)',
@@ -413,6 +417,7 @@ class _Corretoras extends StatelessWidget {
 
   void _detalhe(BuildContext context, CorretoraPlataforma c) {
     final d = DateFormat('dd/MM/yyyy');
+    String n(int? v) => v == null ? '–' : '$v';
     Widget linha(String r, String v) => Padding(
           padding: const EdgeInsets.symmetric(vertical: 3),
           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -437,7 +442,19 @@ class _Corretoras extends StatelessWidget {
             linha('Identificador', c.id),
             const Divider(height: 20),
             linha('Situação', rotuloSituacao(c.conta?.situacao ?? '')),
-            linha('Plano', c.conta == null ? '' : '${c.conta!.planoNome}${c.conta!.cortesia ? ' (cortesia)' : ''}'),
+            linha('Plano', c.conta == null ? '' : _rotuloPlano(c.conta!)),
+            // Etapa 24: preço, franquias e cortesia
+            if (c.conta != null && c.conta!.planoTipo != 'tudo_ligado' && c.conta!.planoTipo.isNotEmpty)
+              linha('Preço', c.conta!.precoCentavos > 0 ? '${Planos.reais(c.conta!.precoCentavos)}/mês' : 'sem mensalidade'),
+            if (c.conta != null && c.conta!.cortesia)
+              linha('Cortesia', c.conta!.cortesiaAte == null ? 'sem data de fim' : 'até ${d.format(c.conta!.cortesiaAte!)}'),
+            if (c.conta != null)
+              for (final m in Planos.metricas)
+                if (!(c.conta!.franquias[m.id]?.semLimite ?? true))
+                  linha(m.nome, m.id == 'usuarios'
+                      ? '${n(c.usuarios)} de ${c.conta!.franquias[m.id]!.incluido}'
+                          '${(c.usuarios ?? 0) > c.conta!.franquias[m.id]!.incluido! ? '  ⚠ acima da franquia' : ''}'
+                      : Planos.descreverFranquia(m, c.conta!.franquias[m.id]!)),
             // Etapa 23
             if (c.conta != null)
               linha('Módulos', c.conta!.modulos == null
@@ -452,11 +469,11 @@ class _Corretoras extends StatelessWidget {
         actions: [
           if (c.conta != null)
             TextButton.icon(
-              icon: const Icon(Icons.tune, size: 18),
-              label: const Text('Módulos do plano'),
+              icon: const Icon(Icons.workspace_premium_outlined, size: 18),
+              label: const Text('Plano da corretora'),
               onPressed: () async {
                 Navigator.pop(ctx);
-                if (await abrirModulosDaCorretora(context, c)) await onRecarregar();
+                if (await abrirPlanoDaCorretora(context, c)) await onRecarregar();
               },
             ),
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fechar')),
@@ -464,6 +481,13 @@ class _Corretoras extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Etapa 24: "Essencial · R$ 199,00/mês" · "Tudo ligado (cortesia)"
+String _rotuloPlano(ContaPlataforma c) {
+  final nome = c.planoNome.isEmpty ? 'Tudo ligado' : c.planoNome;
+  final preco = c.planoTipo != 'tudo_ligado' && c.precoCentavos > 0 ? ' · ${Planos.reais(c.precoCentavos)}/mês' : '';
+  return '$nome$preco${c.cortesia ? ' (cortesia)' : ''}';
 }
 
 class _ChipSituacao extends StatelessWidget {
