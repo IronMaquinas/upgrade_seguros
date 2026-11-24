@@ -43,6 +43,8 @@ class Modulos {
     Modulo('relatorios_personalizados', 'Relatórios personalizados', 'Gestão', 'Modelos de relatório salvos, exportados em PDF e Excel.'),
     Modulo('nps', 'Pesquisa de satisfação (NPS)', 'Comunicação', 'Envio de pesquisa ao cliente depois do atendimento.', dependeDe: ['assistencias']),
     Modulo('telegram', 'Avisos no Telegram', 'Comunicação', 'Aviso de assistência atrasada no Telegram da equipe.', dependeDe: ['assistencias']),
+    // Etapa 28
+    Modulo('beta', 'Beta — assistente', 'Comunicação', 'Assistente que responde no chat contatos, veículos e situação dos atendimentos, direto do banco.'),
   ];
 
   static final Map<String, Modulo> _porId = {for (final m in catalogo) m.id: m};

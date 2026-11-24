@@ -14,6 +14,7 @@ const MODULOS = [
   { id: 'relatorios_personalizados', dependeDe: [] },
   { id: 'nps', dependeDe: ['assistencias'] },
   { id: 'telegram', dependeDe: ['assistencias'] },
+  { id: 'beta', dependeDe: [] }, // Etapa 28: assistente Beta
 ];
 
 const POR_ID = new Map(MODULOS.map((m) => [m.id, m]));

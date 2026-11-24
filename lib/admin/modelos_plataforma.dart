@@ -153,6 +153,7 @@ String rotuloAcao(String a) => switch (a) {
       'pedido_atendido' => 'Atendeu pedido de plano',
       'situacao_definida' => 'Mudou a situação de uma corretora',
       'uso_medido' => 'Mediu o uso das corretoras',
+      'beta_teto' => 'Mudou o teto da Beta',
       'seguradora_criada' => 'Criou seguradora',
       'seguradora_aprovada' => 'Aprovou seguradora',
       'seguradora_editada' => 'Editou seguradora',

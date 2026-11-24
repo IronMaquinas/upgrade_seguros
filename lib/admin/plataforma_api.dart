@@ -137,6 +137,12 @@ class PlataformaApi {
   /// Mede o uso (GB de arquivos e vídeos, usuários) de uma corretora ou de todas.
   static Future<void> medirUso({String? empresaId}) => _chamar({'acao': 'medirUso', if (empresaId != null) 'empresaId': empresaId});
 
+  // ── Etapa 28: Beta ──
+  static Future<Map<String, dynamic>> betaResumo() => _chamar({'acao': 'betaResumo'});
+  static Future<void> betaPerguntaVista(String id) => _chamar({'acao': 'betaPerguntaVista', 'id': id});
+  static Future<void> contaDefinirTetoBeta(String empresaId, double tetoUsd) =>
+      _chamar({'acao': 'contaDefinirTetoBeta', 'empresaId': empresaId, 'tetoUsd': tetoUsd});
+
   // ── Etapa 22: catálogo de seguradoras ──
   static Future<List<SeguradoraCatalogo>> catalogo() async {
     final j = await _chamar({'acao': 'catalogo'});

@@ -1,7 +1,7 @@
 // lib/admin/portal_app.dart — Etapa 21: telas do portal da plataforma
 //
 //   PortaoPlataforma  login → confere no servidor se é admin → portal
-//   _Portal           menu lateral: Visão geral · Pedidos · Corretoras · Planos · Financeiro · Seguradoras · Auditoria
+//   _Portal           menu lateral: Visão geral · Pedidos · Corretoras · Planos · Financeiro · Beta · Seguradoras · Auditoria
 //
 // Se a conta não for admin da plataforma (ou for usuário de uma corretora), o
 // servidor recusa e o portal sai na hora.
@@ -12,6 +12,7 @@ import 'package:intl/intl.dart';
 
 import 'package:upgrade_seguros/utils/modulos.dart';
 
+import 'aba_beta_portal.dart'; // Etapa 28
 import 'aba_financeiro_portal.dart'; // Etapa 26
 import 'aba_pedidos_portal.dart'; // Etapa 25
 import 'financeiro.dart'; // Etapa 26
@@ -235,6 +236,7 @@ class _PortalState extends State<_Portal> {
       _Corretoras(corretoras: _corretoras, erro: _erro, onRecarregar: _carregar),
       const AbaPlanosPortal(), // Etapa 24
       AbaFinanceiroPortal(corretoras: _corretoras, erro: _erro, onRecarregar: _carregar), // Etapa 26
+      const AbaBetaPortal(), // Etapa 28
       const AbaSeguradorasPortal(), // Etapa 22
       const _Auditoria(),
     ];
@@ -266,6 +268,7 @@ class _PortalState extends State<_Portal> {
             const NavigationRailDestination(icon: Icon(Icons.business_outlined), selectedIcon: Icon(Icons.business), label: Text('Corretoras')),
             const NavigationRailDestination(icon: Icon(Icons.workspace_premium_outlined), selectedIcon: Icon(Icons.workspace_premium), label: Text('Planos')),
             const NavigationRailDestination(icon: Icon(Icons.payments_outlined), selectedIcon: Icon(Icons.payments), label: Text('Financeiro')), // Etapa 26
+            const NavigationRailDestination(icon: Icon(Icons.auto_awesome_outlined), selectedIcon: Icon(Icons.auto_awesome), label: Text('Beta')), // Etapa 28
             const NavigationRailDestination(icon: Icon(Icons.shield_outlined), selectedIcon: Icon(Icons.shield), label: Text('Seguradoras')),
             const NavigationRailDestination(icon: Icon(Icons.history), label: Text('Auditoria')),
           ],

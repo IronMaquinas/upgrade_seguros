@@ -14,6 +14,7 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../screens/auth_screen.dart';
@@ -22,6 +23,7 @@ import '../services/empresa_atual.dart';
 import '../services/plano_atual.dart'; // Etapa 23
 import '../screens/meu_plano_screen.dart'; // Etapa 25
 import '../utils/situacao_conta.dart'; // Etapa 25
+import 'beta_chat.dart'; // Etapa 28
 import 'migracao_empresa_card.dart';
 
 enum _Situacao { pronta, migracaoPendenteAdmin, migracaoPendente }
@@ -115,7 +117,7 @@ class _PortaoEmpresaState extends State<PortaoEmpresa> {
         }
         switch (snap.data!) {
           case _Situacao.pronta:
-            return _ComAvisoDaConta(child: widget.child); // Etapa 25
+            return _ComBeta(child: _ComAvisoDaConta(child: widget.child)); // Etapa 25 · 28
           case _Situacao.migracaoPendenteAdmin:
             return _tela(
               icone: Icons.drive_file_move_outline,
@@ -167,6 +169,29 @@ class _ComAvisoDaConta extends StatelessWidget {
             ),
           ),
           Expanded(child: child),
+        ]);
+      },
+    );
+  }
+}
+
+/// Etapa 28: botão da Beta no canto inferior ESQUERDO (o direito é do "Novo
+/// Registro"), só com o módulo 'beta' no plano. No celular fica acima da barra
+/// de navegação de baixo.
+class _ComBeta extends StatelessWidget {
+  final Widget child;
+  const _ComBeta({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: PlanoAtual.versao,
+      builder: (context, _, __) {
+        if (!PlanoAtual.tem('beta')) return child;
+        final celular = !kIsWeb || MediaQuery.of(context).size.width < 600; // mesmo critério do dashboard
+        return Stack(children: [
+          Positioned.fill(child: child),
+          Positioned(left: 16, bottom: celular ? 80 : 16, child: BotaoBeta(celular: celular)),
         ]);
       },
     );

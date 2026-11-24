@@ -32,6 +32,7 @@ const mod = require('./modulos'); // Etapa 23
 const planos = require('./planos'); // Etapa 24
 const conta = require('./conta'); // Etapa 25
 const uso = require('./uso'); // Etapa 27
+const beta = require('./beta'); // Etapa 28
 
 if (!admin.apps.length) admin.initializeApp();
 const db = () => admin.firestore();
@@ -453,6 +454,9 @@ async function recusar(quem, { id, motivo }) {
  *   contaDefinirSituacao { empresaId, situacao, testeAte?, motivo? }
  *   Etapa 27 — uso (functions/uso.js):
  *   medirUso { empresaId? }          → { medidas: [...] }  (sem empresaId: todas)
+ *   Etapa 28 — Beta (functions/beta.js):
+ *   betaResumo                       → uso do mês por corretora (perguntas, IA, tokens, US$) + perguntas sem resposta
+ *   betaPerguntaVista { id }         · contaDefinirTetoBeta { empresaId, tetoUsd }
  */
 const plataforma = onRequest((req, res) =>
   cors(req, res, async () => {
@@ -499,6 +503,19 @@ const plataforma = onRequest((req, res) =>
           const medidas = corpo.empresaId ? [await uso.medirCorretora(String(corpo.empresaId))] : await uso.medirTodas();
           await auditar(quem, 'uso_medido', { alvoTipo: 'corretora', alvoId: corpo.empresaId ? String(corpo.empresaId) : '', detalhes: { corretoras: medidas.length } });
           return res.json({ medidas });
+        }
+        case 'betaResumo':
+          return res.json(await beta.resumoPortal());
+        case 'betaPerguntaVista':
+          return res.json(await beta.marcarVista(corpo.id));
+        case 'contaDefinirTetoBeta': {
+          const teto = Number(corpo.tetoUsd);
+          if (!Number.isFinite(teto) || teto < 0 || teto > 1000) return res.status(400).json({ erro: 'Teto inválido (0 a 1000 US$).' });
+          const ref = admin.firestore().collection('plataforma_contas').doc(String(corpo.empresaId || ''));
+          if (!(await ref.get()).exists) return res.status(409).json({ erro: 'Esta corretora ainda não tem conta.' });
+          await ref.update({ betaTetoUsd: teto });
+          await auditar(quem, 'beta_teto', { alvoTipo: 'corretora', alvoId: String(corpo.empresaId), detalhes: { tetoUsd: teto } });
+          return res.json({ ok: true });
         }
         case 'contaDefinirSituacao':
           return res.json(await conta.definirSituacao(quem, corpo, auditar));

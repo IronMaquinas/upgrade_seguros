@@ -12,6 +12,18 @@ const SV = { __serverTimestamp: true };
 const APAGAR = { __apagarCampo: true }; // Etapa 23: FieldValue.delete()
 let proximoId = 0; // Etapa 21: doc() sem id
 
+// Etapa 28: FieldValue.increment e set(..., { merge: true }) com mapas aninhados
+const INC = (n) => ({ __incremento: n });
+function mesclar(base, novo) {
+  const r = { ...(base || {}) };
+  for (const [k, v] of Object.entries(novo)) {
+    if (v && typeof v === 'object' && '__incremento' in v) r[k] = (Number(r[k]) || 0) + v.__incremento;
+    else if (v && typeof v === 'object' && !Array.isArray(v) && !v.__serverTimestamp && typeof v.toDate !== 'function') r[k] = mesclar(r[k], v);
+    else r[k] = v;
+  }
+  return r;
+}
+
 function docRef(path) {
   const id = path.split('/').pop();
   return {
@@ -21,7 +33,7 @@ function docRef(path) {
       const d = store[path];
       return { id, exists: !!d, ref: docRef(path), data: () => d && { ...d } };
     },
-    async set(v) { store[path] = { ...v }; },
+    async set(v, opcoes) { store[path] = opcoes && opcoes.merge ? mesclar(store[path], v) : { ...v }; },
     async update(v) {
       if (!store[path]) throw new Error('NOT_FOUND ' + path);
       store[path] = { ...store[path], ...v };
@@ -125,7 +137,7 @@ const balde = {
 const firestore = Object.assign(
   () => ({ collection: (n) => colRef(n), doc: (p) => docRef(p), batch, runTransaction }),
   {
-    FieldValue: { serverTimestamp: () => SV, delete: () => APAGAR },
+    FieldValue: { serverTimestamp: () => SV, delete: () => APAGAR, increment: INC },
     Timestamp: { fromDate: (d) => ({ toDate: () => d }) }, // Etapa 24
   },
 );
@@ -162,6 +174,7 @@ function instalar() {
       return { onRequest: (a, b) => (typeof a === 'function' ? a : b) };
     }
     if (req === 'firebase-functions/v2/scheduler') return { onSchedule: (a, b) => (typeof a === 'function' ? a : b) }; // Etapa 27
+    if (req === 'firebase-functions/params') return { defineSecret: (n) => ({ name: n, value: () => 'segredo-falso' }) }; // Etapa 28
     if (req === 'firebase-functions/logger') return { info() {}, warn() {}, error(e) { console.error('LOG', e); } };
     if (req === 'cors') return () => (req2, res, next) => next();
     return orig.call(this, req, ...r);
