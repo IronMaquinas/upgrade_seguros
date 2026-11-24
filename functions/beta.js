@@ -217,6 +217,15 @@ async function responder(e, quem, corpo, conta) {
     assunto = { ...assunto, clienteId: String(corpo.escolherClienteId), atendimentoId: null, pendente: null };
   } else {
     p = interpretar(mensagem, assunto);
+    // 28.3: a Beta tinha perguntado "de qual sinistro ou cliente?" e a resposta veio
+    // só com o nome/número — completa o pedido anterior.
+    // Só quando a mensagem parece uma resposta curta (um nome ou número), não outra pergunta.
+    const pareceResposta = !/\?/.test(mensagem) && mensagem.split(/\s+/).length <= 6
+      && !/^(qual|quais|quem|como|quando|onde|o que|por ?que|me |quero|preciso|tem |existe)/i.test(normalizar(mensagem));
+    if (!p.intencao && pareceResposta && assunto.pendente && assunto.pendente.intencao) {
+      const soEntidade = p.numero || p.numeroSeguradora || p.placa;
+      p = { ...p, intencao: assunto.pendente.intencao, alvo: p.alvo || assunto.pendente.alvo, cliente: soEntidade ? null : p.cliente || normalizar(mensagem) };
+    }
     if (!bastaSemIa(p, assunto)) {
       if ((usoMes.custoUsd || 0) >= teto) {
         limite = true;
@@ -307,7 +316,7 @@ async function executar(e, p, assunto) {
     if (assunto.atendimentoId) at = await atendimentoPorId(e, assunto.atendimentoId);
     else if (assunto.clienteId) cli = await cliente(e, assunto.clienteId);
   }
-  if (!at && !cli) return { ...FORA('sem_assunto', 'De qual sinistro ou cliente? Me diga o número (SN… / AS…) ou o nome do cliente.'), assunto };
+  if (!at && !cli) return { ...FORA('sem_assunto', 'De qual sinistro ou cliente? Me diga o número (SN… / AS…) ou o nome do cliente.'), assunto: { ...assunto, pendente: { intencao: p.intencao, alvo: p.alvo } } };
   if (at && !cli) cli = await cliente(e, at.id_cliente);
 
   const novoAssunto = at

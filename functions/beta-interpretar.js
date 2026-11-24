@@ -55,7 +55,7 @@ function intencaoDe(t, placa) {
 
 /** Nome do cliente depois de "do cliente", "do segurado", "sinistros do/da". */
 function clienteDe(t) {
-  const m = t.match(/(?:sinistros|veiculos?|telefone|contato|apolices?)\s(?:do|da|de)\s(?:cliente\s|segurad[oa]\s)?(.+?)(?:\?|$)/)
+  const m = t.match(/(?:sinistros|veiculos?|telefone|contato|apolices?|bens|bem|segurad[oa]s?|frota|placas?|dados|carros?|caminhoes|e-?mail|whatsapp|celular|fone)\s(?:do|da|de)\s(?:cliente\s|segurad[oa]\s)?(.+?)(?:\?|$)/)
     || t.match(/(?:cliente|segurad[oa])\s(?!do\b|da\b)(.+?)(?:\?|$)/);
   if (!m) return null;
   let nome = m[1].replace(/\b(sn|as)\d{14}\b/g, '').replace(/\b(do|da|de) sinistro.*$/, '').trim();
@@ -66,6 +66,7 @@ function clienteDe(t) {
   // 28.2: "que ele tem", "dele", "desse cliente" → é o cliente da conversa, não um nome
   if (/^(que|qual|quais|ele|ela|eles|dele|dela|deles|desse|dessa|deste|desta|esse|essa|este|esta|isso|tem|o mesmo|a mesma)\b/.test(nome)) return null;
   if (/^(sinistro|assistencia|terceiro|motorista)/.test(nome)) return null;
+  if (/\b(sinistro|assistencia|atendimento|desse|deste|dessa|desta|oficina|funilaria)\b/.test(nome)) return null; // 28.3: não é nome de cliente
   return nome;
 }
 

@@ -41,6 +41,9 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   p = interpretar('qual o bem segurado que ele tem?', { clienteId: 'x', intencao: 'contato' });
   t.ok(p.intencao === 'veiculo' && p.cliente === null && p.alvo === null, '28.2: "bem segurado que ele tem" = veículo do cliente da conversa');
   t.ok(interpretar('qual a frota dele?', { clienteId: 'x' }).intencao === 'veiculo', '28.2: frota');
+  // 28.3
+  p = interpretar('quais os bens segurados do Iury Guaru?');
+  t.ok(p.intencao === 'veiculo' && p.cliente === 'iury guaru', '28.3: "bens segurados do <cliente>"');
   t.ok(interpretar('telefone desse cliente', { clienteId: 'x' }).cliente === null, '28.2: "desse cliente" não vira nome');
   t.ok(validarDaIa({ intencao: 'hackear', alvo: 'x' }).intencao === null && validarDaIa({ intencao: 'contato', numero: 'sn20261110554460' }).numero === SN, 'IA: só aceita o catálogo');
 
@@ -96,13 +99,21 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   r = await per('qual o telefone do transportes silva ltda', { novaConversa: true });
   r = await per('qual o bem segurado que ele tem?');
   t.ok(r.body.itens[0].titulo.startsWith('Veículo 1 de Transportes Silva') && r.body.itens[0].linhas.includes('Placa: ABC1D23'), '28.2: veículos do cliente da conversa');
+  // 28.3: a Beta pergunta "de qual cliente?" e a resposta vem só com o nome
+  r = await per('qual o veículo?', { novaConversa: true });
+  t.ok(/De qual sinistro/.test(r.body.texto), '28.3: sem assunto, pergunta de qual');
+  r = await per('Transportes Silva Ltda');
+  t.ok(r.body.itens[0] && r.body.itens[0].linhas.includes('Placa: ABC1D23'), '28.3: resposta só com o nome completa o pedido');
+  r = await per('quais os bens segurados do transportes silva ltda?', { novaConversa: true });
+  t.ok(r.body.itens[0] && r.body.itens[0].linhas.includes('Volvo FH'), '28.3: bens segurados do cliente');
   r = await per('de quem é a placa ABC-1D23?');
   t.ok(r.body.texto.includes('Transportes Silva Ltda'), 'dono da placa');
 
   // IA
   respostaIa = { intencao: 'contato', alvo: 'oficina', numero: null };
+  const iaAntes = chamadasIa;
   r = await per('me passa o fone da funilaria desse sinistro aí', { novaConversa: true });
-  t.ok(chamadasIa === 1 && !r.body.semIa, 'pergunta torta vai para a IA');
+  t.ok(chamadasIa === iaAntes + 1 && !r.body.semIa, 'pergunta torta vai para a IA');
   t.ok(r.body.foraDoEscopo && /De qual sinistro/.test(r.body.texto), 'conversa nova sem assunto: pede o número');
   respostaIa = { intencao: null };
   r = await per('qual a previsão do tempo?');
@@ -113,13 +124,13 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   // uso e custo
   const mes = B.mesAtual();
   const u = store[`plataforma_contas/${E}`].beta[mes];
-  t.ok(u.comIa === 2 && u.tokensEntrada === 800 && u.tokensSaida === 80 && u.perguntas === 16, 'mede perguntas, IA e tokens');
-  t.ok(Math.abs(u.custoUsd - 2 * (400 * 1 + 40 * 5) / 1e6) < 1e-12, 'custo em US$ pelos preços do modelo');
+  t.ok(u.comIa === 3 && u.tokensEntrada === 1200 && u.tokensSaida === 120 && u.perguntas === 19, 'mede perguntas, IA e tokens');
+  t.ok(Math.abs(u.custoUsd - 3 * (400 * 1 + 40 * 5) / 1e6) < 1e-12, 'custo em US$ pelos preços do modelo');
 
   // teto
   store[`plataforma_contas/${E}`].betaTetoUsd = 0.0001;
   const antes = chamadasIa;
-  r = await per('quero saber das coisas');
+  r = await per('quero saber das coisas', { novaConversa: true });
   t.ok(chamadasIa === antes && /limite de uso/.test(r.body.texto), 'passou do teto: não chama a IA e avisa');
   r = await per(`telefone do segurado do ${SN}`);
   t.ok(r.body.itens[0].linhas.includes('Telefone: (27) 98888-0000'), 'passou do teto: perguntas diretas continuam');
@@ -135,7 +146,7 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   store['plataforma_admins/adm'] = { email: 'adm@x.com', ativo: true };
   t.ok((await chamar(plataforma, { acao: 'betaResumo' }, 'tFunc')).code === 403, 'funcionário não vê o resumo');
   const rs = await chamar(plataforma, { acao: 'betaResumo' }, 'tAdm');
-  t.ok(rs.code === 200 && rs.body.corretoras[0].nome === 'Upgrade' && rs.body.corretoras[0].comIa === 2 && rs.body.perguntas.length >= 2, 'portal: uso por corretora e perguntas');
+  t.ok(rs.code === 200 && rs.body.corretoras[0].nome === 'Upgrade' && rs.body.corretoras[0].comIa === 3 && rs.body.perguntas.length >= 2, 'portal: uso por corretora e perguntas');
   await chamar(plataforma, { acao: 'betaPerguntaVista', id: rs.body.perguntas[0].id }, 'tAdm');
   t.ok(store[`plataforma_beta_perguntas/${rs.body.perguntas[0].id}`].visto === true, 'marcar como vista');
   t.ok((await chamar(plataforma, { acao: 'contaDefinirTetoBeta', empresaId: E, tetoUsd: 10 }, 'tAdm')).code === 200 && store[`plataforma_contas/${E}`].betaTetoUsd === 10, 'teto por corretora');
