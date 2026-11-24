@@ -37,6 +37,7 @@ function alvoDe(t) {
   if (/(telefone|numero|fone|celular|whats\w*) de contato/.test(t)) return 'contato_segurado';
   if (/oficina/.test(t)) return 'oficina';
   if (/contato (do |da )?(segurad|client)/.test(t) || /\bcontato\b/.test(t) && !/telefone (do |da )?(segurad|client)/.test(t) && /(segurad|client)/.test(t)) return 'contato_segurado';
+  if (/\b(bem|bens) segurad/.test(t)) return null; // 28.2: "bem segurado" é o veículo, não a pessoa
   if (/segurad|client/.test(t)) return 'segurado';
   return null;
 }
@@ -47,7 +48,7 @@ function intencaoDe(t, placa) {
   if (/\b(sinistros|atendimentos|assistencias)\b/.test(t)) return 'sinistros_cliente'; // 28.1: "e os sinistros dele?"
   if (/pendent|pendencia|tarefa|\bacao\b|\bacoes\b|falta fazer/.test(t)) return 'pendencias';
   if (/status|situacao|andamento|como esta|em que pe/.test(t)) return 'status';
-  if (/veiculo|carro|placa|modelo|chassi|marca|caminhao|moto\b/.test(t)) return 'veiculo';
+  if (/veiculo|carro|placa|modelo|chassi|marca|caminhao|moto\b|\b(bem|bens)( segurados?)?\b|frota/.test(t)) return 'veiculo'; // 28.2: "bem segurado", "frota"
   if (/telefone|fone|celular|whats|zap|ligar|contato|e-?mail|numero (do|da) (segurad|client|terceir|motorist|oficin)/.test(t)) return 'contato';
   return null;
 }
@@ -62,6 +63,8 @@ function clienteDe(t) {
   const sobra = /^(contato|telefone|fone|celular|whatsapp|whats|zap|e-?mail|numero|cliente|segurad[oa])\s(?:(?:do|da|de)\s)?/;
   while (sobra.test(nome)) nome = nome.replace(sobra, '').trim();
   if (!nome || nome.length < 3 || /^(do|da|de|o|a)$/.test(nome)) return null;
+  // 28.2: "que ele tem", "dele", "desse cliente" → é o cliente da conversa, não um nome
+  if (/^(que|qual|quais|ele|ela|eles|dele|dela|deles|desse|dessa|deste|desta|esse|essa|este|esta|isso|tem|o mesmo|a mesma)\b/.test(nome)) return null;
   if (/^(sinistro|assistencia|terceiro|motorista)/.test(nome)) return null;
   return nome;
 }

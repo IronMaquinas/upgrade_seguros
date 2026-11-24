@@ -37,6 +37,11 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   t.ok(interpretar('telefone do contato do cliente iury guaru').cliente === 'iury guaru', '28.1: "do contato do cliente" também');
   t.ok(interpretar('qual o telefone de contato do terceiro').alvo === 'contato_terceiro', '28.1: contato do terceiro continua');
   t.ok(interpretar('e os sinistros dele?', { clienteId: 'x' }).intencao === 'sinistros_cliente' && bastaSemIa(interpretar('e os sinistros dele?', { clienteId: 'x' }), { clienteId: 'x' }), '28.1: "e os sinistros dele?" sem IA');
+  // 28.2: o print do Marcony
+  p = interpretar('qual o bem segurado que ele tem?', { clienteId: 'x', intencao: 'contato' });
+  t.ok(p.intencao === 'veiculo' && p.cliente === null && p.alvo === null, '28.2: "bem segurado que ele tem" = veículo do cliente da conversa');
+  t.ok(interpretar('qual a frota dele?', { clienteId: 'x' }).intencao === 'veiculo', '28.2: frota');
+  t.ok(interpretar('telefone desse cliente', { clienteId: 'x' }).cliente === null, '28.2: "desse cliente" não vira nome');
   t.ok(validarDaIa({ intencao: 'hackear', alvo: 'x' }).intencao === null && validarDaIa({ intencao: 'contato', numero: 'sn20261110554460' }).numero === SN, 'IA: só aceita o catálogo');
 
   // ── dados ──
@@ -88,6 +93,9 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
 
   r = await per('qual o telefone de contato do transportes silva ltda', { novaConversa: true });
   t.ok(r.body.itens[0].titulo === 'Contato do segurado' && r.body.itens[0].linhas.includes('Maria'), '28.1: contato do cliente pelo nome');
+  r = await per('qual o telefone do transportes silva ltda', { novaConversa: true });
+  r = await per('qual o bem segurado que ele tem?');
+  t.ok(r.body.itens[0].titulo.startsWith('Veículo 1 de Transportes Silva') && r.body.itens[0].linhas.includes('Placa: ABC1D23'), '28.2: veículos do cliente da conversa');
   r = await per('de quem é a placa ABC-1D23?');
   t.ok(r.body.texto.includes('Transportes Silva Ltda'), 'dono da placa');
 
@@ -105,7 +113,7 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   // uso e custo
   const mes = B.mesAtual();
   const u = store[`plataforma_contas/${E}`].beta[mes];
-  t.ok(u.comIa === 2 && u.tokensEntrada === 800 && u.tokensSaida === 80 && u.perguntas === 14, 'mede perguntas, IA e tokens');
+  t.ok(u.comIa === 2 && u.tokensEntrada === 800 && u.tokensSaida === 80 && u.perguntas === 16, 'mede perguntas, IA e tokens');
   t.ok(Math.abs(u.custoUsd - 2 * (400 * 1 + 40 * 5) / 1e6) < 1e-12, 'custo em US$ pelos preços do modelo');
 
   // teto
