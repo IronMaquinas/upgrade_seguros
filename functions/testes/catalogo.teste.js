@@ -95,6 +95,8 @@ const doCatalogo = (nome) => {
   const sugDeNovo = await chamar(cat.catalogoSeguradoras, { acao: 'sugerir', cnpj: CNPJ_MAPFRE, nome: 'MAPFRE' }, 't1');
   t.ok(sugDeNovo.body.existente === true && pegar('catalogo_seguradoras/').length === 4, 'mesmo CNPJ de novo: devolve a existente');
   t.ok((await chamar(cat.catalogoSeguradoras, { acao: 'sugerir', cnpj: CNPJ_MAPFRE, nome: 'MAPFRE' }, 't2')).code === 409, 'pendente de outra corretora: 409, sem duplicar');
+  const consAxa = await chamar(cat.catalogoSeguradoras, { acao: 'consultarCnpj', cnpj: CNPJ_AXA }, 't2');
+  t.ok(consAxa.body.existente && consAxa.body.existente.nome === 'AXA', '22.2: nome da Receita parecido já avisa na consulta');
   const sugAxa = await chamar(cat.catalogoSeguradoras, { acao: 'sugerir', cnpj: CNPJ_AXA, nome: 'AXA SEGUROS' }, 't2');
   t.ok(sugAxa.body.existente === true && sugAxa.body.seguradora.nome === 'AXA', 'nome parecido com uma aprovada: usa a aprovada');
 

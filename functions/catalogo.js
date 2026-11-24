@@ -210,6 +210,11 @@ const catalogoSeguradoras = onRequest((req, res) =>
         // 22.1: tentativa; se o servidor não conseguir, o app consulta no navegador (receita: null)
         const rec = await consultarReceita(cnpj);
         if (rec.codigo === 404) return res.status(404).json({ erro: rec.erro });
+        // 22.2: nome da Receita parecido com um da lista → já avisa aqui (antes só no "Adicionar")
+        if (rec.ok) {
+          const parecida = [rec.nomeFantasia, rec.razaoSocial].filter(Boolean).map((n) => mesmaChave(catalogo, n)).find(Boolean);
+          if (parecida && visivel(parecida)) return res.json({ existente: resumo(parecida) });
+        }
         return res.json({
           receita: rec.ok ? { cnpj: formatarCnpj(cnpj), razaoSocial: rec.razaoSocial, nomeFantasia: rec.nomeFantasia, situacao: rec.situacao } : null,
         });

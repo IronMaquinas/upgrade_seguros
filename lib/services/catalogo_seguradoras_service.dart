@@ -30,6 +30,15 @@ class ResultadoCnpj {
   bool get ativaNaReceita => situacaoReceita.isEmpty || situacaoReceita.toUpperCase() == 'ATIVA';
 }
 
+/// Resposta de erro da Function, com o código HTTP (22.2).
+class _ErroServidor implements Exception {
+  final int status;
+  final String mensagem;
+  const _ErroServidor(this.status, this.mensagem);
+  @override
+  String toString() => mensagem;
+}
+
 class CatalogoSeguradorasService {
   CatalogoSeguradorasService._();
 
@@ -42,31 +51,51 @@ class CatalogoSeguradorasService {
         return <String, dynamic>{};
       }
     })();
-    if (r.statusCode != 200) throw Exception(j['erro'] ?? 'Erro ${r.statusCode}');
+    if (r.statusCode != 200) throw _ErroServidor(r.statusCode, (j['erro'] ?? 'Erro ${r.statusCode}') as String);
     return j;
   }
 
   /// Já está na lista? Se não, os dados da Receita: do servidor, ou — se o
   /// servidor não conseguir consultar (22.1) — do navegador, como na 17.1.
+  ///
+  /// 22.2: já devolve "existente" quando o nome da Receita bate com um da lista
+  /// (ex.: SUHAI SEGURADORA S.A. × SUHAI) — antes isso só aparecia ao clicar em
+  /// Adicionar. E se o servidor der qualquer outro erro, consulta no navegador.
   static Future<ResultadoCnpj> consultarCnpj(String cnpj) async {
-    final j = await _chamar({'acao': 'consultarCnpj', 'cnpj': cnpj});
-    if (j['existente'] is Map) return ResultadoCnpj(existenteNome: (j['existente'] as Map)['nome'] as String?);
-    if (j['receita'] is! Map) {
+    Map<String, dynamic>? j;
+    try {
+      j = await _chamar({'acao': 'consultarCnpj', 'cnpj': cnpj});
+    } on _ErroServidor catch (e) {
+      // 404 = não existe na Receita; 409 = pendente de outra corretora: são respostas, não falhas
+      if (e.status == 404 || e.status == 409) throw Exception(e.mensagem);
+      j = null;
+    }
+    if (j != null && j['existente'] is Map) return ResultadoCnpj(existenteNome: (j['existente'] as Map)['nome'] as String?);
+
+    final ResultadoCnpj r;
+    if (j != null && j['receita'] is Map) {
+      final m = Map<String, dynamic>.from(j['receita'] as Map);
+      r = ResultadoCnpj(
+        cnpj: (m['cnpj'] ?? '') as String,
+        razaoSocial: (m['razaoSocial'] ?? '') as String,
+        nomeFantasia: (m['nomeFantasia'] ?? '') as String,
+        situacaoReceita: (m['situacao'] ?? '') as String,
+      );
+    } else {
       final d = await consultarReceitaCnpj(cnpj);
-      return ResultadoCnpj(
+      r = ResultadoCnpj(
         cnpj: PerfilCorretora.formatarCnpj(cnpj.replaceAll(RegExp(r'\D'), '')),
         razaoSocial: d.razaoSocial,
         nomeFantasia: d.nomeFantasia,
         situacaoReceita: d.situacao,
       );
     }
-    final r = Map<String, dynamic>.from(j['receita'] as Map);
-    return ResultadoCnpj(
-      cnpj: (r['cnpj'] ?? '') as String,
-      razaoSocial: (r['razaoSocial'] ?? '') as String,
-      nomeFantasia: (r['nomeFantasia'] ?? '') as String,
-      situacaoReceita: (r['situacao'] ?? '') as String,
-    );
+    // nome da Receita parecido com um que já está na lista desta corretora?
+    await SeguradorasCadastradas.nomes().catchError((_) => <String>[]);
+    final ja = (r.nomeFantasia.isEmpty ? null : SeguradorasCadastradas.resolver(r.nomeFantasia)) ??
+        (r.razaoSocial.isEmpty ? null : SeguradorasCadastradas.resolver(r.razaoSocial));
+    if (ja != null) return ResultadoCnpj(existenteNome: ja);
+    return r;
   }
 
   /// Devolve o nome que ficou no catálogo (o existente ou o novo, pendente).

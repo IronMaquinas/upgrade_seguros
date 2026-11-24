@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:upgrade_seguros/services/receita_cnpj.dart';
 import 'package:upgrade_seguros/utils/perfil_corretora.dart';
+import 'package:upgrade_seguros/utils/seguradoras.dart';
 
 import 'plataforma_api.dart';
 
@@ -114,16 +115,37 @@ class _AbaSeguradorasPortalState extends State<AbaSeguradorasPortal> {
     }
   }
 
+  static String _dig(String s) => s.replaceAll(RegExp(r'\D'), '');
+
+  /// 22.2: a entrada da lista que já corresponde a este CNPJ ou a este nome da
+  /// Receita (SUHAI SEGURADORA S.A. × SUHAI). [exceto]: a que está sendo editada.
+  SeguradoraCatalogo? _jaNaLista(String cnpj, DadosReceita r, {String exceto = ''}) {
+    final vivas = (_lista ?? const <SeguradoraCatalogo>[]).where((x) => (x.viva || x.pendente) && x.id != exceto).toList();
+    final c = _dig(cnpj);
+    for (final x in vivas) {
+      if (c.isNotEmpty && _dig(x.cnpj) == c) return x;
+    }
+    final nomes = [for (final x in vivas) x.nome];
+    for (final n in [r.nomeFantasia, r.razaoSocial]) {
+      if (n.isEmpty) continue;
+      final achou = resolverSeguradora(n, nomes);
+      if (achou != null) return vivas.firstWhere((x) => x.nome == achou);
+    }
+    return null;
+  }
+
   /// 22.1: o admin cria direto, já aprovada. CNPJ consultado na Receita pelo
-  /// navegador; nome pode ser ajustado (o admin é quem cuida da lista).
+  /// navegador. 22.2: se já existir (pelo CNPJ ou nome parecido), avisa logo
+  /// na consulta e oferece completar a existente com os dados da Receita.
   Future<void> _nova() async {
     final cnpj = TextEditingController();
     final nome = TextEditingController();
     final susep = TextEditingController();
-    var razao = '';
+    DadosReceita? receita;
+    SeguradoraCatalogo? existente;
     String? aviso;
     var consultando = false;
-    final ok = await showDialog<bool>(
+    final acao = await showDialog<String>(
       context: context,
       builder: (d) => StatefulBuilder(
         builder: (d, set) {
@@ -131,13 +153,16 @@ class _AbaSeguradorasPortalState extends State<AbaSeguradorasPortal> {
             set(() {
               consultando = true;
               aviso = null;
+              existente = null;
+              receita = null;
             });
             try {
               final r = await consultarReceitaCnpj(cnpj.text);
               set(() {
-                razao = r.razaoSocial;
-                cnpj.text = PerfilCorretora.formatarCnpj(cnpj.text.replaceAll(RegExp(r'\D'), ''));
-                if (nome.text.trim().isEmpty) nome.text = r.nomeFantasia.isNotEmpty ? r.nomeFantasia : r.razaoSocial;
+                receita = r;
+                cnpj.text = PerfilCorretora.formatarCnpj(_dig(cnpj.text));
+                existente = _jaNaLista(cnpj.text, r);
+                nome.text = r.nomeFantasia.isNotEmpty ? r.nomeFantasia : r.razaoSocial;
                 if (!r.ativa) aviso = '⚠️ Situação na Receita: ${r.situacao}';
               });
             } catch (e) {
@@ -147,12 +172,14 @@ class _AbaSeguradorasPortalState extends State<AbaSeguradorasPortal> {
             }
           }
 
+          final r = receita;
+          final ja = existente;
           return AlertDialog(
             backgroundColor: Colors.white,
             surfaceTintColor: Colors.transparent,
             title: const Text('Nova seguradora'),
             content: SizedBox(
-              width: 460,
+              width: 480,
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
                   Expanded(
@@ -167,33 +194,56 @@ class _AbaSeguradorasPortalState extends State<AbaSeguradorasPortal> {
                   FilledButton.tonal(onPressed: consultando ? null : consultar, child: const Text('Consultar na Receita')),
                 ]),
                 if (consultando) const Padding(padding: EdgeInsets.only(top: 10), child: LinearProgressIndicator()),
-                if (razao.isNotEmpty)
-                  Padding(padding: const EdgeInsets.only(top: 8), child: Text('Receita: $razao', style: TextStyle(fontSize: 12, color: Colors.grey.shade700))),
                 if (aviso != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(aviso!, style: const TextStyle(color: _kVermelho))),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: nome,
-                  decoration: const InputDecoration(labelText: 'Nome na lista', border: OutlineInputBorder()),
-                  onChanged: (_) => set(() {}),
-                ),
-                const SizedBox(height: 10),
-                TextField(controller: susep, decoration: const InputDecoration(labelText: 'Código SUSEP (opcional)', border: OutlineInputBorder())),
+                if (r != null) _DadosReceitaBox(r),
+                if (ja != null)
+                  Container(
+                    margin: const EdgeInsets.only(top: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: const Color(0xFFFFF8E1), borderRadius: BorderRadius.circular(8)),
+                    child: Text(
+                      'Já está na lista como "${ja.nome}"${ja.cnpj.isEmpty ? ' (sem CNPJ)' : ' (${ja.cnpj})'}. '
+                      'Use "Completar" para gravar estes dados nela.',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                if (r != null && ja == null) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: nome,
+                    decoration: const InputDecoration(labelText: 'Nome na lista', border: OutlineInputBorder()),
+                    onChanged: (_) => set(() {}),
+                  ),
+                  if (r.nomeFantasia.isNotEmpty && r.razaoSocial.isNotEmpty)
+                    Wrap(spacing: 4, children: [
+                      for (final o in [r.nomeFantasia, r.razaoSocial])
+                        if (nome.text != o) TextButton(onPressed: () => set(() => nome.text = o), child: Text('Usar "$o"')),
+                    ]),
+                  const SizedBox(height: 10),
+                  TextField(controller: susep, decoration: const InputDecoration(labelText: 'Código SUSEP (opcional)', border: OutlineInputBorder())),
+                ],
               ]),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancelar')),
-              FilledButton(
-                onPressed: razao.isEmpty || nome.text.trim().isEmpty ? null : () => Navigator.pop(d, true),
-                child: const Text('Criar'),
-              ),
+              TextButton(onPressed: () => Navigator.pop(d), child: const Text('Cancelar')),
+              if (ja != null)
+                FilledButton(onPressed: () => Navigator.pop(d, 'completar'), child: Text('Completar "${ja.nome}"'))
+              else
+                FilledButton(
+                  onPressed: r == null || nome.text.trim().isEmpty ? null : () => Navigator.pop(d, 'criar'),
+                  child: const Text('Criar'),
+                ),
             ],
           );
         },
       ),
     );
-    if (ok != true) return;
+    if (acao == 'completar' && existente != null && receita != null) {
+      return _editar(existente!, receita: receita, cnpjConsultado: cnpj.text);
+    }
+    if (acao != 'criar' || receita == null) return;
     await _executar(
-      () => PlataformaApi.catalogoCriar(cnpj: cnpj.text, nome: nome.text.trim(), razaoSocial: razao, susep: susep.text),
+      () => PlataformaApi.catalogoCriar(cnpj: cnpj.text, nome: nome.text.trim(), razaoSocial: receita!.razaoSocial, susep: susep.text),
       '"${nome.text.trim()}" criada.',
     );
   }
@@ -302,7 +352,8 @@ class _AbaSeguradorasPortalState extends State<AbaSeguradorasPortal> {
     await _executar(() => PlataformaApi.catalogoRecusar(s.id, motivo.text), 'Recusada.');
   }
 
-  Future<void> _editar(SeguradoraCatalogo s) async {
+  /// 22.2: [receita] / [cnpjConsultado] vêm do "Completar" da Nova seguradora.
+  Future<void> _editar(SeguradoraCatalogo s, {DadosReceita? receita, String? cnpjConsultado}) async {
     final nome = TextEditingController(text: s.nome);
     final cnpj = TextEditingController(text: s.cnpj);
     final susep = TextEditingController(text: s.susep);
@@ -310,6 +361,20 @@ class _AbaSeguradorasPortalState extends State<AbaSeguradorasPortal> {
     var ativa = s.situacao != 'inativa';
     var razao = s.razaoSocial; // 22.1: conferida pelo "Consultar"
     String? avisoCnpj;
+    DadosReceita? achado; // 22.2: o que a última consulta trouxe
+
+    // 22.2: Buscar CNPJ → dados encontrados → Salvar. O nome já vem o da Receita
+    // (fantasia, se houver; senão razão social); "Manter" volta ao atual.
+    void aplicar(DadosReceita r, String cnpjTxt) {
+      achado = r;
+      razao = r.razaoSocial;
+      cnpj.text = PerfilCorretora.formatarCnpj(_dig(cnpjTxt));
+      final sugerido = r.nomeFantasia.isNotEmpty ? r.nomeFantasia : r.razaoSocial;
+      if (sugerido.isNotEmpty) nome.text = sugerido;
+      avisoCnpj = r.ativa ? null : '⚠️ Situação na Receita: ${r.situacao}';
+    }
+
+    if (receita != null) aplicar(receita, cnpjConsultado ?? '');
     final uso = await _textoUso(s);
     if (!mounted) return;
     final acao = await showDialog<String>(
@@ -324,10 +389,25 @@ class _AbaSeguradorasPortalState extends State<AbaSeguradorasPortal> {
             child: SingleChildScrollView(
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
                 if (uso.isNotEmpty) Text(uso, style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-                if (razao.isNotEmpty) Text('Receita: $razao', style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+                if (achado == null && razao.isNotEmpty) SelectableText('Receita: $razao', style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+                if (achado != null) _DadosReceitaBox(achado!),
                 if (avisoCnpj != null) Text(avisoCnpj!, style: const TextStyle(fontSize: 12, color: _kVermelho)),
                 const SizedBox(height: 12),
-                TextField(controller: nome, decoration: const InputDecoration(labelText: 'Nome na lista', border: OutlineInputBorder())),
+                TextField(
+                  controller: nome,
+                  decoration: InputDecoration(
+                    labelText: 'Nome na lista',
+                    border: const OutlineInputBorder(),
+                    helperText: nome.text != s.nome ? 'Antes: "${s.nome}" (vira apelido e os registros são atualizados)' : null,
+                  ),
+                  onChanged: (_) => set(() {}),
+                ),
+                Wrap(spacing: 4, children: [
+                  if (nome.text != s.nome) TextButton(onPressed: () => set(() => nome.text = s.nome), child: Text('Manter "${s.nome}"')),
+                  if (achado != null)
+                    for (final o in {achado!.nomeFantasia, achado!.razaoSocial})
+                      if (o.isNotEmpty && nome.text != o) TextButton(onPressed: () => set(() => nome.text = o), child: Text('Usar "$o"')),
+                ]),
                 const SizedBox(height: 10),
                 Row(children: [
                   Expanded(child: TextField(controller: cnpj, decoration: const InputDecoration(labelText: 'CNPJ', border: OutlineInputBorder()))),
@@ -337,10 +417,15 @@ class _AbaSeguradorasPortalState extends State<AbaSeguradorasPortal> {
                     onPressed: () async {
                       try {
                         final r = await consultarReceitaCnpj(cnpj.text);
+                        final outra = (_lista ?? const <SeguradoraCatalogo>[])
+                            .where((x) => x.id != s.id && (x.viva || x.pendente) && _dig(x.cnpj) == _dig(cnpj.text) && _dig(cnpj.text).isNotEmpty)
+                            .firstOrNull;
                         set(() {
-                          razao = r.razaoSocial;
-                          avisoCnpj = r.ativa ? null : '⚠️ Situação na Receita: ${r.situacao}';
-                          cnpj.text = PerfilCorretora.formatarCnpj(cnpj.text.replaceAll(RegExp(r'\D'), ''));
+                          if (outra != null) {
+                            avisoCnpj = 'Esse CNPJ já é de "${outra.nome}". Para unir as duas, use "Juntar com…".';
+                          } else {
+                            aplicar(r, cnpj.text);
+                          }
                         });
                       } catch (e) {
                         set(() => avisoCnpj = '$e');
@@ -524,4 +609,23 @@ class _AbaSeguradorasPortalState extends State<AbaSeguradorasPortal> {
         const Positioned(top: 0, left: 0, right: 0, child: LinearProgressIndicator(color: _kAzul)),
     ]);
   }
+}
+
+/// 22.2: dados da Receita, selecionáveis (dá para copiar).
+class _DadosReceitaBox extends StatelessWidget {
+  final DadosReceita r;
+  const _DadosReceitaBox(this.r);
+  @override
+  Widget build(BuildContext context) => Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(top: 10),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(8)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Encontrado na Receita', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _kVerde)),
+          SelectableText('Razão social: ${r.razaoSocial}', style: const TextStyle(fontSize: 12.5)),
+          SelectableText('Nome fantasia: ${r.nomeFantasia.isEmpty ? '(não tem)' : r.nomeFantasia}', style: const TextStyle(fontSize: 12.5)),
+          if (r.situacao.isNotEmpty) Text('Situação: ${r.situacao}', style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700)),
+        ]),
+      );
 }
