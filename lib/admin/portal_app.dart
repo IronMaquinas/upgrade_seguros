@@ -1,7 +1,7 @@
 // lib/admin/portal_app.dart — Etapa 21: telas do portal da plataforma
 //
 //   PortaoPlataforma  login → confere no servidor se é admin → portal
-//   _Portal           menu lateral: Visão geral · Pedidos · Corretoras · Planos · Seguradoras · Auditoria
+//   _Portal           menu lateral: Visão geral · Pedidos · Corretoras · Planos · Financeiro · Seguradoras · Auditoria
 //
 // Se a conta não for admin da plataforma (ou for usuário de uma corretora), o
 // servidor recusa e o portal sai na hora.
@@ -12,7 +12,9 @@ import 'package:intl/intl.dart';
 
 import 'package:upgrade_seguros/utils/modulos.dart';
 
+import 'aba_financeiro_portal.dart'; // Etapa 26
 import 'aba_pedidos_portal.dart'; // Etapa 25
+import 'financeiro.dart'; // Etapa 26
 import 'aba_planos_portal.dart'; // Etapa 24
 import 'aba_seguradoras_portal.dart'; // Etapa 22
 import 'modulos_corretora_dialog.dart'; // Etapa 23 / 24: plano da corretora
@@ -232,6 +234,7 @@ class _PortalState extends State<_Portal> {
       AbaPedidosPortal(onMudou: _carregar), // Etapa 25
       _Corretoras(corretoras: _corretoras, erro: _erro, onRecarregar: _carregar),
       const AbaPlanosPortal(), // Etapa 24
+      AbaFinanceiroPortal(corretoras: _corretoras, erro: _erro, onRecarregar: _carregar), // Etapa 26
       const AbaSeguradorasPortal(), // Etapa 22
       const _Auditoria(),
     ];
@@ -262,6 +265,7 @@ class _PortalState extends State<_Portal> {
             ),
             const NavigationRailDestination(icon: Icon(Icons.business_outlined), selectedIcon: Icon(Icons.business), label: Text('Corretoras')),
             const NavigationRailDestination(icon: Icon(Icons.workspace_premium_outlined), selectedIcon: Icon(Icons.workspace_premium), label: Text('Planos')),
+            const NavigationRailDestination(icon: Icon(Icons.payments_outlined), selectedIcon: Icon(Icons.payments), label: Text('Financeiro')), // Etapa 26
             const NavigationRailDestination(icon: Icon(Icons.shield_outlined), selectedIcon: Icon(Icons.shield), label: Text('Seguradoras')),
             const NavigationRailDestination(icon: Icon(Icons.history), label: Text('Auditoria')),
           ],
@@ -370,6 +374,7 @@ class _VisaoGeralState extends State<_VisaoGeral> {
         _Cartao('Corretoras', '${r.corretoras}', Icons.business, _kEscuro),
         _Cartao('Usuários', '${r.usuarios}', Icons.people_outline, _kAzul),
         _Cartao('Atendimentos', '${r.atendimentos}', Icons.assignment_outlined, _kAzul),
+        _Cartao('Receita do mês', Planos.reais(ResumoFinanceiro.de(l).mrrCentavos), Icons.trending_up, _kVerde), // Etapa 26
         for (final e in r.porSituacao.entries) _Cartao(rotuloSituacao(e.key), '${e.value}', Icons.circle, corSituacao(e.key)),
       ]),
       // Etapa 25: pedidos e testes acabando
@@ -411,7 +416,7 @@ class _VisaoGeralState extends State<_VisaoGeral> {
         ),
       ],
       const SizedBox(height: 24),
-      Text('Em breve: receita do mês, custos por corretora e cobrança automática.',
+      Text('Em breve: uso e custo por corretora (GB e vídeos) e cobrança automática.',
           style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
     ]);
   }
