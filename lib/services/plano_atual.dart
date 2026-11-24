@@ -12,6 +12,7 @@ import 'package:flutter/foundation.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart';
 import 'package:upgrade_seguros/utils/modulos.dart';
 import 'package:upgrade_seguros/utils/planos.dart';
+import 'package:upgrade_seguros/utils/situacao_conta.dart';
 
 class PlanoAtual {
   PlanoAtual._();
@@ -62,6 +63,8 @@ class PlanoAtual {
   /// 'tudo_ligado' · 'modelo' · 'personalizado'
   static String get tipo => (_plano['tipo'] ?? 'tudo_ligado') as String;
 
+  static String get planoId => (_plano['planoId'] ?? '') as String;
+
   static String get descricao => (_plano['descricao'] ?? '') as String;
 
   static int get precoCentavos => tipo == 'tudo_ligado' ? 0 : (_plano['precoCentavos'] as num?)?.toInt() ?? 0;
@@ -77,4 +80,11 @@ class PlanoAtual {
     final v = _conta?['testeAte'];
     return v is Timestamp ? v.toDate() : null;
   }
+
+  // ── Etapa 25 ──
+  /// Teste vencido = 'teste_encerrado' (sem conta = 'ativa').
+  static String get situacaoEfetiva => SituacaoConta.efetiva(situacao, testeAte);
+
+  /// Teste encerrado, suspensa, cancelada: o servidor só deixa ler.
+  static bool get somenteLeitura => SituacaoConta.somenteLeitura(situacaoEfetiva);
 }

@@ -99,6 +99,19 @@ service cloud.firestore {
         || get(contaPath(e)).data.get('plano', {}).get('tipo', 'tudo_ligado') == 'tudo_ligado'
         || m in get(contaPath(e)).data.get('modulos', []);
     }
+    // ── Etapa 25: só leitura ───────────────────────────────────────────────
+    // Teste encerrado, suspensa ou cancelada — ou "teste" com testeAte já
+    // vencido (não depende de rotina agendada) — a corretora só LÊ.
+    // Mesma conta em functions/conta.js (situacaoEfetiva / contaGrava).
+    function contaLivre(c) {
+      return !(c.get('situacao', 'ativa') in ['teste_encerrado', 'suspensa', 'cancelada'])
+        && !(c.get('situacao', 'ativa') == 'teste'
+             && c.get('testeAte', null) != null
+             && c.get('testeAte', null) < request.time);
+    }
+    function contaGrava(e) {
+      return !exists(contaPath(e)) || contaLivre(get(contaPath(e)).data);
+    }
     // Coleção da corretora → módulo que ela exige para GRAVAR ('' = sempre).
     function moduloDaColecao(c) {
       return c == 'assistencias' ? 'assistencias'
@@ -111,7 +124,7 @@ service cloud.firestore {
 
     match /corretoras/{e} {
       allow read: if membro(e);
-      allow write: if gestor(e);
+      allow write: if gestor(e) && contaGrava(e); // Etapa 25
 
       match /{colecao}/{documento=**} {
         allow read: if membro(e);
@@ -120,13 +133,14 @@ service cloud.firestore {
         allow create, update: if (colecao in ['app_config', 'sla_configs', 'pdf_signatures', 'seguradoras', 'workshops']
           ? gestor(e)
           : membro(e))
-          && moduloLigado(e, moduloDaColecao(colecao)); // Etapa 23
+          && moduloLigado(e, moduloDaColecao(colecao)) // Etapa 23
+          && contaGrava(e); // Etapa 25
 
         // excluir atendimento/cliente e configurações: só o gestor
         allow delete: if colecao in ['sinistros', 'assistencias', 'clientes',
                                      'app_config', 'sla_configs', 'pdf_signatures', 'seguradoras', 'workshops']
-          ? gestor(e)
-          : membro(e);
+          ? gestor(e) && contaGrava(e)
+          : membro(e) && contaGrava(e); // Etapa 25
       }
     }
 

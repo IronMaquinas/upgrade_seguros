@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../screens/register_screen.dart';
+import '../screens/autocadastro_screen.dart'; // Etapa 25
 import '../screens/dashboard_screen.dart';
 import '../services/auth_service.dart';
 import '../services/biometric_service.dart';
@@ -354,7 +355,13 @@ class _AuthScreenState extends State<AuthScreen> {
                       onPressed: _resetPassword,
                       child: const Text('Esqueci minha senha'),
                     ),
-                    // ❌ Link "Não tem conta? Cadastre-se" removido
+                    // Etapa 25: autocadastro de corretora (vira pedido; teste de 14 dias após aprovação)
+                    TextButton(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const AutocadastroScreen()),
+                      ),
+                      child: const Text('Sua corretora ainda não usa? Teste 14 dias grátis'),
+                    ),
 
                     // 🔥 Rodapé com navegadores recomendados
                     const SizedBox(height: 16),

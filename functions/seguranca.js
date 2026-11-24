@@ -200,6 +200,11 @@ exports.criarUsuario = postComCors(async (req, res) => {
   // Etapa 16: o usuário novo entra na corretora do administrador.
   const empresaId = String(quem.dados.empresaId || '').trim();
   if (!empresaId) return res.status(400).json({ erro: 'O seu usuário não tem corretora (empresaId) no cadastro' });
+  // Etapa 25: conta em só leitura (teste terminou, suspensa, cancelada) não cria usuário
+  const contaDoc = await db().doc(`plataforma_contas/${empresaId}`).get();
+  if (contaDoc.exists && !require('./conta').contaGrava(contaDoc.data())) {
+    return res.status(403).json({ erro: 'A conta da corretora está em modo só leitura. Veja Meu plano.' });
+  }
 
   const b = req.body || {};
   const nome = String(b.nome || '').trim();

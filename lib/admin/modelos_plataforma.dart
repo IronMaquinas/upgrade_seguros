@@ -19,6 +19,8 @@ class ContaPlataforma {
   final int precoCentavos;
   final Map<String, Franquia> franquias;
   final DateTime? cortesiaAte;
+  /// Etapa 25: teste vencido = 'teste_encerrado' (calculado no servidor).
+  final String situacaoEfetiva;
 
   const ContaPlataforma({
     required this.situacao,
@@ -32,7 +34,8 @@ class ContaPlataforma {
     this.precoCentavos = 0,
     this.franquias = const {},
     this.cortesiaAte,
-  });
+    String? situacaoEfetiva,
+  }) : situacaoEfetiva = situacaoEfetiva ?? situacao;
 
   factory ContaPlataforma.deJson(Map<String, dynamic> j) {
     final plano = (j['plano'] is Map) ? Map<String, dynamic>.from(j['plano'] as Map) : const <String, dynamic>{};
@@ -48,6 +51,7 @@ class ContaPlataforma {
       precoCentavos: (plano['precoCentavos'] as num?)?.toInt() ?? 0,
       franquias: Planos.franquiasDe(plano['franquias']),
       cortesiaAte: DateTime.tryParse((j['cortesiaAte'] ?? '') as String)?.toLocal(),
+      situacaoEfetiva: (j['situacaoEfetiva'] ?? j['situacao'] ?? '') as String,
     );
   }
 }
@@ -140,6 +144,10 @@ String rotuloAcao(String a) => switch (a) {
       'plano_editado' => 'Editou plano',
       'plano_excluido' => 'Excluiu plano',
       'plano_da_corretora' => 'Definiu o plano de uma corretora',
+      'cadastro_aprovado' => 'Aprovou cadastro de corretora',
+      'pedido_recusado' => 'Recusou pedido',
+      'pedido_atendido' => 'Atendeu pedido de plano',
+      'situacao_definida' => 'Mudou a situação de uma corretora',
       'seguradora_criada' => 'Criou seguradora',
       'seguradora_aprovada' => 'Aprovou seguradora',
       'seguradora_editada' => 'Editou seguradora',
@@ -171,7 +179,8 @@ class ResumoPlataforma {
       if (c.conta == null) {
         sem++;
       } else {
-        por[c.conta!.situacao] = (por[c.conta!.situacao] ?? 0) + 1;
+        // Etapa 25: pela situação efetiva (teste vencido aparece como "Teste terminou")
+        por[c.conta!.situacaoEfetiva] = (por[c.conta!.situacaoEfetiva] ?? 0) + 1;
       }
       usu += c.usuarios ?? 0;
       atd += (c.sinistros ?? 0) + (c.assistencias ?? 0);
@@ -214,6 +223,81 @@ class PlanoModelo {
         franquias: Planos.franquiasDe(j['franquias']),
         corretoras: (j['corretoras'] as num?)?.toInt() ?? 0,
       );
+}
+
+// ── Etapa 25: pedidos (autocadastro e contratação) ───────────────────────────
+
+class PedidoPlataforma {
+  final String id;
+  final String tipo; // cadastro · contratacao
+  final String situacao; // pendente · aprovado · recusado · atendido
+  final String cnpj;
+  final String nomeCorretora;
+  final String responsavel;
+  final String email;
+  final String telefone;
+  final String susep;
+  final String razaoSocial;
+  final String nomeFantasia;
+  final String situacaoReceita;
+  final String empresaId;
+  final String planoNome;
+  final String mensagem;
+  final String motivo;
+  final DateTime? criadoEm;
+  final DateTime? resolvidoEm;
+  final String resolvidoPor;
+
+  const PedidoPlataforma({
+    required this.id,
+    required this.tipo,
+    required this.situacao,
+    this.cnpj = '',
+    this.nomeCorretora = '',
+    this.responsavel = '',
+    this.email = '',
+    this.telefone = '',
+    this.susep = '',
+    this.razaoSocial = '',
+    this.nomeFantasia = '',
+    this.situacaoReceita = '',
+    this.empresaId = '',
+    this.planoNome = '',
+    this.mensagem = '',
+    this.motivo = '',
+    this.criadoEm,
+    this.resolvidoEm,
+    this.resolvidoPor = '',
+  });
+
+  bool get pendente => situacao == 'pendente';
+  bool get cadastro => tipo == 'cadastro';
+
+  factory PedidoPlataforma.deJson(Map<String, dynamic> j) {
+    final r = j['receita'] is Map ? Map<String, dynamic>.from(j['receita'] as Map) : const <String, dynamic>{};
+    String s(String k) => (j[k] ?? '') as String;
+    return PedidoPlataforma(
+      id: s('id'),
+      tipo: s('tipo'),
+      situacao: s('situacao'),
+      cnpj: s('cnpj'),
+      nomeCorretora: s('nomeCorretora'),
+      responsavel: s('responsavel'),
+      email: s('email'),
+      telefone: s('telefone'),
+      susep: s('susep'),
+      razaoSocial: (r['razaoSocial'] ?? '') as String,
+      nomeFantasia: (r['nomeFantasia'] ?? '') as String,
+      situacaoReceita: (r['situacao'] ?? '') as String,
+      empresaId: s('empresaId'),
+      planoNome: s('planoNome'),
+      mensagem: s('mensagem'),
+      motivo: s('motivo'),
+      criadoEm: DateTime.tryParse(s('criadoEm'))?.toLocal(),
+      resolvidoEm: DateTime.tryParse(s('resolvidoEm'))?.toLocal(),
+      resolvidoPor: s('resolvidoPor'),
+    );
+  }
 }
 
 // ── Etapa 22: catálogo global de seguradoras ─────────────────────────────────

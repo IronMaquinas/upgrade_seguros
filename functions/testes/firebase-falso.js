@@ -142,6 +142,10 @@ const fakeAdmin = {
       if (typeof tokens[t] === 'object') return { uid: tokens[t].uid, email: tokens[t].uid + '@x.com', ...(tokens[t].marcas || {}) };
       return { uid: tokens[t], email: tokens[t] + '@x.com' };
     },
+    async getUserByEmail(email) { // Etapa 25
+      if (contas[email]) return { uid: contas[email], email };
+      const e = new Error('x'); e.code = 'auth/user-not-found'; throw e;
+    },
     async createUser({ email }) {
       if (contas[email]) { const e = new Error('x'); e.code = 'auth/email-already-exists'; throw e; }
       contas[email] = 'novo_' + Object.keys(contas).length;

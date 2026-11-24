@@ -214,4 +214,4 @@ async function definirDaConta(quem, corpo, auditar) {
   return { ok: true, plano, modulos };
 }
 
-module.exports = { METRICAS, ErroDePlano, listar, salvar, excluir, definirDaConta, chave };
+module.exports = { COL, METRICAS, ErroDePlano, listar, salvar, excluir, definirDaConta, chave };

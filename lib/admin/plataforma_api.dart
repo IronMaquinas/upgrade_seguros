@@ -108,6 +108,31 @@ class PlataformaApi {
         'motivo': motivo,
       });
 
+  // ── Etapa 25: pedidos e situação ──
+  static Future<List<PedidoPlataforma>> pedidos() async {
+    final j = await _chamar({'acao': 'pedidos'});
+    return [for (final p in (j['pedidos'] as List)) PedidoPlataforma.deJson(Map<String, dynamic>.from(p as Map))];
+  }
+
+  /// [planoId] null = Tudo ligado durante o teste. Devolve o e-mail do gestor criado.
+  static Future<String> pedidoAprovar(String id, {String? planoId, int diasTeste = 14}) async {
+    final j = await _chamar({'acao': 'pedidoAprovar', 'id': id, if (planoId != null) 'planoId': planoId, 'diasTeste': diasTeste});
+    return (j['email'] ?? '') as String;
+  }
+
+  static Future<void> pedidoRecusar(String id, String motivo) => _chamar({'acao': 'pedidoRecusar', 'id': id, 'motivo': motivo});
+
+  static Future<void> pedidoAtendido(String id, String nota) => _chamar({'acao': 'pedidoAtendido', 'id': id, 'nota': nota});
+
+  /// [testeAte] 'AAAA-MM-DD' (só para situação 'teste').
+  static Future<void> contaDefinirSituacao(String empresaId, String situacao, {String? testeAte, String motivo = ''}) => _chamar({
+        'acao': 'contaDefinirSituacao',
+        'empresaId': empresaId,
+        'situacao': situacao,
+        if (testeAte != null) 'testeAte': testeAte,
+        'motivo': motivo,
+      });
+
   // ── Etapa 22: catálogo de seguradoras ──
   static Future<List<SeguradoraCatalogo>> catalogo() async {
     final j = await _chamar({'acao': 'catalogo'});

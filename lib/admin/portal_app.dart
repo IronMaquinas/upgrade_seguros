@@ -1,7 +1,7 @@
 // lib/admin/portal_app.dart — Etapa 21: telas do portal da plataforma
 //
 //   PortaoPlataforma  login → confere no servidor se é admin → portal
-//   _Portal           menu lateral: Visão geral · Corretoras · Planos · Seguradoras · Auditoria
+//   _Portal           menu lateral: Visão geral · Pedidos · Corretoras · Planos · Seguradoras · Auditoria
 //
 // Se a conta não for admin da plataforma (ou for usuário de uma corretora), o
 // servidor recusa e o portal sai na hora.
@@ -12,6 +12,7 @@ import 'package:intl/intl.dart';
 
 import 'package:upgrade_seguros/utils/modulos.dart';
 
+import 'aba_pedidos_portal.dart'; // Etapa 25
 import 'aba_planos_portal.dart'; // Etapa 24
 import 'aba_seguradoras_portal.dart'; // Etapa 22
 import 'modulos_corretora_dialog.dart'; // Etapa 23 / 24: plano da corretora
@@ -199,6 +200,7 @@ class _PortalState extends State<_Portal> {
   int _aba = 0;
   List<CorretoraPlataforma>? _corretoras;
   String? _erro;
+  int _pedidosPendentes = 0; // Etapa 25
 
   @override
   void initState() {
@@ -211,6 +213,11 @@ class _PortalState extends State<_Portal> {
     try {
       final l = await PlataformaApi.corretoras();
       if (mounted) setState(() => _corretoras = l);
+      // Etapa 25: contador de pedidos pendentes (falha aqui não atrapalha o resto)
+      try {
+        final p = await PlataformaApi.pedidos();
+        if (mounted) setState(() => _pedidosPendentes = p.where((x) => x.pendente).length);
+      } catch (_) {}
     } on AcessoNegado {
       widget.onSair();
     } catch (e) {
@@ -221,7 +228,8 @@ class _PortalState extends State<_Portal> {
   @override
   Widget build(BuildContext context) {
     final telas = [
-      _VisaoGeral(corretoras: _corretoras, erro: _erro, onRecarregar: _carregar),
+      _VisaoGeral(corretoras: _corretoras, erro: _erro, onRecarregar: _carregar, pedidosPendentes: _pedidosPendentes, irParaPedidos: () => setState(() => _aba = 1)),
+      AbaPedidosPortal(onMudou: _carregar), // Etapa 25
       _Corretoras(corretoras: _corretoras, erro: _erro, onRecarregar: _carregar),
       const AbaPlanosPortal(), // Etapa 24
       const AbaSeguradorasPortal(), // Etapa 22
@@ -244,12 +252,18 @@ class _PortalState extends State<_Portal> {
           onDestinationSelected: (i) => setState(() => _aba = i),
           labelType: NavigationRailLabelType.all,
           backgroundColor: Colors.white,
-          destinations: const [
-            NavigationRailDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: Text('Visão geral')),
-            NavigationRailDestination(icon: Icon(Icons.business_outlined), selectedIcon: Icon(Icons.business), label: Text('Corretoras')),
-            NavigationRailDestination(icon: Icon(Icons.workspace_premium_outlined), selectedIcon: Icon(Icons.workspace_premium), label: Text('Planos')),
-            NavigationRailDestination(icon: Icon(Icons.shield_outlined), selectedIcon: Icon(Icons.shield), label: Text('Seguradoras')),
-            NavigationRailDestination(icon: Icon(Icons.history), label: Text('Auditoria')),
+          destinations: [
+            const NavigationRailDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: Text('Visão geral')),
+            // Etapa 25
+            NavigationRailDestination(
+              icon: Badge(isLabelVisible: _pedidosPendentes > 0, label: Text('$_pedidosPendentes'), child: const Icon(Icons.inbox_outlined)),
+              selectedIcon: Badge(isLabelVisible: _pedidosPendentes > 0, label: Text('$_pedidosPendentes'), child: const Icon(Icons.inbox)),
+              label: const Text('Pedidos'),
+            ),
+            const NavigationRailDestination(icon: Icon(Icons.business_outlined), selectedIcon: Icon(Icons.business), label: Text('Corretoras')),
+            const NavigationRailDestination(icon: Icon(Icons.workspace_premium_outlined), selectedIcon: Icon(Icons.workspace_premium), label: Text('Planos')),
+            const NavigationRailDestination(icon: Icon(Icons.shield_outlined), selectedIcon: Icon(Icons.shield), label: Text('Seguradoras')),
+            const NavigationRailDestination(icon: Icon(Icons.history), label: Text('Auditoria')),
           ],
         ),
         const VerticalDivider(width: 1),
@@ -298,7 +312,15 @@ class _VisaoGeral extends StatefulWidget {
   final List<CorretoraPlataforma>? corretoras;
   final String? erro;
   final Future<void> Function() onRecarregar;
-  const _VisaoGeral({required this.corretoras, required this.erro, required this.onRecarregar});
+  final int pedidosPendentes; // Etapa 25
+  final VoidCallback irParaPedidos;
+  const _VisaoGeral({
+    required this.corretoras,
+    required this.erro,
+    required this.onRecarregar,
+    this.pedidosPendentes = 0,
+    required this.irParaPedidos,
+  });
   @override
   State<_VisaoGeral> createState() => _VisaoGeralState();
 }
@@ -350,6 +372,27 @@ class _VisaoGeralState extends State<_VisaoGeral> {
         _Cartao('Atendimentos', '${r.atendimentos}', Icons.assignment_outlined, _kAzul),
         for (final e in r.porSituacao.entries) _Cartao(rotuloSituacao(e.key), '${e.value}', Icons.circle, corSituacao(e.key)),
       ]),
+      // Etapa 25: pedidos e testes acabando
+      if (widget.pedidosPendentes > 0) ...[
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: const Color(0xFFE3F2FD), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFF90CAF9))),
+          child: Row(children: [
+            const Icon(Icons.inbox, color: _kAzul),
+            const SizedBox(width: 10),
+            Expanded(child: Text('${widget.pedidosPendentes} pedido(s) esperando: cadastro de corretora ou pedido de plano.')),
+            FilledButton(onPressed: widget.irParaPedidos, child: const Text('Ver pedidos')),
+          ]),
+        ),
+      ],
+      for (final c in l.where((c) =>
+          c.conta?.situacaoEfetiva == 'teste' &&
+          c.conta!.testeAte != null &&
+          c.conta!.testeAte!.difference(DateTime.now()).inHours < 72)) ...[
+        const SizedBox(height: 8),
+        Text('⏳ ${c.nome}: teste termina em ${DateFormat('dd/MM HH:mm').format(c.conta!.testeAte!)}', style: const TextStyle(color: _kLaranja)),
+      ],
       if (r.semConta > 0) ...[
         const SizedBox(height: 20),
         Container(
@@ -368,7 +411,7 @@ class _VisaoGeralState extends State<_VisaoGeral> {
         ),
       ],
       const SizedBox(height: 24),
-      Text('Em breve: cadastro de novas corretoras com teste grátis, assinatura e receita.',
+      Text('Em breve: receita do mês, custos por corretora e cobrança automática.',
           style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
     ]);
   }
@@ -441,7 +484,7 @@ class _Corretoras extends StatelessWidget {
             linha('Criada em', c.criadaEm == null ? '' : d.format(c.criadaEm!)),
             linha('Identificador', c.id),
             const Divider(height: 20),
-            linha('Situação', rotuloSituacao(c.conta?.situacao ?? '')),
+            linha('Situação', rotuloSituacao(c.conta?.situacaoEfetiva ?? '')), // Etapa 25
             linha('Plano', c.conta == null ? '' : _rotuloPlano(c.conta!)),
             // Etapa 24: preço, franquias e cortesia
             if (c.conta != null && c.conta!.planoTipo != 'tudo_ligado' && c.conta!.planoTipo.isNotEmpty)
@@ -467,6 +510,15 @@ class _Corretoras extends StatelessWidget {
           ]),
         ),
         actions: [
+          if (c.conta != null) // Etapa 25
+            TextButton.icon(
+              icon: const Icon(Icons.flag_outlined, size: 18),
+              label: const Text('Situação'),
+              onPressed: () async {
+                Navigator.pop(ctx);
+                if (await abrirSituacaoDaConta(context, c)) await onRecarregar();
+              },
+            ),
           if (c.conta != null)
             TextButton.icon(
               icon: const Icon(Icons.workspace_premium_outlined, size: 18),
@@ -495,7 +547,7 @@ class _ChipSituacao extends StatelessWidget {
   const _ChipSituacao(this.conta);
   @override
   Widget build(BuildContext context) {
-    final s = conta?.situacao ?? '';
+    final s = conta?.situacaoEfetiva ?? ''; // Etapa 25: teste vencido = "Teste terminou"
     final cor = corSituacao(s);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

@@ -20,6 +20,8 @@ import '../screens/auth_screen.dart';
 import '../services/auth_service.dart';
 import '../services/empresa_atual.dart';
 import '../services/plano_atual.dart'; // Etapa 23
+import '../screens/meu_plano_screen.dart'; // Etapa 25
+import '../utils/situacao_conta.dart'; // Etapa 25
 import 'migracao_empresa_card.dart';
 
 enum _Situacao { pronta, migracaoPendenteAdmin, migracaoPendente }
@@ -113,7 +115,7 @@ class _PortaoEmpresaState extends State<PortaoEmpresa> {
         }
         switch (snap.data!) {
           case _Situacao.pronta:
-            return widget.child;
+            return _ComAvisoDaConta(child: widget.child); // Etapa 25
           case _Situacao.migracaoPendenteAdmin:
             return _tela(
               icone: Icons.drive_file_move_outline,
@@ -127,6 +129,45 @@ class _PortaoEmpresaState extends State<PortaoEmpresa> {
               texto: 'O sistema está sendo atualizado pelo gestor. Tente de novo em alguns minutos.',
             );
         }
+      },
+    );
+  }
+}
+
+/// Etapa 25: faixa no topo com o teste grátis (dias que faltam) ou o modo só
+/// leitura (teste terminou, suspensa, cancelada). Sem aviso, só o app.
+class _ComAvisoDaConta extends StatelessWidget {
+  final Widget child;
+  const _ComAvisoDaConta({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: PlanoAtual.versao,
+      builder: (context, _, __) {
+        final efetiva = PlanoAtual.situacaoEfetiva;
+        final texto = SituacaoConta.aviso(efetiva, PlanoAtual.testeAte);
+        if (texto.isEmpty) return child;
+        final grave = PlanoAtual.somenteLeitura || efetiva == 'inadimplente';
+        final cor = grave ? const Color(0xFFC62828) : const Color(0xFF1565C0);
+        return Column(children: [
+          Material(
+            color: grave ? const Color(0xFFFFEBEE) : const Color(0xFFE3F2FD),
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: Row(children: [
+                  Icon(grave ? Icons.lock_clock_outlined : Icons.hourglass_bottom, size: 18, color: cor),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(texto, style: TextStyle(fontSize: 13, color: cor, fontWeight: FontWeight.w600))),
+                  TextButton(onPressed: () => abrirMeuPlano(context), child: const Text('Ver meu plano')),
+                ]),
+              ),
+            ),
+          ),
+          Expanded(child: child),
+        ]);
       },
     );
   }

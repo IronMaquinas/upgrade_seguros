@@ -13,6 +13,12 @@ exports.criarUsuario = seguranca.criarUsuario;
 // Etapa 16: multi-tenant — cópia dos dados da raiz para a pasta da corretora.
 exports.migrarEmpresa = require('./empresa').migrarEmpresa;
 
+// Etapa 25: autocadastro de corretora (público, vira pedido para o portal) e
+// "Meu plano" (planos disponíveis, pedido de contratação).
+const conta = require('./conta');
+exports.autocadastro = conta.autocadastro;
+exports.minhaConta = conta.minhaConta;
+
 // Etapa 16c: arquivos na pasta da corretora e links com chave de acesso
 // (o upload não deixa mais o arquivo público). O código de uploadFile e
 // deleteFiles saiu daqui e foi para functions/arquivos.js — mesmos nomes e
