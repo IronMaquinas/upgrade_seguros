@@ -116,6 +116,7 @@ String rotuloAcao(String a) => switch (a) {
       'admin_adicionado' => 'Admin adicionado',
       'admin_removido' => 'Admin removido',
       'catalogo_importado' => 'Importou o catálogo de seguradoras',
+      'seguradora_criada' => 'Criou seguradora',
       'seguradora_aprovada' => 'Aprovou seguradora',
       'seguradora_editada' => 'Editou seguradora',
       'seguradoras_juntadas' => 'Juntou seguradoras',
@@ -167,6 +168,8 @@ class SeguradoraCatalogo {
   final String situacao; // aprovada · pendente · inativa · juntada · recusada
   final String origem;
   final String situacaoReceita;
+  /// 22.1: 'servidor' (conferida pelo servidor) ou 'navegador' (consultada no app)
+  final String dadosReceita;
   final String criadaPorCorretora;
   final String criadaPorEmail;
   final DateTime? criadaEm;
@@ -183,6 +186,7 @@ class SeguradoraCatalogo {
     this.situacao = '',
     this.origem = '',
     this.situacaoReceita = '',
+    this.dadosReceita = '',
     this.criadaPorCorretora = '',
     this.criadaPorEmail = '',
     this.criadaEm,
@@ -205,6 +209,7 @@ class SeguradoraCatalogo {
       situacao: (j['situacao'] ?? '') as String,
       origem: (j['origem'] ?? '') as String,
       situacaoReceita: (j['situacaoReceita'] ?? '') as String,
+      dadosReceita: (j['dadosReceita'] ?? '') as String,
       criadaPorCorretora: (por['corretora'] ?? '') as String,
       criadaPorEmail: (por['email'] ?? '') as String,
       criadaEm: DateTime.tryParse((j['criadaEm'] ?? '') as String)?.toLocal(),

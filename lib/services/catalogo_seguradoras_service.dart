@@ -13,6 +13,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:upgrade_seguros/models/seguradora_model.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart';
 import 'package:upgrade_seguros/services/funcoes_nuvem.dart';
+import 'package:upgrade_seguros/services/receita_cnpj.dart';
+import 'package:upgrade_seguros/utils/perfil_corretora.dart';
 import 'package:upgrade_seguros/services/seguradoras_cadastradas.dart';
 
 class ResultadoCnpj {
@@ -44,9 +46,20 @@ class CatalogoSeguradorasService {
     return j;
   }
 
+  /// Já está na lista? Se não, os dados da Receita: do servidor, ou — se o
+  /// servidor não conseguir consultar (22.1) — do navegador, como na 17.1.
   static Future<ResultadoCnpj> consultarCnpj(String cnpj) async {
     final j = await _chamar({'acao': 'consultarCnpj', 'cnpj': cnpj});
     if (j['existente'] is Map) return ResultadoCnpj(existenteNome: (j['existente'] as Map)['nome'] as String?);
+    if (j['receita'] is! Map) {
+      final d = await consultarReceitaCnpj(cnpj);
+      return ResultadoCnpj(
+        cnpj: PerfilCorretora.formatarCnpj(cnpj.replaceAll(RegExp(r'\D'), '')),
+        razaoSocial: d.razaoSocial,
+        nomeFantasia: d.nomeFantasia,
+        situacaoReceita: d.situacao,
+      );
+    }
     final r = Map<String, dynamic>.from(j['receita'] as Map);
     return ResultadoCnpj(
       cnpj: (r['cnpj'] ?? '') as String,
@@ -57,8 +70,15 @@ class CatalogoSeguradorasService {
   }
 
   /// Devolve o nome que ficou no catálogo (o existente ou o novo, pendente).
-  static Future<({String nome, bool pendente, bool existente})> sugerir(String cnpj, String nome) async {
-    final j = await _chamar({'acao': 'sugerir', 'cnpj': cnpj, 'nome': nome});
+  /// [receita]: o que a consulta trouxe (o servidor usa se ele mesmo não conseguir consultar).
+  static Future<({String nome, bool pendente, bool existente})> sugerir(String cnpj, String nome, {ResultadoCnpj? receita}) async {
+    final j = await _chamar({
+      'acao': 'sugerir',
+      'cnpj': cnpj,
+      'nome': nome,
+      if (receita != null)
+        'receita': {'razaoSocial': receita.razaoSocial, 'nomeFantasia': receita.nomeFantasia, 'situacao': receita.situacaoReceita},
+    });
     final s = Map<String, dynamic>.from(j['seguradora'] as Map);
     SeguradorasCadastradas.invalidar();
     return (nome: (s['nome'] ?? '') as String, pendente: s['situacao'] == 'pendente', existente: j['existente'] == true);

@@ -8,6 +8,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:upgrade_seguros/services/receita_cnpj.dart';
+import 'package:upgrade_seguros/utils/perfil_corretora.dart';
 
 import 'plataforma_api.dart';
 
@@ -110,6 +112,90 @@ class _AbaSeguradorasPortalState extends State<AbaSeguradorasPortal> {
     } catch (_) {
       return '';
     }
+  }
+
+  /// 22.1: o admin cria direto, já aprovada. CNPJ consultado na Receita pelo
+  /// navegador; nome pode ser ajustado (o admin é quem cuida da lista).
+  Future<void> _nova() async {
+    final cnpj = TextEditingController();
+    final nome = TextEditingController();
+    final susep = TextEditingController();
+    var razao = '';
+    String? aviso;
+    var consultando = false;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (d) => StatefulBuilder(
+        builder: (d, set) {
+          Future<void> consultar() async {
+            set(() {
+              consultando = true;
+              aviso = null;
+            });
+            try {
+              final r = await consultarReceitaCnpj(cnpj.text);
+              set(() {
+                razao = r.razaoSocial;
+                cnpj.text = PerfilCorretora.formatarCnpj(cnpj.text.replaceAll(RegExp(r'\D'), ''));
+                if (nome.text.trim().isEmpty) nome.text = r.nomeFantasia.isNotEmpty ? r.nomeFantasia : r.razaoSocial;
+                if (!r.ativa) aviso = '⚠️ Situação na Receita: ${r.situacao}';
+              });
+            } catch (e) {
+              set(() => aviso = '$e');
+            } finally {
+              set(() => consultando = false);
+            }
+          }
+
+          return AlertDialog(
+            backgroundColor: Colors.white,
+            surfaceTintColor: Colors.transparent,
+            title: const Text('Nova seguradora'),
+            content: SizedBox(
+              width: 460,
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Expanded(
+                    child: TextField(
+                      controller: cnpj,
+                      autofocus: true,
+                      decoration: const InputDecoration(labelText: 'CNPJ', border: OutlineInputBorder()),
+                      onSubmitted: (_) => consultando ? null : consultar(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.tonal(onPressed: consultando ? null : consultar, child: const Text('Consultar na Receita')),
+                ]),
+                if (consultando) const Padding(padding: EdgeInsets.only(top: 10), child: LinearProgressIndicator()),
+                if (razao.isNotEmpty)
+                  Padding(padding: const EdgeInsets.only(top: 8), child: Text('Receita: $razao', style: TextStyle(fontSize: 12, color: Colors.grey.shade700))),
+                if (aviso != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(aviso!, style: const TextStyle(color: _kVermelho))),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: nome,
+                  decoration: const InputDecoration(labelText: 'Nome na lista', border: OutlineInputBorder()),
+                  onChanged: (_) => set(() {}),
+                ),
+                const SizedBox(height: 10),
+                TextField(controller: susep, decoration: const InputDecoration(labelText: 'Código SUSEP (opcional)', border: OutlineInputBorder())),
+              ]),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancelar')),
+              FilledButton(
+                onPressed: razao.isEmpty || nome.text.trim().isEmpty ? null : () => Navigator.pop(d, true),
+                child: const Text('Criar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (ok != true) return;
+    await _executar(
+      () => PlataformaApi.catalogoCriar(cnpj: cnpj.text, nome: nome.text.trim(), razaoSocial: razao, susep: susep.text),
+      '"${nome.text.trim()}" criada.',
+    );
   }
 
   Future<void> _aprovar(SeguradoraCatalogo s) async {
@@ -222,6 +308,8 @@ class _AbaSeguradorasPortalState extends State<AbaSeguradorasPortal> {
     final susep = TextEditingController(text: s.susep);
     final apelidos = TextEditingController(text: s.apelidos.join(', '));
     var ativa = s.situacao != 'inativa';
+    var razao = s.razaoSocial; // 22.1: conferida pelo "Consultar"
+    String? avisoCnpj;
     final uso = await _textoUso(s);
     if (!mounted) return;
     final acao = await showDialog<String>(
@@ -236,13 +324,30 @@ class _AbaSeguradorasPortalState extends State<AbaSeguradorasPortal> {
             child: SingleChildScrollView(
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
                 if (uso.isNotEmpty) Text(uso, style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-                if (s.razaoSocial.isNotEmpty) Text('Receita: ${s.razaoSocial}', style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+                if (razao.isNotEmpty) Text('Receita: $razao', style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+                if (avisoCnpj != null) Text(avisoCnpj!, style: const TextStyle(fontSize: 12, color: _kVermelho)),
                 const SizedBox(height: 12),
                 TextField(controller: nome, decoration: const InputDecoration(labelText: 'Nome na lista', border: OutlineInputBorder())),
                 const SizedBox(height: 10),
                 Row(children: [
                   Expanded(child: TextField(controller: cnpj, decoration: const InputDecoration(labelText: 'CNPJ', border: OutlineInputBorder()))),
-                  const SizedBox(width: 10),
+                  IconButton(
+                    tooltip: 'Consultar na Receita',
+                    icon: const Icon(Icons.travel_explore),
+                    onPressed: () async {
+                      try {
+                        final r = await consultarReceitaCnpj(cnpj.text);
+                        set(() {
+                          razao = r.razaoSocial;
+                          avisoCnpj = r.ativa ? null : '⚠️ Situação na Receita: ${r.situacao}';
+                          cnpj.text = PerfilCorretora.formatarCnpj(cnpj.text.replaceAll(RegExp(r'\D'), ''));
+                        });
+                      } catch (e) {
+                        set(() => avisoCnpj = '$e');
+                      }
+                    },
+                  ),
+                  const SizedBox(width: 6),
                   Expanded(child: TextField(controller: susep, decoration: const InputDecoration(labelText: 'Código SUSEP', border: OutlineInputBorder()))),
                 ]),
                 const SizedBox(height: 10),
@@ -287,6 +392,7 @@ class _AbaSeguradorasPortalState extends State<AbaSeguradorasPortal> {
         susep: susep.text,
         apelidos: lerApelidos(apelidos.text),
         ativa: ativa,
+        razaoSocial: razao != s.razaoSocial ? razao : null,
       ),
       'Salvo.',
     );
@@ -322,6 +428,8 @@ class _AbaSeguradorasPortalState extends State<AbaSeguradorasPortal> {
           Text('lista única de todas as corretoras', style: TextStyle(color: Colors.grey.shade600)),
           const Spacer(),
           OutlinedButton.icon(onPressed: _ocupado ? null : _importar, icon: const Icon(Icons.download, size: 18), label: const Text('Importar das corretoras')),
+          const SizedBox(width: 8),
+          FilledButton.icon(onPressed: _ocupado ? null : _nova, icon: const Icon(Icons.add, size: 18), label: const Text('Nova seguradora')),
           IconButton(tooltip: 'Atualizar', icon: const Icon(Icons.refresh), onPressed: _ocupado ? null : _carregar),
         ]),
         if (l.where((x) => x.viva).isEmpty)
@@ -350,6 +458,7 @@ class _AbaSeguradorasPortalState extends State<AbaSeguradorasPortal> {
                           if (s.cnpj.isNotEmpty) s.cnpj,
                           if (s.razaoSocial.isNotEmpty && s.razaoSocial != s.nome) s.razaoSocial,
                           if (s.situacaoReceita.isNotEmpty && s.situacaoReceita.toUpperCase() != 'ATIVA') '⚠️ Receita: ${s.situacaoReceita}',
+                          if (s.dadosReceita == 'navegador') 'dados da Receita consultados pelo app — confira o CNPJ',
                         ].join(' · '),
                         style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                       ),

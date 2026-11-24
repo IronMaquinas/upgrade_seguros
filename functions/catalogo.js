@@ -16,10 +16,13 @@
 // O catálogo garante nome único; renomear ou juntar no portal troca o nome em
 // todas as corretoras (renomearNosRegistros).
 //
-// Seguradora nova: a corretora informa o CNPJ; QUEM consulta a Receita é o
-// servidor (BrasilAPI), então o nome é o oficial — não dá para digitar errado.
-// Ela entra como "pendente", a corretora já pode usar, e o admin aprova / junta /
-// recusa no portal.
+// Seguradora nova: a corretora informa o CNPJ e o app consulta a Receita
+// (BrasilAPI) no navegador, como na Etapa 17.1. O nome é escolhido entre o
+// fantasia e a razão social, não digitado. Ela entra como "pendente", a
+// corretora já pode usar, e o admin aprova / junta / recusa no portal.
+// Etapa 22.1: o servidor também TENTA consultar (para conferir), mas a BrasilAPI
+// recusa (403) chamadas dos servidores do Google; nesse caso vale o que o
+// navegador trouxe, e a entrada fica marcada (dadosReceita: 'navegador').
 
 const { onRequest } = require('firebase-functions/v2/https');
 const logger = require('firebase-functions/logger');
@@ -70,7 +73,10 @@ const formatarCnpj = (c) => {
 /** Consulta a Receita (BrasilAPI). { ok, razaoSocial, nomeFantasia, situacao } ou { erro, codigo }. */
 async function consultarReceita(cnpj) {
   try {
-    const r = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${digitos(cnpj)}`, { signal: AbortSignal.timeout(15000) });
+    const r = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${digitos(cnpj)}`, {
+      signal: AbortSignal.timeout(10000),
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; UpgradeSeguros/1.0)', Accept: 'application/json' },
+    });
     if (r.status === 404) return { erro: 'CNPJ não encontrado na Receita Federal.', codigo: 404 };
     if (r.status !== 200) return { erro: `A consulta à Receita não respondeu agora (${r.status}). Tente de novo.`, codigo: 502 };
     const j = await r.json();
@@ -200,9 +206,13 @@ const catalogoSeguradoras = onRequest((req, res) =>
 
       if (corpo.acao === 'consultarCnpj') {
         if (porCnpj && visivel(porCnpj)) return res.json({ existente: resumo(porCnpj) });
+        if (porCnpj) return res.status(409).json({ erro: 'Essa seguradora já foi enviada para aprovação por outra corretora. Assim que for aprovada, aparece na lista.' });
+        // 22.1: tentativa; se o servidor não conseguir, o app consulta no navegador (receita: null)
         const rec = await consultarReceita(cnpj);
-        if (!rec.ok) return res.status(rec.codigo === 404 ? 404 : 502).json({ erro: rec.erro });
-        return res.json({ receita: { cnpj: formatarCnpj(cnpj), razaoSocial: rec.razaoSocial, nomeFantasia: rec.nomeFantasia, situacao: rec.situacao } });
+        if (rec.codigo === 404) return res.status(404).json({ erro: rec.erro });
+        return res.json({
+          receita: rec.ok ? { cnpj: formatarCnpj(cnpj), razaoSocial: rec.razaoSocial, nomeFantasia: rec.nomeFantasia, situacao: rec.situacao } : null,
+        });
       }
 
       if (corpo.acao === 'sugerir') {
@@ -211,8 +221,16 @@ const catalogoSeguradoras = onRequest((req, res) =>
           // pendente de OUTRA corretora com o mesmo CNPJ: não duplica, deixa ela visível para esta também
           return res.status(409).json({ erro: 'Essa seguradora já foi enviada para aprovação por outra corretora. Assim que for aprovada, aparece na lista.' });
         }
-        const rec = await consultarReceita(cnpj);
-        if (!rec.ok) return res.status(rec.codigo === 404 ? 404 : 502).json({ erro: rec.erro });
+        let rec = await consultarReceita(cnpj);
+        if (rec.codigo === 404) return res.status(404).json({ erro: rec.erro });
+        const dadosReceita = rec.ok ? 'servidor' : 'navegador';
+        if (!rec.ok) {
+          // 22.1: vale o que o navegador consultou (o admin confere ao aprovar)
+          const n = corpo.receita || {};
+          const t = (v) => String(v || '').trim().slice(0, 200);
+          if (!t(n.razaoSocial)) return res.status(400).json({ erro: 'Consulte o CNPJ na Receita antes de adicionar.' });
+          rec = { ok: true, razaoSocial: t(n.razaoSocial), nomeFantasia: t(n.nomeFantasia), situacao: t(n.situacao) };
+        }
         const opcoes = [rec.nomeFantasia, rec.razaoSocial].filter(Boolean);
         const nome = opcoes.find((o) => simples(o) === simples(corpo.nome)) || rec.nomeFantasia || rec.razaoSocial;
         const parecida = mesmaChave(catalogo, nome);
@@ -231,6 +249,7 @@ const catalogoSeguradoras = onRequest((req, res) =>
           situacao: 'pendente',
           origem: 'sugerida',
           situacaoReceita: rec.situacao,
+          dadosReceita,
           criadaPor: { empresaId, uid: u.uid, email: u.email || '' },
           criadaEm: agora(),
           atualizadaEm: agora(),

@@ -52,7 +52,12 @@ class PlataformaApi {
 
   static Future<void> catalogoAprovar(String id, {String? nome}) => _chamar({'acao': 'catalogoAprovar', 'id': id, if (nome != null) 'nome': nome});
 
-  static Future<void> catalogoEditar(String id, {String? nome, String? cnpj, String? susep, List<String>? apelidos, bool? ativa}) => _chamar({
+  static Future<void> catalogoCriar({required String cnpj, required String nome, String razaoSocial = '', String susep = ''}) =>
+      _chamar({'acao': 'catalogoCriar', 'cnpj': cnpj, 'nome': nome, 'razaoSocial': razaoSocial, 'susep': susep});
+
+  static Future<void> catalogoEditar(String id,
+          {String? nome, String? cnpj, String? susep, List<String>? apelidos, bool? ativa, String? razaoSocial}) =>
+      _chamar({
         'acao': 'catalogoEditar',
         'id': id,
         if (nome != null) 'nome': nome,
@@ -60,6 +65,7 @@ class PlataformaApi {
         if (susep != null) 'susep': susep,
         if (apelidos != null) 'apelidos': apelidos,
         if (ativa != null) 'ativa': ativa,
+        if (razaoSocial != null) 'razaoSocial': razaoSocial,
       });
 
   static Future<void> catalogoJuntar(String de, String para) => _chamar({'acao': 'catalogoJuntar', 'de': de, 'para': para});

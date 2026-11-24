@@ -70,7 +70,7 @@ class _NovaSeguradoraDialogState extends State<_NovaSeguradoraDialog> {
       _erro = null;
     });
     try {
-      final r = await CatalogoSeguradorasService.sugerir(_cnpj.text, nome);
+      final r = await CatalogoSeguradorasService.sugerir(_cnpj.text, nome, receita: _resultado);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(r.existente

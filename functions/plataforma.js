@@ -207,6 +207,7 @@ async function catalogoParaPortal() {
       situacao: x.situacao || '',
       origem: x.origem || '',
       situacaoReceita: x.situacaoReceita || '',
+      dadosReceita: x.dadosReceita || '',
       criadaPor: x.criadaPor ? { ...x.criadaPor, corretora: nomesCorretora[x.criadaPor.empresaId] || '' } : null,
       criadaEm: data(x.criadaEm),
       juntadaCom: x.juntadaCom || '',
@@ -296,6 +297,36 @@ async function trocarNome(e, novoNome) {
   return total;
 }
 
+/** 22.1: o admin cria direto (aprovada), com o CNPJ consultado no portal. */
+async function criar(quem, { cnpj, nome, razaoSocial, susep }) {
+  const c = String(cnpj || '').replace(/\D/g, '');
+  const n = String(nome || '').trim();
+  if (!n) throw new ErroDeUso('Informe o nome.');
+  if (c && !cat.cnpjValido(c)) throw new ErroDeUso('CNPJ inválido.');
+  const lista = await cat.todasDoCatalogo();
+  const vivas = ['aprovada', 'pendente', 'inativa'];
+  const porCnpj = c && lista.find((x) => x.cnpj === c && vivas.includes(x.situacao));
+  if (porCnpj) throw new ErroDeUso(`Esse CNPJ já é de "${porCnpj.nome}".`, 409);
+  const parecida = cat.mesmaChave(lista, n);
+  if (parecida) throw new ErroDeUso(`Já existe "${parecida.nome}" — edite essa (pode pôr o CNPJ nela).`, 409);
+  const ref = db().collection(cat.COL).doc();
+  await ref.set({
+    nome: n,
+    chave: cat.chave(n),
+    cnpj: c,
+    razaoSocial: String(razaoSocial || '').trim(),
+    susep: String(susep || '').trim(),
+    apelidos: [],
+    situacao: 'aprovada',
+    origem: 'portal',
+    criadaEm: agora(),
+    aprovadaEm: agora(),
+    atualizadaEm: agora(),
+  });
+  await auditar(quem, 'seguradora_criada', { alvoTipo: 'seguradora', alvoId: ref.id, detalhes: { nome: n, cnpj: c } });
+  return { ok: true, id: ref.id };
+}
+
 async function aprovar(quem, { id, nome }) {
   const e = await entrada(id);
   if (e.situacao !== 'pendente') throw new ErroDeUso('Só dá para aprovar uma seguradora pendente.');
@@ -305,7 +336,7 @@ async function aprovar(quem, { id, nome }) {
   return { ok: true };
 }
 
-async function editar(quem, { id, nome, cnpj, susep, apelidos, ativa }) {
+async function editar(quem, { id, nome, cnpj, susep, apelidos, ativa, razaoSocial }) {
   const e = await entrada(id);
   if (!['aprovada', 'inativa', 'pendente'].includes(e.situacao)) throw new ErroDeUso('Esta entrada não pode mais ser editada.');
   const mudancas = {};
@@ -319,6 +350,7 @@ async function editar(quem, { id, nome, cnpj, susep, apelidos, ativa }) {
     mudancas.cnpj = c;
   }
   if (susep !== undefined) mudancas.susep = String(susep || '').trim();
+  if (razaoSocial !== undefined) mudancas.razaoSocial = String(razaoSocial || '').trim(); // 22.1
   const renomeados = await trocarNome(e, nome);
   const nomeFinal = String(nome || '').trim() || e.nome;
   if (apelidos !== undefined) mudancas.apelidos = limparApelidos([...apelidos, ...(renomeados ? [e.nome] : [])], nomeFinal);
@@ -367,6 +399,7 @@ async function recusar(quem, { id, motivo }) {
  *   catalogoUso      { id }         → { sinistros, assistencias, apolices, total }
  *   catalogoAprovar  { id, nome? }  · catalogoEditar { id, nome?, cnpj?, susep?, apelidos?, ativa? }
  *   catalogoJuntar   { de, para }   · catalogoRecusar { id, motivo }
+ *   catalogoCriar    { cnpj, nome, razaoSocial?, susep? }   (22.1: o admin cria direto)
  */
 const plataforma = onRequest((req, res) =>
   cors(req, res, async () => {
@@ -391,6 +424,8 @@ const plataforma = onRequest((req, res) =>
           return res.json(await importarDasCorretoras(quem));
         case 'catalogoUso':
           return res.json(await cat.usoDoNome((await entrada(corpo.id)).nome));
+        case 'catalogoCriar':
+          return res.json(await criar(quem, corpo));
         case 'catalogoAprovar':
           return res.json(await aprovar(quem, corpo));
         case 'catalogoEditar':

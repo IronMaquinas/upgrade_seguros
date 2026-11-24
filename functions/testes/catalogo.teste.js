@@ -140,8 +140,37 @@ const doCatalogo = (nome) => {
   const rec = await chamar(plataforma, { acao: 'catalogoRecusar', id: nova.body.seguradora.id, motivo: 'não é seguradora' }, 'tAdm');
   t.ok(rec.code === 200 && store[`catalogo_seguradoras/${nova.body.seguradora.id}`].situacao === 'recusada', 'recusar sem uso');
 
+  // ── 22.1: BrasilAPI recusa o servidor (403) → vale o que o navegador consultou ──
+  const fetchOriginal = global.fetch;
+  global.fetch = async () => ({ status: 403, json: async () => ({}) });
+  const CNPJ_SUHAI = comDv('168252550001');
+  const c403 = await chamar(cat.catalogoSeguradoras, { acao: 'consultarCnpj', cnpj: CNPJ_SUHAI }, 't1');
+  t.ok(c403.code === 200 && c403.body.receita === null, '22.1: servidor barrado → consulta devolve receita null (o app consulta no navegador)');
+  t.ok((await chamar(cat.catalogoSeguradoras, { acao: 'sugerir', cnpj: CNPJ_SUHAI, nome: 'SUHAI' }, 't1')).code === 400, '22.1: sem dados do navegador → 400');
+  const s403 = await chamar(cat.catalogoSeguradoras, {
+    acao: 'sugerir', cnpj: CNPJ_SUHAI, nome: 'qualquer coisa',
+    receita: { razaoSocial: 'SUHAI SEGURADORA S.A.', nomeFantasia: '', situacao: 'ATIVA' },
+  }, 't1');
+  const suhai = doCatalogo('SUHAI SEGURADORA S.A.');
+  t.ok(s403.code === 200 && suhai && suhai.situacao === 'pendente', '22.1: com os dados do navegador, entra pendente');
+  t.ok(suhai.dadosReceita === 'navegador', '22.1: marcada como consultada no navegador');
+  t.ok(s403.body.seguradora.nome === 'SUHAI SEGURADORA S.A.', '22.1: nome continua sendo um dos da Receita (não o digitado)');
+  global.fetch = fetchOriginal;
+
+  // ── 22.1: admin cria direto pelo portal ──
+  const CNPJ_TOKIO = comDv('333111220001');
+  t.ok((await chamar(plataforma, { acao: 'catalogoCriar', cnpj: '123', nome: 'X' }, 'tAdm')).code === 400, '22.1 criar: CNPJ inválido 400');
+  t.ok((await chamar(plataforma, { acao: 'catalogoCriar', cnpj: CNPJ_TOKIO, nome: '' }, 'tAdm')).code === 400, '22.1 criar: sem nome 400');
+  t.ok((await chamar(plataforma, { acao: 'catalogoCriar', cnpj: CNPJ_TOKIO, nome: 'axa seguros' }, 'tAdm')).code === 409, '22.1 criar: nome parecido com existente 409');
+  t.ok((await chamar(plataforma, { acao: 'catalogoCriar', cnpj: CNPJ_SUHAI, nome: 'Outra' }, 'tAdm')).code === 409, '22.1 criar: CNPJ já usado 409');
+  const cri = await chamar(plataforma, { acao: 'catalogoCriar', cnpj: CNPJ_TOKIO, nome: 'Tokio Marine', razaoSocial: 'TOKIO MARINE SEGURADORA S.A.', susep: '06190' }, 'tAdm');
+  const tokio = doCatalogo('Tokio Marine');
+  t.ok(cri.code === 200 && tokio.situacao === 'aprovada' && tokio.origem === 'portal' && tokio.cnpj === CNPJ_TOKIO && tokio.susep === '06190', '22.1 criar: aprovada com CNPJ e SUSEP');
+  await chamar(plataforma, { acao: 'catalogoEditar', id: doCatalogo('AXA').id, razaoSocial: 'AXA SEGUROS S.A.' }, 'tAdm');
+  t.ok(doCatalogo('AXA').razaoSocial === 'AXA SEGUROS S.A.', '22.1 editar: grava a razão social conferida');
+
   const acoes = pegar('plataforma_auditoria/').map((k) => store[k].acao);
-  t.ok(['catalogo_importado', 'seguradora_aprovada', 'seguradora_editada', 'seguradoras_juntadas', 'seguradora_recusada'].every((a) => acoes.includes(a)), 'tudo na auditoria');
+  t.ok(['catalogo_importado', 'seguradora_criada', 'seguradora_aprovada', 'seguradora_editada', 'seguradoras_juntadas', 'seguradora_recusada'].every((a) => acoes.includes(a)), 'tudo na auditoria');
   t.ok((await chamar(plataforma, { acao: 'catalogo' }, 't1')).code === 403, 'usuário de corretora não usa as ações do portal');
   t.fim();
 })();
