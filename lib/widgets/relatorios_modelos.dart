@@ -712,7 +712,9 @@ class _ExportarDialogState extends State<_ExportarDialog> {
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                 ),
               ),
-            if (ramos.length > 1) ...[
+            // 19b.4: sempre visível (com 1 ramo só, sumia e parecia que o
+            // cliente não tinha sinistro).
+            if (ramos.isNotEmpty) ...[
               const SizedBox(height: 16),
               const Text('Ramo (nenhum marcado = todos)', style: titulo),
               const SizedBox(height: 6),
@@ -725,7 +727,7 @@ class _ExportarDialogState extends State<_ExportarDialog> {
                   ),
               ]),
             ],
-            if (status.length > 1) ...[
+            if (status.isNotEmpty) ...[
               const SizedBox(height: 16),
               const Text('Status (nenhum marcado = todos)', style: titulo),
               const SizedBox(height: 6),

@@ -32,6 +32,7 @@ import 'package:upgrade_seguros/widgets/tarefas_evento_dialog.dart'; // Etapa 14
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
 import 'package:upgrade_seguros/widgets/lancamentos_widget.dart'; // Etapa 19a
+import 'package:upgrade_seguros/widgets/identificacao_atendimento.dart'; // Etapa 19b.4
 
 class AssistDetailScreen extends StatefulWidget {
   final String assistId;
@@ -1303,8 +1304,16 @@ class _AssistDetailScreenState extends State<AssistDetailScreen> {
             _buildSection(
               title: 'Informações da Assistência',
               children: [
-                // Número
-                _buildInfoRow('Número', _assist!.numeroSinistro),
+                // 19b.4: nosso nº com botão copiar + ramo (Veículo / Residencial)
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    NumeroRegistro(_assist!.numeroSinistro),
+                    RamoChip(_assist!.ramoSinistro == 'Assistência Residencial' ? 'Residencial' : 'Veículo'),
+                  ],
+                ),
                 const Divider(height: 20),
 
                 // Linha: Cliente | CPF/CNPJ | Telefone

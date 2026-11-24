@@ -50,6 +50,7 @@ import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
 import 'package:upgrade_seguros/services/marca_pdf.dart'; // Etapa 17
 import 'package:upgrade_seguros/utils/perfil_corretora.dart'; // Etapa 17
+import 'package:upgrade_seguros/widgets/identificacao_atendimento.dart'; // Etapa 19b.4
 
 class ClaimDetailScreen extends StatefulWidget {
   final Claim claim;
@@ -2922,23 +2923,38 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
+                                        // 19b.4: status + ramo em evidência; nosso nº de registro
+                                        // à direita, com botão copiar.
                                         Row(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                              decoration: BoxDecoration(
-                                                color: _getStatusColor(_currentClaim.statusAtual).withOpacity(0.1),
-                                                borderRadius: BorderRadius.circular(20),
-                                              ),
-                                              child: Text(
-                                                _currentClaim.statusAtual,
-                                                style: TextStyle(
-                                                  color: _getStatusColor(_currentClaim.statusAtual),
-                                                  fontWeight: FontWeight.w600,
-                                                  fontSize: 12,
-                                                ),
+                                            Expanded(
+                                              child: Wrap(
+                                                spacing: 8,
+                                                runSpacing: 6,
+                                                crossAxisAlignment: WrapCrossAlignment.center,
+                                                children: [
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                                    decoration: BoxDecoration(
+                                                      color: _getStatusColor(_currentClaim.statusAtual).withOpacity(0.1),
+                                                      borderRadius: BorderRadius.circular(20),
+                                                    ),
+                                                    child: Text(
+                                                      _currentClaim.statusAtual,
+                                                      style: TextStyle(
+                                                        color: _getStatusColor(_currentClaim.statusAtual),
+                                                        fontWeight: FontWeight.w600,
+                                                        fontSize: 12,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  RamoChip(_currentClaim.ramoSinistro),
+                                                ],
                                               ),
                                             ),
+                                            const SizedBox(width: 8),
+                                            NumeroRegistro(_currentClaim.numeroSinistro),
                                           ],
                                         ),
                                         const SizedBox(height: 10),
