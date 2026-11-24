@@ -1,4 +1,4 @@
-// test/modelos_plataforma_test.dart — Etapa 21: dados do portal da plataforma
+// test/modelos_plataforma_test.dart — Etapa 21: dados do portal da plataforma (22: catálogo)
 import 'package:flutter_test/flutter_test.dart';
 import 'package:upgrade_seguros/admin/modelos_plataforma.dart';
 
@@ -59,5 +59,31 @@ void main() {
     final a = AcaoAuditoria.deJson({'em': '2026-11-24T03:00:00.000Z', 'email': 'adm@x.com', 'acao': 'entrada', 'detalhes': {'ids': ['C1']}});
     expect(a.em!.isUtc, false);
     expect(a.detalhes['ids'], ['C1']);
+  });
+
+  test('Etapa 22: seguradora do catálogo a partir do JSON', () {
+    final s = SeguradoraCatalogo.deJson({
+      'id': 'x',
+      'nome': 'MAPFRE',
+      'cnpj': '61.223.088/0001-03',
+      'apelidos': ['MAPFRE SEGUROS'],
+      'situacao': 'pendente',
+      'criadaPor': {'empresaId': 'C1', 'email': 'a@b.com', 'corretora': 'Upgrade'},
+      'criadaEm': '2026-11-24T10:00:00.000Z',
+    });
+    expect(s.pendente, true);
+    expect(s.viva, false);
+    expect(s.criadaPorCorretora, 'Upgrade');
+    expect(s.apelidos.length, 1);
+    expect(SeguradoraCatalogo.deJson({'id': 'y', 'nome': 'AXA', 'situacao': 'inativa'}).viva, true);
+    expect(rotuloSituacaoSeguradora('juntada'), 'Juntada');
+    expect(rotuloAcao('seguradoras_juntadas'), 'Juntou seguradoras');
+  });
+
+  test('Etapa 22: apelidos digitados', () {
+    final a = lerApelidos('AXA SEGUROS, axa seguros,\n  Axa Brasil ,, ');
+    expect(a.length, 2);
+    expect(a.first, 'AXA SEGUROS');
+    expect(a.last, 'Axa Brasil');
   });
 }

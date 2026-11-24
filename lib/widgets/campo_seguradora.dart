@@ -12,10 +12,17 @@
 //     corresponder a nenhuma, o campo é limpo e mostra o aviso;
 //   • texto vindo de outro lugar (ex.: apólice antiga) e fora do cadastro
 //     aparece com aviso em vermelho até ser trocado.
+// Etapa 22: a lista vem do catálogo único; valem os apelidos do catálogo; as
+// pendentes aparecem com "(aguardando aprovação)"; e, com o catálogo montado,
+// "Cadastrar nova seguradora pelo CNPJ" no fim da lista.
 
 import 'package:flutter/material.dart';
 import 'package:upgrade_seguros/services/seguradoras_cadastradas.dart';
 import 'package:upgrade_seguros/utils/seguradoras.dart';
+import 'package:upgrade_seguros/widgets/nova_seguradora_dialog.dart';
+
+/// Opção especial da lista: abre o cadastro pelo CNPJ.
+const _kNova = '\u0000nova';
 
 class CampoSeguradora extends StatefulWidget {
   final TextEditingController controller;
@@ -95,7 +102,7 @@ class _CampoSeguradoraState extends State<CampoSeguradora> {
       if (_aviso != null) setState(() => _aviso = null);
       return;
     }
-    final certo = resolverSeguradora(t, _nomes);
+    final certo = SeguradorasCadastradas.resolver(t) ?? resolverSeguradora(t, _nomes);
     if (certo != null) {
       if (certo != widget.controller.text) _definir(certo);
       if (_aviso != null) setState(() => _aviso = null);
@@ -112,12 +119,37 @@ class _CampoSeguradoraState extends State<CampoSeguradora> {
   Future<void> _abrirLista() async {
     final escolhida = await showDialog<String>(
       context: context,
-      builder: (ctx) => _ListaSeguradorasDialog(nomes: _nomes),
+      builder: (ctx) => _ListaSeguradorasDialog(nomes: _nomes, podeCadastrar: SeguradorasCadastradas.usaCatalogo),
     );
+    if (escolhida == _kNova) return _novaPeloCnpj();
     if (escolhida != null) {
       _definir(escolhida);
       setState(() => _aviso = null);
     }
+  }
+
+  /// Etapa 22: cadastra pelo CNPJ e já escolhe.
+  Future<void> _novaPeloCnpj() async {
+    _foco.unfocus();
+    final nome = await abrirNovaSeguradora(context);
+    if (nome == null || !mounted) return;
+    SeguradorasCadastradas.invalidar();
+    final lista = await SeguradorasCadastradas.nomes();
+    if (!mounted) return;
+    setState(() {
+      _nomes = lista;
+      _aviso = null;
+    });
+    _definir(nome);
+  }
+
+  List<String> _opcoes(String texto) {
+    if (!_foco.hasFocus) return const <String>[];
+    final s = sugestoesSeguradora(texto, _nomes);
+    final apelido = SeguradorasCadastradas.resolver(texto);
+    if (apelido != null && !s.contains(apelido)) s.insert(0, apelido);
+    if (SeguradorasCadastradas.usaCatalogo && texto.trim().length >= 2) s.add(_kNova);
+    return s;
   }
 
   @override
@@ -126,8 +158,13 @@ class _CampoSeguradoraState extends State<CampoSeguradora> {
     return RawAutocomplete<String>(
       textEditingController: widget.controller,
       focusNode: _foco,
-      optionsBuilder: (v) => _foco.hasFocus ? sugestoesSeguradora(v.text, _nomes) : const <String>[],
+      optionsBuilder: (v) => _opcoes(v.text),
+      displayStringForOption: (o) => o == _kNova ? widget.controller.text : o,
       onSelected: (s) {
+        if (s == _kNova) {
+          _novaPeloCnpj();
+          return;
+        }
         _definir(s);
         setState(() => _aviso = null);
       },
@@ -151,7 +188,7 @@ class _CampoSeguradoraState extends State<CampoSeguradora> {
           widget.onChanged?.call(v);
         },
         onFieldSubmitted: (_) {
-          final s = sugestoesSeguradora(controller.text, _nomes);
+          final s = _opcoes(controller.text)..remove(_kNova);
           if (s.length == 1) {
             _definir(s.first);
             setState(() => _aviso = null);
@@ -173,11 +210,28 @@ class _CampoSeguradoraState extends State<CampoSeguradora> {
               itemCount: options.length,
               itemBuilder: (_, i) {
                 final o = options.elementAt(i);
+                if (o == _kNova) {
+                  return InkWell(
+                    onTap: () => onSelected(o),
+                    child: Container(
+                      decoration: BoxDecoration(border: Border(top: BorderSide(color: Colors.grey.shade200))),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      child: const Row(children: [
+                        Icon(Icons.add_business_outlined, size: 16, color: Color(0xFF1565C0)),
+                        SizedBox(width: 6),
+                        Text('Não achou? Cadastrar pelo CNPJ', style: TextStyle(fontSize: 13, color: Color(0xFF1565C0), fontWeight: FontWeight.w600)),
+                      ]),
+                    ),
+                  );
+                }
                 return InkWell(
                   onTap: () => onSelected(o),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    child: Text(o, style: const TextStyle(fontSize: 13)),
+                    child: Text.rich(TextSpan(text: o, style: const TextStyle(fontSize: 13), children: [
+                      if (SeguradorasCadastradas.ehPendente(o))
+                        TextSpan(text: '  (aguardando aprovação)', style: TextStyle(fontSize: 11, color: Colors.orange.shade800)),
+                    ])),
                   ),
                 );
               },
@@ -191,7 +245,8 @@ class _CampoSeguradoraState extends State<CampoSeguradora> {
 
 class _ListaSeguradorasDialog extends StatefulWidget {
   final List<String> nomes;
-  const _ListaSeguradorasDialog({required this.nomes});
+  final bool podeCadastrar; // Etapa 22
+  const _ListaSeguradorasDialog({required this.nomes, this.podeCadastrar = false});
   @override
   State<_ListaSeguradorasDialog> createState() => _ListaSeguradorasDialogState();
 }
@@ -224,13 +279,24 @@ class _ListaSeguradorasDialogState extends State<_ListaSeguradorasDialog> {
                     itemBuilder: (_, i) => ListTile(
                       dense: true,
                       title: Text(lista[i]),
+                      subtitle: SeguradorasCadastradas.ehPendente(lista[i])
+                          ? Text('aguardando aprovação', style: TextStyle(fontSize: 11, color: Colors.orange.shade800))
+                          : null,
                       onTap: () => Navigator.pop(context, lista[i]),
                     ),
                   ),
           ),
         ]),
       ),
-      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar'))],
+      actions: [
+        if (widget.podeCadastrar)
+          TextButton.icon(
+            onPressed: () => Navigator.pop(context, _kNova),
+            icon: const Icon(Icons.add_business_outlined, size: 18),
+            label: const Text('Não achou? Cadastrar pelo CNPJ'),
+          ),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+      ],
     );
   }
 }

@@ -9,6 +9,16 @@ class Seguradora {
   bool ativa;
   DateTime dataCriacao;
 
+  // Etapa 22: catálogo único de seguradoras.
+  /// Id em catalogo_seguradoras (vazio = só no cadastro desta corretora).
+  String catalogoId;
+  /// Sugerida por esta corretora, aguardando aprovação da plataforma (não é gravado).
+  bool pendente;
+  /// CNPJ do catálogo (não é gravado no cadastro da corretora).
+  String cnpj;
+  /// No cadastro da corretora, mas sem entrada no catálogo (não é gravado).
+  bool foraDoCatalogo = false;
+
   Seguradora({
     this.id = '',
     required this.nome,
@@ -17,6 +27,9 @@ class Seguradora {
     this.contato = '',
     this.ativa = true,
     DateTime? dataCriacao,
+    this.catalogoId = '',
+    this.pendente = false,
+    this.cnpj = '',
   }) : dataCriacao = dataCriacao ?? DateTime.now();
 
   /// Converte para Map para salvar no Firestore
@@ -29,6 +42,7 @@ class Seguradora {
       'contato': contato,
       'ativa': ativa,
       'data_criacao': Timestamp.fromDate(dataCriacao),
+      if (catalogoId.isNotEmpty) 'catalogoId': catalogoId, // Etapa 22
     };
   }
 
@@ -42,6 +56,7 @@ class Seguradora {
       contato: map['contato'] ?? '',
       ativa: map['ativa'] ?? true,
       dataCriacao: (map['data_criacao'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      catalogoId: (map['catalogoId'] ?? '') as String,
     );
   }
 

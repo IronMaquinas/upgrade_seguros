@@ -13,6 +13,9 @@ rules_version = '2';
 //   plataforma_*                   Etapa 21: portal da plataforma (admin do SaaS).
 //                                  Só o servidor grava (Function "plataforma" e o
 //                                  script do dono). O app só lê a própria conta.
+//   catalogo_seguradoras/{id}      Etapa 22: catálogo único de seguradoras. Só o
+//                                  servidor grava; usuários leem as aprovadas e as
+//                                  pendentes que a própria corretora sugeriu.
 //
 // Quem pode o quê dentro da corretora:
 //   • ler e gravar sinistros, assistências, clientes, tarefas…: membro
@@ -122,6 +125,15 @@ service cloud.firestore {
     // O admin confere o próprio registro; auditoria e o resto: só o servidor.
     match /plataforma_admins/{uid} {
       allow get: if logado() && request.auth.uid == uid;
+    }
+
+    // ── catálogo de seguradoras (Etapa 22) ─────────────────────────────────
+    // As consultas do app filtram por situacao == 'aprovada' OU por
+    // criadaPor.empresaId == a própria corretora (a regra exige esse filtro).
+    match /catalogo_seguradoras/{id} {
+      allow read: if ativo()
+        && (resource.data.situacao == 'aprovada'
+            || resource.data.criadaPor.empresaId == minhaEmpresa());
     }
 
     // Qualquer outro caminho (inclusive as coleções antigas da raiz): bloqueado.

@@ -10,6 +10,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import 'aba_seguradoras_portal.dart'; // Etapa 22
 import 'plataforma_api.dart';
 
 const _kEscuro = Color(0xFF263238);
@@ -218,6 +219,7 @@ class _PortalState extends State<_Portal> {
     final telas = [
       _VisaoGeral(corretoras: _corretoras, erro: _erro, onRecarregar: _carregar),
       _Corretoras(corretoras: _corretoras, erro: _erro, onRecarregar: _carregar),
+      const AbaSeguradorasPortal(), // Etapa 22
       const _Auditoria(),
     ];
     return Scaffold(
@@ -240,6 +242,7 @@ class _PortalState extends State<_Portal> {
           destinations: const [
             NavigationRailDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: Text('Visão geral')),
             NavigationRailDestination(icon: Icon(Icons.business_outlined), selectedIcon: Icon(Icons.business), label: Text('Corretoras')),
+            NavigationRailDestination(icon: Icon(Icons.shield_outlined), selectedIcon: Icon(Icons.shield), label: Text('Seguradoras')),
             NavigationRailDestination(icon: Icon(Icons.history), label: Text('Auditoria')),
           ],
         ),
@@ -359,7 +362,7 @@ class _VisaoGeralState extends State<_VisaoGeral> {
         ),
       ],
       const SizedBox(height: 24),
-      Text('Em breve: planos e módulos, cadastro de novas corretoras com teste grátis, catálogo de seguradoras, receita.',
+      Text('Em breve: planos e módulos, cadastro de novas corretoras com teste grátis, receita.',
           style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
     ]);
   }

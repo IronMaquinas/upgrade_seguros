@@ -27,6 +27,9 @@ import 'package:upgrade_seguros/models/workshop_model.dart';
 import 'package:upgrade_seguros/services/workshop_service.dart';
 import 'package:upgrade_seguros/widgets/perfil_corretora_card.dart'; // Etapa 17
 import 'package:upgrade_seguros/widgets/corrigir_seguradoras_dialog.dart'; // Etapa 20
+import 'package:upgrade_seguros/services/catalogo_seguradoras_service.dart'; // Etapa 22
+import 'package:upgrade_seguros/services/seguradoras_cadastradas.dart'; // Etapa 22
+import 'package:upgrade_seguros/widgets/nova_seguradora_dialog.dart'; // Etapa 22
 
 // ─── Paleta ──────────────────────────────────────────────────────────────────
 const _kBlue  = Color(0xFF1565C0);
@@ -46,6 +49,8 @@ class _SettingsScreenState extends State<SettingsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _service = SeguradoraService();
+  // Etapa 22: catálogo + dados desta corretora (criado uma vez por tela)
+  late final Stream<List<Seguradora>> _listaSeguradoras = CatalogoSeguradorasService.streamParaConfiguracoes();
   String _busca = '';
 
   final _pdfSignatureService = PdfSignatureService();
@@ -121,6 +126,15 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   // ── Abre o bottom sheet de cadastro / edição ──────────────────────────────
   Future<void> _abrirForm({Seguradora? seguradora}) async {
+    // Etapa 22: com o catálogo montado, seguradora NOVA entra pelo CNPJ.
+    if (seguradora == null) {
+      await SeguradorasCadastradas.nomes().catchError((_) => <String>[]);
+      if (!mounted) return;
+      if (SeguradorasCadastradas.usaCatalogo) {
+        await abrirNovaSeguradora(context);
+        return;
+      }
+    }
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -158,7 +172,11 @@ class _SettingsScreenState extends State<SettingsScreen>
     );
     if (confirm == true) {
       try {
-        if (s.ativa) {
+        if (s.catalogoId.isNotEmpty) {
+          // Etapa 22: "não trabalho com essa" é só desta corretora
+          s.ativa = !s.ativa;
+          await _service.salvarDadosDaCorretora(s);
+        } else if (s.ativa) {
           await _service.desativar(s.id);
         } else {
           await _service.reativar(s.id);
@@ -295,6 +313,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                   onEditar: (s) => _soGestor(() => _abrirForm(seguradora: s)),
                   onToggle: (s) => _soGestor(() => _toggleAtiva(s)),
                   onCorrigir: () => _soGestor(() => abrirCorrecaoSeguradoras(context)), // Etapa 20
+                  lista: _listaSeguradoras, // Etapa 22
                 ),
                 
                 // ─── ABA OFICINAS (NOVA) ───
@@ -327,9 +346,11 @@ class _AbaSeguradoras extends StatelessWidget {
     required this.onEditar,
     required this.onToggle,
     required this.onCorrigir,
+    required this.lista,
   });
 
   final SeguradoraService service;
+  final Stream<List<Seguradora>> lista; // Etapa 22
   final VoidCallback onCorrigir; // Etapa 20
   final String busca;
   final ValueChanged<String> onBuscaChanged;
@@ -400,7 +421,8 @@ class _AbaSeguradoras extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  'Sinistros, assistências e apólices só aceitam seguradoras desta lista.',
+                  'Lista única para todas as corretoras. Sinistros, assistências e apólices só aceitam '
+                  'seguradoras dela. Não achou? "Nova" → pelo CNPJ.',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                 ),
               ),
@@ -417,7 +439,7 @@ class _AbaSeguradoras extends StatelessWidget {
         // Lista em tempo real via Stream
         Expanded(
           child: StreamBuilder<List<Seguradora>>(
-            stream: service.streamTodas(),
+            stream: lista, // Etapa 22: catálogo + dados desta corretora
             builder: (ctx, snap) {
               if (snap.connectionState == ConnectionState.waiting) {
                 return const Center(
@@ -612,6 +634,20 @@ class _SeguradoraCard extends StatelessWidget {
                       ],
                     ),
 
+                    // Etapa 22: situação no catálogo
+                    if (seguradora.pendente || seguradora.foraDoCatalogo) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        seguradora.pendente
+                            ? 'Aguardando aprovação da plataforma (já pode usar)'
+                            : 'Fora da lista única — não aparece nos atendimentos',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: seguradora.pendente ? Colors.orange.shade800 : Colors.grey.shade500,
+                        ),
+                      ),
+                    ],
+
                     // ✅ CONTATO - Mostrar sempre
                     const SizedBox(height: 6),
                     Row(
@@ -777,16 +813,21 @@ class _SeguradoraFormState extends State<_SeguradoraForm> {
     setState(() => _isSaving = true);
 
     try {
+      final doCatalogo = (widget.seguradora?.catalogoId ?? '').isNotEmpty;
       final s = Seguradora(
         id:       widget.seguradora?.id ?? '',
-        nome:     _nomeCtrl.text.trim().toUpperCase(),
+        nome:     doCatalogo ? widget.seguradora!.nome : _nomeCtrl.text.trim().toUpperCase(),
         contato:  _contatoCtrl.text.trim(),
         telefone: _telefoneCtrl.text.trim(),
         email:    _emailCtrl.text.trim(),
         ativa:    _ativa,
+        catalogoId: widget.seguradora?.catalogoId ?? '',
       );
 
-      if (_isEdit) {
+      if (doCatalogo) {
+        // Etapa 22: grava só o que é desta corretora
+        await widget.service.salvarDadosDaCorretora(s);
+      } else if (_isEdit) {
         await widget.service.editar(s.id, s);
       } else {
         await widget.service.criar(s);
@@ -876,6 +917,8 @@ class _SeguradoraFormState extends State<_SeguradoraForm> {
             // Nome
             TextFormField(
               controller: _nomeCtrl,
+              // Etapa 22: o nome vem da lista única (só a plataforma muda)
+              readOnly: (widget.seguradora?.catalogoId ?? '').isNotEmpty,
               textCapitalization: TextCapitalization.characters,
               decoration: _dec('Nome da Seguradora *',
                   hint: 'Ex: PORTO SEGURO',

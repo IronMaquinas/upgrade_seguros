@@ -31,3 +31,6 @@ exports.converterVideo = require('./converter-video').converterVideo;
 
 // Etapa 21: portal da plataforma (admin do SaaS) — só admin com a marca "plataforma"
 exports.plataforma = require('./plataforma').plataforma;
+
+// Etapa 22: catálogo global de seguradoras — corretora consulta CNPJ e sugere seguradora nova
+exports.catalogoSeguradoras = require('./catalogo').catalogoSeguradoras;

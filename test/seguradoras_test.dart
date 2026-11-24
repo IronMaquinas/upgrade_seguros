@@ -1,4 +1,5 @@
 // test/seguradoras_test.dart — Etapa 20: seguradora só do cadastro + correção dos nomes antigos
+// Etapa 22: apelidos do catálogo único
 import 'package:flutter_test/flutter_test.dart';
 import 'package:upgrade_seguros/utils/seguradoras.dart';
 
@@ -79,5 +80,32 @@ void main() {
     expect(apolices[0]['seguradora'], 'AXA SEGURUROS'); // original intacto
     expect(trocarSeguradoraNasApolices(apolices, {'Mapfre': 'AXA'}), null);
     expect(trocarSeguradoraNasApolices(null, {'a': 'b'}), null);
+  });
+
+  group('Etapa 22: apelidos do catálogo', () {
+    final apelidos = mapaDeApelidos({
+      'AXA': ['AXA SEGUROS GERAIS', 'Axa Seguradora Brasil'],
+      'Mapfre': ['MAPFRE SEGUROS GERAIS S.A.'],
+      'Chubb': ['ACE'],
+      'Zurich': ['ACE'], // apelido em duas seguradoras: ignorado
+    });
+    const lista = ['AXA', 'Mapfre', 'Chubb', 'Zurich'];
+    test('acha pelo apelido (sem acento/caixa e pela chave)', () {
+      expect(resolverComApelidos('axa seguros gerais', lista, apelidos), 'AXA');
+      expect(resolverComApelidos('Mapfre Seguros Gerais', lista, apelidos), 'Mapfre');
+      expect(resolverComApelidos('AXA SEGURADORA BRASIL S.A.', lista, apelidos), 'AXA');
+    });
+    test('o nome direto continua valendo e vem primeiro', () {
+      expect(resolverComApelidos('chubb', lista, apelidos), 'Chubb');
+    });
+    test('apelido ambíguo ou de seguradora fora da lista: nada', () {
+      expect(resolverComApelidos('ACE', lista, apelidos), null);
+      expect(resolverComApelidos('Mapfre Seguros Gerais', ['AXA'], apelidos), null);
+      expect(resolverComApelidos('', lista, apelidos), null);
+    });
+    test('sem apelidos: igual ao resolverSeguradora', () {
+      expect(resolverComApelidos('AXA SEGUROS', lista, const {}), 'AXA');
+      expect(resolverComApelidos('XYZ', lista, const {}), null);
+    });
   });
 }

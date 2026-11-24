@@ -42,6 +42,43 @@ String? resolverSeguradora(String digitado, Iterable<String> cadastradas) {
   return achadas.length == 1 ? achadas.first : null;
 }
 
+/// Etapa 22: apelidos do catálogo (ex.: "AXA SEGUROS" → AXA, nome antigo de uma
+/// seguradora renomeada). Monta o mapa texto → nome cadastrado, pela forma
+/// simples (sem acento/caixa) e pela chave. Apelido que aponta para duas
+/// seguradoras diferentes é ignorado.
+Map<String, String> mapaDeApelidos(Map<String, List<String>> apelidosPorNome) {
+  final m = <String, String>{};
+  final ambiguos = <String>{};
+  void por(String k, String nome) {
+    if (k.isEmpty || ambiguos.contains(k)) return;
+    final antes = m[k];
+    if (antes != null && antes != nome) {
+      m.remove(k);
+      ambiguos.add(k);
+    } else {
+      m[k] = nome;
+    }
+  }
+
+  apelidosPorNome.forEach((nome, apelidos) {
+    for (final a in apelidos) {
+      por('s:${_simples(a)}', nome);
+      por('k:${chaveSeguradora(a)}', nome);
+    }
+  });
+  return m;
+}
+
+/// Como [resolverSeguradora], e se não achar, procura nos apelidos do catálogo.
+String? resolverComApelidos(String digitado, Iterable<String> cadastradas, Map<String, String> apelidos) {
+  final direto = resolverSeguradora(digitado, cadastradas);
+  if (direto != null || apelidos.isEmpty) return direto;
+  final t = digitado.trim();
+  if (t.isEmpty) return null;
+  final nome = apelidos['s:${_simples(t)}'] ?? apelidos['k:${chaveSeguradora(t)}'];
+  return nome != null && cadastradas.contains(nome) ? nome : null;
+}
+
 /// Sugestões do campo: as que contêm o texto (sem acento/caixa), primeiro as
 /// que começam com ele. Texto vazio → todas.
 List<String> sugestoesSeguradora(String texto, Iterable<String> cadastradas) {

@@ -2,6 +2,7 @@ import '../models/seguradora_model.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 import 'package:upgrade_seguros/services/seguradoras_cadastradas.dart'; // Etapa 20
 import 'package:upgrade_seguros/utils/seguradoras.dart'; // Etapa 20
+import 'package:cloud_firestore/cloud_firestore.dart'; // Etapa 22: Timestamp, SetOptions
 
 class SeguradoraService {
   final String _collection = 'seguradoras';
@@ -141,6 +142,26 @@ class SeguradoraService {
       print('❌ Erro ao reativar seguradora: $e');
       rethrow;
     }
+  }
+
+  /// Etapa 22: grava só o que é DESTA corretora para uma seguradora do catálogo
+  /// (telefone, e-mail, contato, ativa). Cria o documento se ainda não existe.
+  /// O nome vem do catálogo; não passa pela checagem de nome parecido.
+  Future<void> salvarDadosDaCorretora(Seguradora s) async {
+    final dados = <String, dynamic>{
+      'nome': s.nome,
+      'telefone': s.telefone,
+      'email': s.email,
+      'contato': s.contato,
+      'ativa': s.ativa,
+      if (s.catalogoId.isNotEmpty) 'catalogoId': s.catalogoId,
+    };
+    if (s.id.isEmpty) {
+      await EmpresaAtual.col(_collection).add({...dados, 'data_criacao': Timestamp.fromDate(DateTime.now())});
+    } else {
+      await EmpresaAtual.col(_collection).doc(s.id).set(dados, SetOptions(merge: true));
+    }
+    SeguradorasCadastradas.invalidar();
   }
 
   /// 🔎 Etapa 20: nome igual OU parecido já cadastrado (sem acento/caixa e sem

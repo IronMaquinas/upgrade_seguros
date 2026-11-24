@@ -115,6 +115,11 @@ String rotuloAcao(String a) => switch (a) {
       'contas_criadas' => 'Criou contas que faltavam',
       'admin_adicionado' => 'Admin adicionado',
       'admin_removido' => 'Admin removido',
+      'catalogo_importado' => 'Importou o catálogo de seguradoras',
+      'seguradora_aprovada' => 'Aprovou seguradora',
+      'seguradora_editada' => 'Editou seguradora',
+      'seguradoras_juntadas' => 'Juntou seguradoras',
+      'seguradora_recusada' => 'Recusou seguradora',
       _ => a,
     };
 
@@ -149,3 +154,83 @@ class ResumoPlataforma {
     return ResumoPlataforma(corretoras: lista.length, semConta: sem, porSituacao: por, usuarios: usu, atendimentos: atd);
   }
 }
+
+// ── Etapa 22: catálogo global de seguradoras ─────────────────────────────────
+
+class SeguradoraCatalogo {
+  final String id;
+  final String nome;
+  final String cnpj;
+  final String razaoSocial;
+  final String susep;
+  final List<String> apelidos;
+  final String situacao; // aprovada · pendente · inativa · juntada · recusada
+  final String origem;
+  final String situacaoReceita;
+  final String criadaPorCorretora;
+  final String criadaPorEmail;
+  final DateTime? criadaEm;
+  final String juntadaCom;
+  final String motivo;
+
+  const SeguradoraCatalogo({
+    required this.id,
+    required this.nome,
+    this.cnpj = '',
+    this.razaoSocial = '',
+    this.susep = '',
+    this.apelidos = const [],
+    this.situacao = '',
+    this.origem = '',
+    this.situacaoReceita = '',
+    this.criadaPorCorretora = '',
+    this.criadaPorEmail = '',
+    this.criadaEm,
+    this.juntadaCom = '',
+    this.motivo = '',
+  });
+
+  bool get pendente => situacao == 'pendente';
+  bool get viva => situacao == 'aprovada' || situacao == 'inativa';
+
+  factory SeguradoraCatalogo.deJson(Map<String, dynamic> j) {
+    final por = j['criadaPor'] is Map ? Map<String, dynamic>.from(j['criadaPor'] as Map) : const <String, dynamic>{};
+    return SeguradoraCatalogo(
+      id: (j['id'] ?? '') as String,
+      nome: (j['nome'] ?? '') as String,
+      cnpj: (j['cnpj'] ?? '') as String,
+      razaoSocial: (j['razaoSocial'] ?? '') as String,
+      susep: (j['susep'] ?? '') as String,
+      apelidos: [for (final a in (j['apelidos'] as List? ?? const [])) '$a'],
+      situacao: (j['situacao'] ?? '') as String,
+      origem: (j['origem'] ?? '') as String,
+      situacaoReceita: (j['situacaoReceita'] ?? '') as String,
+      criadaPorCorretora: (por['corretora'] ?? '') as String,
+      criadaPorEmail: (por['email'] ?? '') as String,
+      criadaEm: DateTime.tryParse((j['criadaEm'] ?? '') as String)?.toLocal(),
+      juntadaCom: (j['juntadaCom'] ?? '') as String,
+      motivo: (j['motivo'] ?? '') as String,
+    );
+  }
+}
+
+/// Apelidos digitados separados por vírgula ou linha → lista limpa, sem repetir.
+List<String> lerApelidos(String texto) {
+  final vistos = <String>{};
+  final r = <String>[];
+  for (final p in texto.split(RegExp(r'[,\n]'))) {
+    final t = p.trim();
+    if (t.isEmpty || !vistos.add(t.toUpperCase())) continue;
+    r.add(t);
+  }
+  return r;
+}
+
+String rotuloSituacaoSeguradora(String s) => switch (s) {
+      'aprovada' => 'Aprovada',
+      'pendente' => 'Aguardando aprovação',
+      'inativa' => 'Inativa',
+      'juntada' => 'Juntada',
+      'recusada' => 'Recusada',
+      _ => s,
+    };
