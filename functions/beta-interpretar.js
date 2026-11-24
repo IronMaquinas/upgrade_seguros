@@ -2,7 +2,8 @@
 //
 // Transforma a pergunta num pedido estruturado, só com padrões de texto:
 //   { intencao, alvo, numero, numeroSeguradora, placa, cliente }
-// intencao: contato · veiculo · status · pendencias · sinistros_cliente · dono_placa
+// intencao: contato · veiculo · apolices · status · pendencias · sinistros_cliente · dono_placa
+//   apolices (28.4): apólices do cliente por ramo, vencimento, valor, bens e gasto × gatilho
 // alvo (de quem): segurado · contato_segurado · motorista · terceiro ·
 //                 contato_terceiro · motorista_terceiro · contato_local · oficina
 //
@@ -11,7 +12,7 @@
 // Se as regras não bastarem, o servidor pergunta ao Haiku, que devolve este
 // mesmo formato (functions/beta.js). Sem Firebase: testado em testes/beta.teste.js.
 
-const INTENCOES = ['contato', 'veiculo', 'status', 'pendencias', 'sinistros_cliente', 'dono_placa'];
+const INTENCOES = ['contato', 'veiculo', 'apolices', 'status', 'pendencias', 'sinistros_cliente', 'dono_placa'];
 const ALVOS = ['segurado', 'contato_segurado', 'motorista', 'terceiro', 'contato_terceiro', 'motorista_terceiro', 'contato_local', 'oficina'];
 
 const normalizar = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -44,6 +45,8 @@ function alvoDe(t) {
 
 function intencaoDe(t, placa) {
   if (placa && /de quem|dono|proprietari|qual cliente|qual segurado/.test(t)) return 'dono_placa';
+  // 28.4: apólices — vencimento, vigência, gastos/gatilho
+  if (/apolice|vence|vencimento|vigencia|vigente|gastos?\b|gastou|gatilho|sinistralidade|renova/.test(t)) return 'apolices';
   if (/(quais|lista|numeros?|todos) (os )?sinistros|sinistros (do|da|de) /.test(t)) return 'sinistros_cliente';
   if (/\b(sinistros|atendimentos|assistencias)\b/.test(t)) return 'sinistros_cliente'; // 28.1: "e os sinistros dele?"
   if (/pendent|pendencia|tarefa|\bacao\b|\bacoes\b|falta fazer/.test(t)) return 'pendencias';
@@ -57,7 +60,7 @@ function intencaoDe(t, placa) {
 function clienteDe(t) {
   const m = t.match(/(?:sinistros|veiculos?|telefone|contato|apolices?|bens|bem|segurad[oa]s?|frota|placas?|dados|carros?|caminhoes|e-?mail|whatsapp|celular|fone)\s(?:do|da|de)\s(?:cliente\s|segurad[oa]\s)?(.+?)(?:\?|$)/)
     || t.match(/(?:cliente|segurad[oa])\s(?!do\b|da\b)(.+?)(?:\?|$)/);
-  if (!m) return null;
+  if (!m) return clienteAntesDoVerbo(t);
   let nome = m[1].replace(/\b(sn|as)\d{14}\b/g, '').replace(/\b(do|da|de) sinistro.*$/, '').trim();
   // 28.1: tira o que sobrou da pergunta ("contato do", "cliente", "segurado"…) antes do nome
   const sobra = /^(contato|telefone|fone|celular|whatsapp|whats|zap|e-?mail|numero|cliente|segurad[oa])\s(?:(?:do|da|de)\s)?/;
@@ -67,6 +70,17 @@ function clienteDe(t) {
   if (/^(que|qual|quais|ele|ela|eles|dele|dela|deles|desse|dessa|deste|desta|esse|essa|este|esta|isso|tem|o mesmo|a mesma)\b/.test(nome)) return null;
   if (/^(sinistro|assistencia|terceiro|motorista)/.test(nome)) return null;
   if (/\b(sinistro|assistencia|atendimento|desse|deste|dessa|desta|oficina|funilaria)\b/.test(nome)) return null; // 28.3: não é nome de cliente
+  return nome;
+}
+
+/** 28.4: "o fulano tem bens segurados?", "quais os bens e apólices fulano possui?" */
+function clienteAntesDoVerbo(t) {
+  const m = t.match(/.*(?:apolices?|bens|segurados?)\s+(?!do\b|da\b|de\b|e\b)([a-z0-9][a-z0-9 .&-]*?)\s(?:possui|tem)\b/)
+    || t.match(/^(?:sera que |e )?(?:o |a )?([a-z0-9][a-z0-9 .&-]*?)\s(?:possui|tem)\b/);
+  if (!m) return null;
+  const nome = m[1].trim();
+  if (nome.length < 3) return null;
+  if (/^(que|qual|quais|quem|quanto|quantos|ele|ela|eles|dele|dela|esse|essa|este|esta|isso|o sinistro|a assistencia|sinistro|assistencia|o cliente|cliente|segurado)\b/.test(nome)) return null;
   return nome;
 }
 
@@ -83,15 +97,20 @@ function interpretar(pergunta, assunto = {}) {
   let intencao = intencaoDe(t, placa);
   // "e do terceiro?" — sem verbo: repete o que foi perguntado antes
   if (!intencao && alvo && assunto.intencao) intencao = assunto.intencao;
-  const cliente = intencao === 'sinistros_cliente' || (!numero && !placa && !seg && !assunto.atendimentoId) ? clienteDe(t) : null;
-  return { intencao, alvo, numero, numeroSeguradora: seg, placa, cliente };
+  const cliente = intencao === 'sinistros_cliente' || intencao === 'apolices' || (!numero && !placa && !seg && !assunto.atendimentoId) ? clienteDe(t) : null;
+  // 28.4: o que mostrar nas apólices
+  const detalhe = intencao !== 'apolices' ? null
+    : /gastos?\b|gastou|gatilho|sinistralidade|consum|utiliz/.test(t) ? 'gastos'
+      : /\b(bem|bens)\b/.test(t) ? 'bens'
+        : null;
+  return { intencao, alvo, numero, numeroSeguradora: seg, placa, cliente, detalhe };
 }
 
 /** As regras resolvem sozinhas? (senão, pergunta ao Haiku) */
 function bastaSemIa(p, assunto = {}) {
   if (!p.intencao) return false;
   if (p.intencao === 'dono_placa') return !!p.placa;
-  if (p.intencao === 'sinistros_cliente') return !!(p.cliente || assunto.clienteId);
+  if (p.intencao === 'sinistros_cliente' || p.intencao === 'apolices') return !!(p.cliente || p.numero || p.numeroSeguradora || assunto.clienteId || assunto.atendimentoId);
   return !!(p.numero || p.numeroSeguradora || p.placa || p.cliente || assunto.atendimentoId || assunto.clienteId);
 }
 

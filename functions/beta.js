@@ -48,6 +48,7 @@ const mesAtual = () => {
 };
 
 const PROMPT = `Você converte perguntas de funcionários de uma corretora de seguros em JSON. Não responda a pergunta.
+(apolices = apólices do cliente: ramo, vencimento, valor, bens segurados, gasto com sinistros × gatilho.)
 Devolva SÓ um objeto JSON: {"intencao":…, "alvo":…, "numero":…, "numeroSeguradora":…, "placa":…, "cliente":…}
 intencao: ${INTENCOES.join(' | ')} | null (fora do escopo)
   contato = telefone/e-mail/WhatsApp de alguém; veiculo = dados do veículo; status = situação do sinistro/assistência;
@@ -187,9 +188,118 @@ function respostaVeiculo(alvo, at, cli) {
     return ts.map((t, i) => ({ titulo: `Veículo do terceiro${ts.length > 1 ? ` ${i + 1}` : ''}`, linhas: linhasV(t), acoes: [] }));
   }
   if (at && at.veiculo_selecionado) return [{ titulo: 'Veículo segurado', linhas: linhasV(at.veiculo_selecionado), acoes: [abrir(at)] }];
+  // 28.4: os bens ficam nas apólices do cadastro (um ou mais ramos, uma ou mais apólices)
+  const bens = bensDoCliente(cli);
+  if (bens.length) return bens.slice(0, 15).map((b, i) => ({ titulo: `Bem ${i + 1} — ${b.apolice}`, linhas: b.linhas, acoes: [] }));
   const vs = (cli && Array.isArray(cli.veiculos_segurados) ? cli.veiculos_segurados : []).slice(0, 10);
   if (vs.length) return vs.map((v, i) => ({ titulo: `Veículo ${i + 1} de ${cli.nome}`, linhas: linhasV(v), acoes: [] }));
   return null;
+}
+
+// ── 28.4: apólices e bens do cadastro do cliente ────────────────────────────
+const paraData = (v) => (v && typeof v.toDate === 'function' ? v.toDate() : v ? new Date(v) : null);
+const reais = (n) => `R$ ${Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const diaBr = (d) => (d ? d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—');
+const apolicesDe = (cli) => (cli && Array.isArray(cli.apolices) ? cli.apolices : []);
+const rotuloApolice = (a) => `${a.ramo || 'Apólice'}${a.numero_apolice ? ` • ${a.numero_apolice}` : ''}`;
+
+function linhasDoBem(b) {
+  const veic = [b.marca, b.modelo].filter(Boolean).join(' ');
+  const cavalo = [b.marca_cavalo, b.modelo_cavalo].filter(Boolean).join(' ');
+  const end = [b.logradouro, b.numero, b.bairro, b.cidade && `${b.cidade}${b.estado ? `/${b.estado}` : ''}`].filter(Boolean).join(', ');
+  return [
+    b.tipo && `Tipo: ${b.tipo}`,
+    b.descricao,
+    veic,
+    b.placa && `Placa: ${b.placa}`,
+    (b.ano || b.ano_modelo) && `Ano: ${[b.ano, b.ano_modelo].filter(Boolean).join('/')}`,
+    b.cor && `Cor: ${b.cor}`,
+    b.chassi && `Chassi: ${b.chassi}`,
+    (cavalo || b.placa_cavalo) && `Cavalo: ${[cavalo, b.placa_cavalo && `placa ${b.placa_cavalo}`].filter(Boolean).join(' · ')}`,
+    b.placa_carreta && `Carreta: placa ${b.placa_carreta}`,
+    end,
+    b.capital_segurado && `Capital segurado: ${reais(b.capital_segurado)}`,
+    b.numero_documento && `Documento: ${b.numero_documento}`,
+  ].filter(Boolean);
+}
+
+function bensDoCliente(cli) {
+  const r = [];
+  for (const a of apolicesDe(cli)) {
+    for (const b of Array.isArray(a.bens_segurados) ? a.bens_segurados : []) {
+      const linhas = linhasDoBem(b);
+      if (linhas.length) r.push({ apolice: rotuloApolice(a), linhas });
+    }
+  }
+  return r;
+}
+
+/** Gasto de cada apólice: sinistros (não cancelados/negados) dentro da vigência — mesma conta do app (recomendacao_cliente.dart). */
+function gastosPorApolice(apolices, sinistros) {
+  const dia = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const conta = (a, s) => {
+    const ini = paraData(a.data_inicio); const fim = paraData(a.data_fim); const oc = paraData(s.data_ocorrencia);
+    if (!ini || !fim || !oc) return false;
+    if (['Cancelado', 'Negado'].includes(String(s.status_atual || '').trim())) return false;
+    const f = dia(fim); f.setDate(f.getDate() + 1);
+    return oc >= dia(ini) && oc < f;
+  };
+  const ramo = (r) => (String(r || '').trim() === 'Vidas' ? 'Vida' : String(r || '').trim());
+  const ids = new Set(apolices.map((a) => a.id));
+  const gasto = {};
+  const qtd = {};
+  for (const s of sinistros) {
+    let alvo = null;
+    if (s.apolice_id && ids.has(s.apolice_id)) alvo = apolices.find((a) => a.id === s.apolice_id);
+    else {
+      alvo = apolices.filter((a) => ramo(a.ramo) === ramo(s.ramo_sinistro) && conta(a, s))
+        .sort((x, y) => (paraData(y.data_inicio) || 0) - (paraData(x.data_inicio) || 0))[0] || null;
+    }
+    if (!alvo || !conta(alvo, s)) continue;
+    gasto[alvo.id] = (gasto[alvo.id] || 0) + (Number(s.valor_total_sinistro) || 0);
+    qtd[alvo.id] = (qtd[alvo.id] || 0) + 1;
+  }
+  return { gasto, qtd };
+}
+
+async function respostaApolices(e, cli, detalhe) {
+  const aps = apolicesDe(cli).slice().sort((x, y) => (paraData(y.data_fim) || 0) - (paraData(x.data_fim) || 0));
+  if (!aps.length) return { texto: `${cli.nome} não tem apólices cadastradas.`, itens: [] };
+  const hoje = new Date();
+  let gastos = null;
+  let pct = 70;
+  if (detalhe === 'gastos') {
+    const s = await col(e, 'sinistros').where('id_cliente', '==', cli.id).get();
+    gastos = gastosPorApolice(aps, s.docs.map((d) => d.data()).filter((x) => (x.tipo || 'sinistro') === 'sinistro'));
+    const cfg = await col(e, 'app_config').doc('config').get();
+    const p = Number(((cfg.exists && cfg.data()) || {}).percentualGatilhoPadrao);
+    if (p > 0) pct = p > 1 ? p : p * 100;
+  }
+  const vigentes = aps.filter((a) => { const i = paraData(a.data_inicio); const f = paraData(a.data_fim); return i && f && i <= hoje && hoje <= new Date(f.getTime() + 86400000); });
+  const itens = aps.slice(0, 10).map((a) => {
+    const ini = paraData(a.data_inicio); const fim = paraData(a.data_fim);
+    const vig = vigentes.includes(a);
+    const dias = fim ? Math.ceil((fim - hoje) / 86400000) : null;
+    const linhas = [
+      a.seguradora && `Seguradora: ${a.seguradora}`,
+      `Vigência: ${diaBr(ini)} até ${diaBr(fim)}${vig ? (dias !== null && dias <= 30 ? ` — vence em ${dias} dia(s)` : ' — vigente') : fim && fim < hoje ? ' — vencida' : ''}`,
+      Number(a.valor_apolice) > 0 && `Valor: ${reais(a.valor_apolice)}`,
+    ];
+    if (gastos) {
+      const g = gastos.gasto[a.id] || 0;
+      const gat = Number(a.valor_gatilho) > 0.01 ? Number(a.valor_gatilho) : (Number(a.valor_apolice) || 0) * pct / 100;
+      linhas.push(`Gasto com sinistros na vigência: ${reais(g)} (${gastos.qtd[a.id] || 0} sinistro(s))`);
+      if (gat > 0) linhas.push(`Gatilho: ${reais(gat)} — ${Math.round((g / gat) * 100)}% usado`);
+    }
+    const bens = Array.isArray(a.bens_segurados) ? a.bens_segurados : [];
+    if (detalhe === 'bens') bens.slice(0, 8).forEach((b, i) => linhas.push(`Bem ${i + 1}: ${linhasDoBem(b).slice(0, 4).join(' · ')}`));
+    else if (bens.length) linhas.push(`${bens.length} bem(ns) segurado(s)`);
+    return { titulo: rotuloApolice(a), linhas: linhas.filter(Boolean), acoes: [] };
+  });
+  return {
+    texto: `${cli.nome}: ${aps.length} apólice(s), ${vigentes.length} vigente(s).`,
+    itens,
+  };
 }
 
 // ── o pedido completo ───────────────────────────────────────────────────────
@@ -334,6 +444,12 @@ async function executar(e, p, assunto) {
       const itens = respostaVeiculo(p.alvo, at, cli);
       if (!itens) return { ...FORA('nao_encontrado', 'Não há veículo cadastrado para isso.'), assunto: novoAssunto };
       return { texto: at ? rotuloAt(at) : cli.nome, itens, assunto: novoAssunto };
+    }
+    case 'apolices': {
+      const c = cli || (await cliente(e, at && at.id_cliente));
+      if (!c) return { ...FORA('nao_encontrado'), assunto: novoAssunto };
+      const r = await respostaApolices(e, c, p.detalhe);
+      return { ...r, assunto: { atendimentoId: null, clienteId: c.id, rotulo: `Cliente ${c.nome}`, intencao: 'apolices' } };
     }
     case 'status': {
       if (!at) return { ...FORA('nao_encontrado', 'De qual sinistro ou assistência? Me diga o número.'), assunto: novoAssunto };

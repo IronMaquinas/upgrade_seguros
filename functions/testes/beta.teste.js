@@ -41,6 +41,13 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   p = interpretar('qual o bem segurado que ele tem?', { clienteId: 'x', intencao: 'contato' });
   t.ok(p.intencao === 'veiculo' && p.cliente === null && p.alvo === null, '28.2: "bem segurado que ele tem" = veículo do cliente da conversa');
   t.ok(interpretar('qual a frota dele?', { clienteId: 'x' }).intencao === 'veiculo', '28.2: frota');
+  // 28.4
+  p = interpretar('quais os bens e apólices Iury Guaru possui?');
+  t.ok(p.intencao === 'apolices' && p.cliente === 'iury guaru' && p.detalhe === 'bens', '28.4: "bens e apólices <cliente> possui"');
+  p = interpretar('O Iury Guaru tem bens segurados?');
+  t.ok(p.intencao === 'veiculo' && p.cliente === 'iury guaru', '28.4: "<cliente> tem bens segurados?"');
+  t.ok(interpretar('qual o total de gastos da apólice do Iury Guaru?').detalhe === 'gastos', '28.4: gastos da apólice');
+  t.ok(interpretar('Iury Guaru tem apólice').cliente === 'iury guaru', '28.4: "<cliente> tem apólice"');
   // 28.3
   p = interpretar('quais os bens segurados do Iury Guaru?');
   t.ok(p.intencao === 'veiculo' && p.cliente === 'iury guaru', '28.3: "bens segurados do <cliente>"');
@@ -106,6 +113,30 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   t.ok(r.body.itens[0] && r.body.itens[0].linhas.includes('Placa: ABC1D23'), '28.3: resposta só com o nome completa o pedido');
   r = await per('quais os bens segurados do transportes silva ltda?', { novaConversa: true });
   t.ok(r.body.itens[0] && r.body.itens[0].linhas.includes('Volvo FH'), '28.3: bens segurados do cliente');
+  // 28.4: apólices e bens no cadastro (dois ramos, duas apólices de frota)
+  const ts = (d) => ({ toDate: () => new Date(d) });
+  store[`corretoras/${E}/clientes/cli3`] = { nome: 'IURY GUARU TRANSPORTES LTDA', contato_telefone: '(79) 9903-5735', apolices: [
+    { id: 'ap1', ramo: 'Frota', numero_apolice: '950001854', seguradora: 'SURA', data_inicio: ts('2025-09-24T03:00:00Z'), data_fim: ts('2026-09-24T03:00:00Z'), valor_apolice: 149920.28, valor_gatilho: 0,
+      bens_segurados: [{ tipo: 'Caminhão', marca: 'Scania', modelo: 'R450', placa: 'QWE1R23' }, { tipo: 'Carreta', placa_carreta: 'ZZZ9Z99', descricao: 'Carreta graneleira' }] },
+    { id: 'ap2', ramo: 'Frota', numero_apolice: '950009999', seguradora: 'SURA', data_inicio: ts('2026-09-24T03:00:00Z'), data_fim: ts('2027-09-24T03:00:00Z'), valor_apolice: 100000, valor_gatilho: 50000, bens_segurados: [] },
+    { id: 'ap3', ramo: 'Residencial', numero_apolice: 'R-77', seguradora: 'Porto', data_inicio: ts('2026-01-10T03:00:00Z'), data_fim: ts('2027-01-10T03:00:00Z'), valor_apolice: 1200,
+      bens_segurados: [{ tipo: 'Residência', logradouro: 'Rua A', numero: '10', cidade: 'Aracaju', estado: 'SE' }] },
+  ] };
+  store[`corretoras/${E}/sinistros/s9`] = { numero_sinistro: 'SN20260301000000', id_cliente: 'cli3', tipo: 'sinistro', ramo_sinistro: 'Frota', status_atual: 'Em análise', data_ocorrencia: ts('2026-03-01T15:00:00Z'), valor_total_sinistro: 20000 };
+  store[`corretoras/${E}/sinistros/s10`] = { numero_sinistro: 'SN20260302000000', id_cliente: 'cli3', tipo: 'sinistro', ramo_sinistro: 'Frota', status_atual: 'Negado', data_ocorrencia: ts('2026-03-02T15:00:00Z'), valor_total_sinistro: 99999 };
+  store[`corretoras/${E}/app_config/config`] = { percentualGatilhoPadrao: 70 };
+  r = await per('O Iury Guaru tem bens segurados?', { novaConversa: true });
+  t.ok(r.body.itens.length === 3 && r.body.itens[0].titulo === 'Bem 1 — Frota • 950001854' && r.body.itens[0].linhas.includes('Placa: QWE1R23'), '28.4: bens vêm das apólices (todos os ramos)');
+  t.ok(r.body.itens.some((i) => i.titulo.includes('Residencial') && i.linhas.some((l) => l.includes('Aracaju'))), '28.4: bem residencial com endereço');
+  r = await per('quais os bens e apólices Iury Guaru possui?', { novaConversa: true });
+  t.ok(r.body.texto.includes('3 apólice(s)') && r.body.itens.some((i) => i.linhas.some((l) => l.startsWith('Bem 1: Tipo: Caminhão'))), '28.4: apólices com os bens');
+  r = await per('quando vence a apólice do Iury Guaru?', { novaConversa: true });
+  t.ok(r.body.itens.some((i) => i.titulo === 'Frota • 950001854' && i.linhas.some((l) => l.startsWith('Vigência: 24/09/2025 até 24/09/2026'))), '28.4: vigência/vencimento');
+  r = await per('qual o total de gastos da apólice do Iury Guaru?', { novaConversa: true });
+  const a1 = r.body.itens.find((i) => i.titulo === 'Frota • 950001854');
+  t.ok(a1.linhas.includes('Gasto com sinistros na vigência: R$ 20.000,00 (1 sinistro(s))') && a1.linhas.some((l) => l.startsWith('Gatilho: R$ 104.944,20 — 19% usado')), '28.4: gasto × gatilho (negado não conta; 70% do valor)');
+  r = await per('e ele tem apólice vigente?');
+  t.ok(r.body.texto.includes('vigente'), '28.4: continua com o cliente da conversa');
   r = await per('de quem é a placa ABC-1D23?');
   t.ok(r.body.texto.includes('Transportes Silva Ltda'), 'dono da placa');
 
@@ -124,7 +155,7 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   // uso e custo
   const mes = B.mesAtual();
   const u = store[`plataforma_contas/${E}`].beta[mes];
-  t.ok(u.comIa === 3 && u.tokensEntrada === 1200 && u.tokensSaida === 120 && u.perguntas === 19, 'mede perguntas, IA e tokens');
+  t.ok(u.comIa === 3 && u.tokensEntrada === 1200 && u.tokensSaida === 120 && u.perguntas === 24, 'mede perguntas, IA e tokens');
   t.ok(Math.abs(u.custoUsd - 3 * (400 * 1 + 40 * 5) / 1e6) < 1e-12, 'custo em US$ pelos preços do modelo');
 
   // teto
