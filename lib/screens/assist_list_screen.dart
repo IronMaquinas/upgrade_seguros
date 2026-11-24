@@ -862,12 +862,14 @@ class AssistListScreenState extends State<AssistListScreen> {
             tooltip: 'Atualizar',
           ),
         ],
+        // 19b.5: mesmas medidas de Sinistros (com 130/170 o conteúdo não cabia
+        // e a barra de cima — título e "Exportar relatório" — ficava cortada).
         bottom: PreferredSize(
           preferredSize: Size.fromHeight(
-            _selectedPeriodo == 'Por período' ? 170.0 : 130.0,
+            _selectedPeriodo == 'Por período' ? 190.0 : 150.0,
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
             child: Column(
               children: [
                 // ── Linha 1: Busca ──
