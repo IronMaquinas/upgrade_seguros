@@ -131,7 +131,9 @@ async function cliente(e, id) {
   return d.exists ? { id: d.id, ...d.data() } : null;
 }
 async function clientesPorNome(e, nome) {
-  const partes = normalizar(nome).split(' ').filter((p) => p.length > 1 && !['do', 'da', 'de', 'dos', 'das', 'e'].includes(p));
+  // 28.1: palavras da pergunta que não fazem parte do nome não podem atrapalhar a busca
+  const ignorar = ['do', 'da', 'de', 'dos', 'das', 'e', 'o', 'a', 'contato', 'telefone', 'fone', 'celular', 'whatsapp', 'email', 'cliente', 'segurado', 'segurada', 'numero', 'qual'];
+  const partes = normalizar(nome).split(' ').filter((p) => p.length > 1 && !ignorar.includes(p));
   if (!partes.length) return [];
   const s = await col(e, 'clientes').get();
   return s.docs

@@ -31,6 +31,12 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   p = interpretar('de quem é a placa ABC-1D23?');
   t.ok(p.intencao === 'dono_placa' && p.placa === 'ABC1D23', 'dono da placa (Mercosul)');
   t.ok(!bastaSemIa(interpretar('me conta uma piada')), 'fora do escopo precisa da IA');
+  // 28.1: o print do Marcony
+  p = interpretar('qual o telefone de contato do iury guaru');
+  t.ok(p.intencao === 'contato' && p.alvo === 'contato_segurado' && p.cliente === 'iury guaru', '28.1: "telefone de contato do <cliente>" → nome limpo');
+  t.ok(interpretar('telefone do contato do cliente iury guaru').cliente === 'iury guaru', '28.1: "do contato do cliente" também');
+  t.ok(interpretar('qual o telefone de contato do terceiro').alvo === 'contato_terceiro', '28.1: contato do terceiro continua');
+  t.ok(interpretar('e os sinistros dele?', { clienteId: 'x' }).intencao === 'sinistros_cliente' && bastaSemIa(interpretar('e os sinistros dele?', { clienteId: 'x' }), { clienteId: 'x' }), '28.1: "e os sinistros dele?" sem IA');
   t.ok(validarDaIa({ intencao: 'hackear', alvo: 'x' }).intencao === null && validarDaIa({ intencao: 'contato', numero: 'sn20261110554460' }).numero === SN, 'IA: só aceita o catálogo');
 
   // ── dados ──
@@ -80,6 +86,8 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   r = await per('', { escolherClienteId: 'cli1' });
   t.ok(r.body.texto.startsWith('Transportes Silva Ltda: 1 atendimento') && r.body.itens[0].acoes[0].tipo === 'abrir', 'escolheu: lista os sinistros com "abrir"');
 
+  r = await per('qual o telefone de contato do transportes silva ltda', { novaConversa: true });
+  t.ok(r.body.itens[0].titulo === 'Contato do segurado' && r.body.itens[0].linhas.includes('Maria'), '28.1: contato do cliente pelo nome');
   r = await per('de quem é a placa ABC-1D23?');
   t.ok(r.body.texto.includes('Transportes Silva Ltda'), 'dono da placa');
 
@@ -97,7 +105,7 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   // uso e custo
   const mes = B.mesAtual();
   const u = store[`plataforma_contas/${E}`].beta[mes];
-  t.ok(u.comIa === 2 && u.tokensEntrada === 800 && u.tokensSaida === 80 && u.perguntas === 13, 'mede perguntas, IA e tokens');
+  t.ok(u.comIa === 2 && u.tokensEntrada === 800 && u.tokensSaida === 80 && u.perguntas === 14, 'mede perguntas, IA e tokens');
   t.ok(Math.abs(u.custoUsd - 2 * (400 * 1 + 40 * 5) / 1e6) < 1e-12, 'custo em US$ pelos preços do modelo');
 
   // teto

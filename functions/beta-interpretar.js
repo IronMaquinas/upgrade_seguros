@@ -33,6 +33,8 @@ function alvoDe(t) {
   if (/terceir/.test(t)) return 'terceiro';
   if (/motorista|condutor/.test(t)) return 'motorista';
   if (/contato (no |do |de )?local|no local/.test(t)) return 'contato_local';
+  // 28.1: "telefone de contato do X" = contato do segurado/cliente
+  if (/(telefone|numero|fone|celular|whats\w*) de contato/.test(t)) return 'contato_segurado';
   if (/oficina/.test(t)) return 'oficina';
   if (/contato (do |da )?(segurad|client)/.test(t) || /\bcontato\b/.test(t) && !/telefone (do |da )?(segurad|client)/.test(t) && /(segurad|client)/.test(t)) return 'contato_segurado';
   if (/segurad|client/.test(t)) return 'segurado';
@@ -42,6 +44,7 @@ function alvoDe(t) {
 function intencaoDe(t, placa) {
   if (placa && /de quem|dono|proprietari|qual cliente|qual segurado/.test(t)) return 'dono_placa';
   if (/(quais|lista|numeros?|todos) (os )?sinistros|sinistros (do|da|de) /.test(t)) return 'sinistros_cliente';
+  if (/\b(sinistros|atendimentos|assistencias)\b/.test(t)) return 'sinistros_cliente'; // 28.1: "e os sinistros dele?"
   if (/pendent|pendencia|tarefa|\bacao\b|\bacoes\b|falta fazer/.test(t)) return 'pendencias';
   if (/status|situacao|andamento|como esta|em que pe/.test(t)) return 'status';
   if (/veiculo|carro|placa|modelo|chassi|marca|caminhao|moto\b/.test(t)) return 'veiculo';
@@ -54,7 +57,10 @@ function clienteDe(t) {
   const m = t.match(/(?:sinistros|veiculos?|telefone|contato|apolices?)\s(?:do|da|de)\s(?:cliente\s|segurad[oa]\s)?(.+?)(?:\?|$)/)
     || t.match(/(?:cliente|segurad[oa])\s(?!do\b|da\b)(.+?)(?:\?|$)/);
   if (!m) return null;
-  const nome = m[1].replace(/\b(sn|as)\d{14}\b/g, '').replace(/\b(do|da|de) sinistro.*$/, '').trim();
+  let nome = m[1].replace(/\b(sn|as)\d{14}\b/g, '').replace(/\b(do|da|de) sinistro.*$/, '').trim();
+  // 28.1: tira o que sobrou da pergunta ("contato do", "cliente", "segurado"…) antes do nome
+  const sobra = /^(contato|telefone|fone|celular|whatsapp|whats|zap|e-?mail|numero|cliente|segurad[oa])\s(?:(?:do|da|de)\s)?/;
+  while (sobra.test(nome)) nome = nome.replace(sobra, '').trim();
   if (!nome || nome.length < 3 || /^(do|da|de|o|a)$/.test(nome)) return null;
   if (/^(sinistro|assistencia|terceiro|motorista)/.test(nome)) return null;
   return nome;
