@@ -1,5 +1,18 @@
 {
   "projects": {
     "default": "upgrade-seguros"
-  }
+  },
+  "targets": {
+    "upgrade-seguros": {
+      "hosting": {
+        "app": [
+          "upgrade-seguros"
+        ],
+        "admin": [
+          "upgrade-seguros-admin"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

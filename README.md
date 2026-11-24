@@ -652,9 +652,32 @@ A lista das coleções da corretora está em `EmpresaAtual.colecoes` (app) e `CO
 | `criarUsuario` | HTTP (só admin) | Etapa 15: cria a conta (senha aleatória) e o cadastro em `users/`, herdando a empresa do administrador; o app manda o e-mail de definir senha |
 | `migrarEmpresa` | HTTP (só admin) | Etapa 16: `diagnostico` (raiz × pasta da corretora, usuários, dias desde a migração) e `copiar` (raiz → `corretoras/{empresaId}/…`, só o que falta; índice do NPS; usuários sem empresa). Etapa 16b: `apagarRaiz` (confirmação `APAGAR`, 7 dias após a migração, só documentos com cópia) |
 | `converterVideo` | Storage (arquivo finalizado em `videos/` ou `corretoras/{id}/videos/`) | Etapa 12: converte para MP4 720p no mesmo caminho (ffmpeg-static) |
+| `plataforma` | HTTP (só admin da plataforma) | Etapa 21, `functions/plataforma.js`: o portal admin. Confere a marca `plataforma` no login + `plataforma_admins/{uid}` ativo + não ser usuário de corretora. Ações: `eu`, `corretoras`, `auditoria`, `criarContasQueFaltam`. Tudo vai para `plataforma_auditoria` |
 | `verificarAssistenciasAtradasTelegram` | Agendada (a cada 10 min) | Lê `app_config/config` e avisa no Telegram as assistências com SLA atrasado, respeitando horário configurado. Token do bot no Secret Manager (`TELEGRAM_BOT_TOKEN`, Etapa 15) |
 
 > Desde a Etapa 16c os anexos não são mais públicos: o link gravado tem uma chave de acesso do Firebase (ver Pendências de Segurança, item S6).
+
+---
+
+## 🏢 Plataforma (SaaS) — portal admin, planos e cobrança
+
+Modelo inspirado no QuotaFlow (resumo de 24/11/2026), adaptado ao Firebase: a trava real fica nas **regras do Firestore** e nas **Functions**, não só na tela.
+
+### Portal admin (Etapa 21)
+- **Site separado** no mesmo projeto: `lib/main_admin.dart` + `lib/admin/` (o app das corretoras não importa nada disso). Endereço provisório `https://upgrade-seguros-admin.web.app` (alvo `admin` no `firebase.json`; o app é o alvo `app`).
+- **Admin da plataforma ≠ usuário de corretora:** conta com e-mail próprio, criada **só** pelo script `functions/scripts/admin-plataforma.js` (`adicionar` / `remover` / `listar`, senha digitada escondida, mínimo 10 caracteres). Não existe tela para criar admin.
+- **Dupla checagem:** marca `plataforma: true` no login **e** `plataforma_admins/{uid}` com `ativo: true` **e** sem `users/{uid}`. O `remover` desliga na hora e encerra as sessões.
+- O portal **não lê o Firestore direto**: tudo pela Function `plataforma`, com registro em `plataforma_auditoria`.
+- **Conta da corretora** (plano, situação, cortesia) em `plataforma_contas/{empresaId}` + `historico/`. Não fica em `corretoras/{id}` porque lá o gestor da corretora pode gravar. O app só lê a própria conta; ninguém grava pelo app.
+- Situações previstas: `teste` (14 dias) · `teste_encerrado` (só leitura) · `ativa` · `inadimplente` · `suspensa` · `cancelada`.
+
+### Publicar
+- **App das corretoras:** `flutter build web` → `firebase deploy --only hosting:app`.
+- **Portal:** `flutter build web -t lib/main_admin.dart`, copiar `build/web` para `build/admin`, `flutter build web` de novo (devolve o app em `build/web`) → `firebase deploy --only hosting:admin`.
+- ⚠️ Desde a Etapa 21, `firebase deploy --only hosting` (sem `:app`) tenta publicar os dois sites.
+
+### Próximas etapas
+22 catálogo global de seguradoras (entrada por CNPJ) · 23 módulos (bloqueio na tela + regras + Functions, "Meu plano") · 24 planos-modelo e plano por corretora · 25 assinatura, autocadastro com CNPJ validado + aprovação, teste de 14 dias → só leitura · 26 painel financeiro · 27 custo por corretora · 28 gateway e régua de cobrança.
 
 ---
 
@@ -748,6 +771,7 @@ Combinado em 07/11/2026 — mesmo ritual usado no QuotaFlow, adaptado para Flutt
 | 19b.4 | 23/11/2026 | Etapa 19b.3 | Detalhe do sinistro: ramo em destaque ao lado do status e nosso nº de registro no topo, com botão copiar; assistência: nº com botão copiar + ramo (Veículo/Residencial). Exportar: filtros Ramo e Status sempre visíveis (com um ramo só, sumiam). |
 | 19b.5 | 23/11/2026 | Etapa 19b.4 | Assistências: barra do topo com as mesmas medidas de Sinistros — "Exportar relatório" e os filtros não ficam mais cortados. |
 | 20 | 23/11/2026 | Etapa 19b.5 | Seguradora só do cadastro: campo único com sugestões (abertura de sinistro, assistências, apólice, edição do sinistro) e conferência ao salvar; contrato importado e apólice copiada usam o nome cadastrado; cadastro barra nome parecido; ferramenta **Corrigir nomes nos registros** em Configurações → Seguradoras. |
+| 21 | 24/11/2026 | Etapa 20 | **Portal da plataforma (fundação):** site separado (`lib/main_admin.dart`), admin criado só por script, dupla checagem (marca + registro ativo + não ser usuário de corretora), Function `plataforma` com auditoria, lista de corretoras com contagens, contas da plataforma (`plataforma_contas`) com "Criar contas que faltam" (fundadoras: ativa, Tudo ligado, cortesia). Hospedagem em dois alvos (`app` e `admin`). |
 | 11 | 08/11/2026 | `9159bd1` | **Busca de Sinistros** também por terceiros (proprietário, motorista, contato, registro na seguradora deles), proprietário/condutor do veículo segurado e contato do segurado; sem acento, várias palavras, telefone sem máscara (`lib/utils/busca.dart`). **Filtro de recomendação** da lista de clientes vira seletor no padrão dos filtros de Sinistros, ao lado da busca. **Sinistralidade Mensal** recalculada (sinistros ocorridos ÷ prêmio ganho), com linha acumulada e linha do gatilho (`lib/utils/sinistralidade.dart`). Testes novos: `busca_test.dart`, `sinistralidade_test.dart`. |
 | 10 | 08/11/2026 | `44f5c8f` | **Top 10 de risco** com a regra da recomendação (vigentes, sem vínculo por ramo + data) e os mesmos nomes. **Lista de clientes:** filtro por recomendação ligado à exportação, que passa a trazer recomendação, uso do gatilho e contato (nome, telefone, e-mail). **Tarefas:** ordenar Mais recente/Mais antiga; exportar agrupado por funcionário (CSV/PDF); `concluida_em` gravado ao concluir; "no prazo / fora do prazo" pela regra única (antes concluída no prazo com data vencida contava como fora); editar não troca mais o responsável; o filtro por funcionário pelo id passou a funcionar (o campo não vinha na lista). **Relatórios:** Tarefas por Funcionário (abertas, concluídas %, no prazo × fora). Testes novos: `tarefas_test.dart` (+1 em `relatorio_clientes_test.dart`). |
 | 09 | 08/11/2026 | `4d14169` | **Recomendação do cliente unificada pelo uso do gatilho** (pior apólice vigente; faixas 60/80/100%; sinistros sem vínculo ligados por ramo + data; "Sem apólice vigente" e "Apólice sem valor" em cinza; Detalhes mostra uso do gatilho e % do valor da apólice). Substitui 4 contas diferentes. Botões com texto: **"Exportar relatório"** na lista de clientes e **"Importar contrato (PDF)"** no cadastro. Teste novo: `recomendacao_cliente_test.dart`. |

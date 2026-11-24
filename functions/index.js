@@ -28,3 +28,6 @@ exports.verificarAssistenciasAtradasTelegram = verificarAssistenciasAtradasTeleg
 
 // Etapa 12: converte vídeos dos sinistros para MP4 720p depois do envio
 exports.converterVideo = require('./converter-video').converterVideo;
+
+// Etapa 21: portal da plataforma (admin do SaaS) — só admin com a marca "plataforma"
+exports.plataforma = require('./plataforma').plataforma;

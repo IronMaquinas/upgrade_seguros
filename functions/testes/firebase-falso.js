@@ -9,6 +9,7 @@ const store = {};
 const tokens = {};
 const contas = {};
 const SV = { __serverTimestamp: true };
+let proximoId = 0; // Etapa 21: doc() sem id
 
 function docRef(path) {
   const id = path.split('/').pop();
@@ -38,8 +39,9 @@ function colRef(path) {
       .filter((k) => filtros.every(([f, v]) => store[k][f] === v));
   const q = {
     path,
-    doc: (id) => docRef(`${path}/${id}`),
+    doc: (id) => docRef(`${path}/${id === undefined ? 'auto' + ++proximoId : id}`),
     where(f, _op, v) { filtros.push([f, v]); return q; },
+    orderBy() { return q; }, // Etapa 21 (a ordem não é conferida nos testes)
     limit() { return q; },
     async get() {
       const docs = docsDaColecao().map((k) => ({ id: k.split('/').pop(), ref: docRef(k), data: () => ({ ...store[k] }) }));
@@ -131,6 +133,8 @@ const fakeAdmin = {
   auth: () => ({
     async verifyIdToken(t) {
       if (!tokens[t]) throw new Error('token inválido');
+      // Etapa 21: tokens[t] pode ser { uid, marcas } (ex.: { plataforma: true })
+      if (typeof tokens[t] === 'object') return { uid: tokens[t].uid, email: tokens[t].uid + '@x.com', ...(tokens[t].marcas || {}) };
       return { uid: tokens[t], email: tokens[t] + '@x.com' };
     },
     async createUser({ email }) {

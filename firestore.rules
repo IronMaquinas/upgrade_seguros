@@ -10,6 +10,9 @@ rules_version = '2';
 //   corretoras/{e}/<coleção>/…     dados da corretora (Etapa 16)
 //   nps_indice/{claimId}           claimId → empresaId (só o app grava; o
 //                                  servidor lê para o NPS sem login)
+//   plataforma_*                   Etapa 21: portal da plataforma (admin do SaaS).
+//                                  Só o servidor grava (Function "plataforma" e o
+//                                  script do dono). O app só lê a própria conta.
 //
 // Quem pode o quê dentro da corretora:
 //   • ler e gravar sinistros, assistências, clientes, tarefas…: membro
@@ -105,6 +108,20 @@ service cloud.firestore {
     match /nps_indice/{claimId} {
       allow create, update: if ativo() && request.resource.data.get('empresaId', '') == minhaEmpresa();
       // leitura só pelo servidor (Function npsPublico)
+    }
+
+    // ── plataforma (Etapa 21) ──────────────────────────────────────────────
+    // Conta da corretora (plano, situação): membros leem a própria (para
+    // "Meu plano", Etapa 23). Ninguém grava pelo app — nem o gestor.
+    match /plataforma_contas/{e} {
+      allow get: if membro(e);
+      match /historico/{h} {
+        allow read: if gestor(e);
+      }
+    }
+    // O admin confere o próprio registro; auditoria e o resto: só o servidor.
+    match /plataforma_admins/{uid} {
+      allow get: if logado() && request.auth.uid == uid;
     }
 
     // Qualquer outro caminho (inclusive as coleções antigas da raiz): bloqueado.
