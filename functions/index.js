@@ -19,6 +19,9 @@ const conta = require('./conta');
 exports.autocadastro = conta.autocadastro;
 exports.minhaConta = conta.minhaConta;
 
+// Etapa 27: uso de cada corretora (GB de arquivos e de vídeos, usuários), todo dia 03:30.
+exports.medirUsoDiario = require('./uso').medirUsoDiario;
+
 // Etapa 16c: arquivos na pasta da corretora e links com chave de acesso
 // (o upload não deixa mais o arquivo público). O código de uploadFile e
 // deleteFiles saiu daqui e foi para functions/arquivos.js — mesmos nomes e

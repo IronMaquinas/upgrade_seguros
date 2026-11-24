@@ -31,6 +31,7 @@ const cat = require('./catalogo'); // Etapa 22
 const mod = require('./modulos'); // Etapa 23
 const planos = require('./planos'); // Etapa 24
 const conta = require('./conta'); // Etapa 25
+const uso = require('./uso'); // Etapa 27
 
 if (!admin.apps.length) admin.initializeApp();
 const db = () => admin.firestore();
@@ -93,6 +94,7 @@ function resumoConta(c) {
     cortesia: c.cortesia === true,
     cortesiaAte: data(c.cortesiaAte), // Etapa 24
     situacaoEfetiva: conta.situacaoEfetiva(c), // Etapa 25: teste vencido = teste_encerrado
+    uso: c.uso ? { ...c.uso, medidoEm: data(c.uso.medidoEm) } : null, // Etapa 27
     modulos: Array.isArray(c.modulos) ? c.modulos : null, // Etapa 23 (null = tudo ligado)
     observacao: c.observacao || '',
     testeAte: data(c.testeAte),
@@ -449,6 +451,8 @@ async function recusar(quem, { id, motivo }) {
  *   pedidoAprovar { id, planoId?, diasTeste? } → cria corretora + gestor + conta em teste
  *   pedidoRecusar { id, motivo }     · pedidoAtendido { id, nota }
  *   contaDefinirSituacao { empresaId, situacao, testeAte?, motivo? }
+ *   Etapa 27 — uso (functions/uso.js):
+ *   medirUso { empresaId? }          → { medidas: [...] }  (sem empresaId: todas)
  */
 const plataforma = onRequest((req, res) =>
   cors(req, res, async () => {
@@ -491,6 +495,11 @@ const plataforma = onRequest((req, res) =>
           return res.json(await conta.recusarPedido(quem, corpo, auditar));
         case 'pedidoAtendido':
           return res.json(await conta.pedidoAtendido(quem, corpo, auditar));
+        case 'medirUso': {
+          const medidas = corpo.empresaId ? [await uso.medirCorretora(String(corpo.empresaId))] : await uso.medirTodas();
+          await auditar(quem, 'uso_medido', { alvoTipo: 'corretora', alvoId: corpo.empresaId ? String(corpo.empresaId) : '', detalhes: { corretoras: medidas.length } });
+          return res.json({ medidas });
+        }
         case 'contaDefinirSituacao':
           return res.json(await conta.definirSituacao(quem, corpo, auditar));
         case 'catalogoCriar':

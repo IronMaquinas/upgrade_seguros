@@ -145,6 +145,8 @@ class MeuPlanoScreen extends StatelessWidget {
                         ),
                         title: Text(m.nome, style: const TextStyle(fontWeight: FontWeight.w600)),
                         subtitle: Text(Planos.descreverFranquia(m, PlanoAtual.franquias[m.id]!)),
+                        // Etapa 27: quanto já usa (medido pela plataforma)
+                        trailing: _textoUso(m.id),
                       ),
                 ]),
               ),
@@ -226,6 +228,29 @@ void avisarForaDoPlano(BuildContext context, String modulo) {
     content: Text('"${m?.nome ?? modulo}" não está no seu plano.'),
     action: SnackBarAction(label: 'Ver meu plano', onPressed: () => abrirMeuPlano(context)),
   ));
+}
+
+// ── Etapa 27: uso × franquia ─────────────────────────────────────────────────
+
+Widget? _textoUso(String metrica) {
+  final u = PlanoAtual.uso;
+  if (u == null) return null;
+  final f = PlanoAtual.franquias[metrica];
+  if (f == null || f.semLimite) return null;
+  final String usado;
+  final bool acima;
+  if (metrica == 'usuarios') {
+    if (u.usuarios == null) return null;
+    usado = '${u.usuarios} de ${f.incluido}';
+    acima = u.usuarios! > f.incluido!;
+  } else {
+    usado = '${UsoConta.texto(metrica == 'gb_video' ? u.bytesVideos : u.bytesArquivos)} de ${f.incluido} GB';
+    acima = UsoConta.gbAcima(u.gbDe(metrica), f) > 0;
+  }
+  return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, mainAxisAlignment: MainAxisAlignment.center, children: [
+    Text('Usado: $usado', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: acima ? const Color(0xFFEF6C00) : _kVerde)),
+    if (u.medidoEm != null) Text('medido em ${DateFormat('dd/MM HH:mm').format(u.medidoEm!)}', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+  ]);
 }
 
 // ── Etapa 25: planos disponíveis e "Quero este plano" ────────────────────────

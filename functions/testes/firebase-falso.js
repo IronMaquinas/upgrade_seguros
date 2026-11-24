@@ -161,6 +161,7 @@ function instalar() {
     if (req === 'firebase-functions/v2/https') {
       return { onRequest: (a, b) => (typeof a === 'function' ? a : b) };
     }
+    if (req === 'firebase-functions/v2/scheduler') return { onSchedule: (a, b) => (typeof a === 'function' ? a : b) }; // Etapa 27
     if (req === 'firebase-functions/logger') return { info() {}, warn() {}, error(e) { console.error('LOG', e); } };
     if (req === 'cors') return () => (req2, res, next) => next();
     return orig.call(this, req, ...r);

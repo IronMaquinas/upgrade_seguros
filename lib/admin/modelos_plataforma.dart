@@ -21,6 +21,8 @@ class ContaPlataforma {
   final DateTime? cortesiaAte;
   /// Etapa 25: teste vencido = 'teste_encerrado' (calculado no servidor).
   final String situacaoEfetiva;
+  /// Etapa 27: uso medido (null = nunca medido).
+  final UsoConta? uso;
 
   const ContaPlataforma({
     required this.situacao,
@@ -35,6 +37,7 @@ class ContaPlataforma {
     this.franquias = const {},
     this.cortesiaAte,
     String? situacaoEfetiva,
+    this.uso,
   }) : situacaoEfetiva = situacaoEfetiva ?? situacao;
 
   factory ContaPlataforma.deJson(Map<String, dynamic> j) {
@@ -52,6 +55,7 @@ class ContaPlataforma {
       franquias: Planos.franquiasDe(plano['franquias']),
       cortesiaAte: DateTime.tryParse((j['cortesiaAte'] ?? '') as String)?.toLocal(),
       situacaoEfetiva: (j['situacaoEfetiva'] ?? j['situacao'] ?? '') as String,
+      uso: UsoConta.deMapa(j['uso']),
     );
   }
 }
@@ -148,6 +152,7 @@ String rotuloAcao(String a) => switch (a) {
       'pedido_recusado' => 'Recusou pedido',
       'pedido_atendido' => 'Atendeu pedido de plano',
       'situacao_definida' => 'Mudou a situação de uma corretora',
+      'uso_medido' => 'Mediu o uso das corretoras',
       'seguradora_criada' => 'Criou seguradora',
       'seguradora_aprovada' => 'Aprovou seguradora',
       'seguradora_editada' => 'Editou seguradora',

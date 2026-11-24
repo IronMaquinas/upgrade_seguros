@@ -9,15 +9,26 @@ final agora = DateTime(2026, 11, 24, 15);
 CorretoraPlataforma c(String nome, {int usuarios = 0, ContaPlataforma? conta}) =>
     CorretoraPlataforma(id: nome, nome: nome, usuarios: usuarios, conta: conta);
 
+const gb = 1024 * 1024 * 1024;
+
 ContaPlataforma plano(String situacao,
-        {int preco = 19900, int? incluidos = 5, int extra = 4900, bool cortesia = false, DateTime? cortesiaAte, DateTime? testeAte, String tipo = 'modelo'}) =>
+        {int preco = 19900,
+        int? incluidos = 5,
+        int extra = 4900,
+        bool cortesia = false,
+        DateTime? cortesiaAte,
+        DateTime? testeAte,
+        String tipo = 'modelo',
+        Map<String, Franquia>? franquiasGb,
+        UsoConta? uso}) =>
     ContaPlataforma(
       situacao: situacao,
       situacaoEfetiva: situacao,
       planoNome: tipo == 'tudo_ligado' ? 'Tudo ligado' : 'Essencial',
       planoTipo: tipo,
       precoCentavos: preco,
-      franquias: {'usuarios': Franquia(incluido: incluidos, extraCentavos: extra)},
+      franquias: {'usuarios': Franquia(incluido: incluidos, extraCentavos: extra), ...?franquiasGb},
+      uso: uso,
       cortesia: cortesia,
       cortesiaAte: cortesiaAte,
       testeAte: testeAte,
@@ -79,7 +90,37 @@ void main() {
 
   test('tabela para o Excel', () {
     final t = ResumoFinanceiro.de([c('Nova', usuarios: 6, conta: plano('ativa'))], agora: agora).tabela().split('\n');
-    expect(t.first.split('\t').length, 11);
-    expect(t[1], 'Nova\tAtiva\tEssencial\t199,00\t6\t5\t1\t49,00\t248,00\tnão\tsim');
+    expect(t.first.split('\t').length, 15);
+    expect(t[1], 'Nova\tAtiva\tEssencial\t199,00\t6\t5\t1\t49,00\t0,00\t0,00\t0\t0,00\t248,00\tnão\tsim');
+  });
+
+  test('Etapa 27: GB acima da franquia (arredonda para cima), arquivos e vídeos separados', () {
+    final r = ResumoFinanceiro.de([
+      c('A',
+          usuarios: 5,
+          conta: plano('ativa',
+              franquiasGb: {'gb': const Franquia(incluido: 10, extraCentavos: 500), 'gb_video': const Franquia(incluido: 2, extraCentavos: 1000)},
+              uso: UsoConta(bytesArquivos: (10.2 * gb).round(), bytesVideos: 1 * gb, medidoEm: DateTime(2026, 11, 24, 3)))),
+      c('B', conta: plano('ativa', franquiasGb: {'gb': const Franquia(incluido: 10, extraCentavos: 500)})), // nunca medida
+    ], agora: agora);
+    final a = r.linhas.firstWhere((l) => l.id == 'A');
+    expect(a.gbArquivosAcima, 1);
+    expect(a.gbVideosAcima, 0);
+    expect(a.gbCentavos, 500);
+    expect(a.totalCentavos, 19900 + 500);
+    expect(r.gbCentavos, 500);
+    expect(r.algumaSemMedicao, true);
+    expect(r.medicaoMaisAntiga, null);
+    expect(UsoConta.gbAcima(3.0, const Franquia()), 0); // sem limite
+    expect(UsoConta.texto(1536 * 1024 * 1024), '1,5 GB');
+    expect(UsoConta.texto(5 * 1024 * 1024), '5,0 MB');
+  });
+
+  test('Etapa 27: uso lido do mapa da conta', () {
+    final u = UsoConta.deMapa({'bytesArquivos': 2 * gb, 'arquivos': 10, 'bytesVideos': 0, 'videos': 0, 'usuarios': 3, 'medidoEm': '2026-11-24T06:30:00.000Z'})!;
+    expect(u.gbArquivos, 2.0);
+    expect(u.usuarios, 3);
+    expect(u.medidoEm!.toUtc().hour, 6);
+    expect(UsoConta.deMapa(null), null);
   });
 }

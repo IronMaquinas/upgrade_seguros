@@ -503,6 +503,12 @@ class _Corretoras extends StatelessWidget {
                       ? '${n(c.usuarios)} de ${c.conta!.franquias[m.id]!.incluido}'
                           '${(c.usuarios ?? 0) > c.conta!.franquias[m.id]!.incluido! ? '  ⚠ acima da franquia' : ''}'
                       : Planos.descreverFranquia(m, c.conta!.franquias[m.id]!)),
+            // Etapa 27: uso medido
+            if (c.conta?.uso != null) ...[
+              linha('Arquivos', '${UsoConta.texto(c.conta!.uso!.bytesArquivos)} em ${c.conta!.uso!.arquivos} arquivo(s)'),
+              linha('Vídeos', '${UsoConta.texto(c.conta!.uso!.bytesVideos)} em ${c.conta!.uso!.videos} vídeo(s)'),
+              if (c.conta!.uso!.medidoEm != null) linha('Medido em', DateFormat('dd/MM/yyyy HH:mm').format(c.conta!.uso!.medidoEm!)),
+            ],
             // Etapa 23
             if (c.conta != null)
               linha('Módulos', c.conta!.modulos == null

@@ -133,6 +133,10 @@ class PlataformaApi {
         'motivo': motivo,
       });
 
+  // ── Etapa 27: uso ──
+  /// Mede o uso (GB de arquivos e vídeos, usuários) de uma corretora ou de todas.
+  static Future<void> medirUso({String? empresaId}) => _chamar({'acao': 'medirUso', if (empresaId != null) 'empresaId': empresaId});
+
   // ── Etapa 22: catálogo de seguradoras ──
   static Future<List<SeguradoraCatalogo>> catalogo() async {
     final j = await _chamar({'acao': 'catalogo'});

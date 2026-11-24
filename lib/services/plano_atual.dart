@@ -71,6 +71,9 @@ class PlanoAtual {
 
   static Map<String, Franquia> get franquias => Planos.franquiasDe(_plano['franquias']);
 
+  /// Etapa 27: uso medido pela plataforma (null = ainda não medido).
+  static UsoConta? get uso => UsoConta.deMapa(_conta?['uso']);
+
   static DateTime? get cortesiaAte {
     final v = _conta?['cortesiaAte'];
     return v is Timestamp ? v.toDate() : null;
