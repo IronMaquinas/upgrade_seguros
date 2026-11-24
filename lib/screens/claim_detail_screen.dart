@@ -51,6 +51,8 @@ import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
 import 'package:upgrade_seguros/services/marca_pdf.dart'; // Etapa 17
 import 'package:upgrade_seguros/utils/perfil_corretora.dart'; // Etapa 17
 import 'package:upgrade_seguros/widgets/identificacao_atendimento.dart'; // Etapa 19b.4
+import 'package:upgrade_seguros/widgets/campo_seguradora.dart'; // Etapa 20
+import 'package:upgrade_seguros/services/seguradoras_cadastradas.dart'; // Etapa 20
 
 class ClaimDetailScreen extends StatefulWidget {
   final Claim claim;
@@ -140,6 +142,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
   late TextEditingController _relatoController;
   late TextEditingController _localController;
   late TextEditingController _numeroSinistroController;
+  TextEditingController? _seguradoraEdicaoCtrl; // Etapa 20
   late TextEditingController _numeroSeguradoraController;
   late TextEditingController _enderecoTerceiroController;
   late TextEditingController _slaPrevistController;
@@ -230,6 +233,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
     _relatoController.dispose();
     _localController.dispose();
     _numeroSinistroController.dispose();
+    _seguradoraEdicaoCtrl?.dispose();
     _numeroSeguradoraController.dispose();
     _enderecoTerceiroController.dispose();
     _slaPrevistController.dispose();
@@ -913,6 +917,21 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
           _client!.email != _originalClient!.email) {
         clientChanged = true;
       }
+    }
+
+    // Etapa 20: seguradora alterada tem que ser uma das cadastradas.
+    if (_currentClaim.seguradora != widget.claim.seguradora) {
+      final seg = await SeguradorasCadastradas.conferir(_currentClaim.seguradora);
+      if (seg == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(SeguradorasCadastradas.mensagemForaDoCadastro(_currentClaim.seguradora))),
+          );
+          setState(() => _isLoading = false);
+        }
+        return;
+      }
+      _currentClaim.seguradora = seg;
     }
 
     try {
@@ -2855,6 +2874,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
               onPressed: () {
                 setState(() {
                   _isEditing = true;
+                  _seguradoraEdicaoCtrl = null; // Etapa 20: recomeça do valor atual
                 });
               },
               tooltip: 'Editar',
@@ -2871,6 +2891,7 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
               onPressed: () {
                 setState(() {
                   _isEditing = false;
+                  _currentClaim.seguradora = widget.claim.seguradora; // Etapa 20
                   _relatoController.text = widget.claim.relatoEvento;
                   _localController.text = widget.claim.localOcorrencia;
                   _numeroSinistroController.text = widget.claim.numeroSinistro;
@@ -3005,11 +3026,27 @@ class _ClaimDetailScreenState extends State<ClaimDetailScreen> {
                                             Row(
                                               children: [
                                                 Expanded(
-                                                  child: buildEditableField(
-                                                    label: 'Seguradora',
-                                                    value: _currentClaim.seguradora,
-                                                    onChanged: (v) => _currentClaim.seguradora = v,
-                                                  ),
+                                                  // Etapa 20: na edição, só seguradoras cadastradas.
+                                                  child: _isEditing
+                                                      ? Padding(
+                                                          padding: const EdgeInsets.only(right: 8),
+                                                          child: CampoSeguradora(
+                                                            controller: _seguradoraEdicaoCtrl ??=
+                                                                TextEditingController(text: _currentClaim.seguradora),
+                                                            decoration: InputDecoration(
+                                                              labelText: 'Seguradora',
+                                                              isDense: true,
+                                                              filled: true,
+                                                              fillColor: Colors.amber.withOpacity(0.12),
+                                                            ),
+                                                            onChanged: (v) => _currentClaim.seguradora = v,
+                                                          ),
+                                                        )
+                                                      : buildEditableField(
+                                                          label: 'Seguradora',
+                                                          value: _currentClaim.seguradora,
+                                                          onChanged: (v) => _currentClaim.seguradora = v,
+                                                        ),
                                                 ),
                                                 Expanded(
                                                   child: buildEditableField(

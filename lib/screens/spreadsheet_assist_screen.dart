@@ -35,6 +35,8 @@ import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 import 'package:upgrade_seguros/services/marca_pdf.dart'; // Etapa 17
 import 'package:upgrade_seguros/models/lancamento_model.dart'; // Etapa 19a
 import 'package:upgrade_seguros/utils/gatilho.dart' show GatilhoApolice; // Etapa 19a
+import 'package:upgrade_seguros/widgets/campo_seguradora.dart'; // Etapa 20
+import 'package:upgrade_seguros/services/seguradoras_cadastradas.dart'; // Etapa 20
 
 class SpreadsheetAssistScreen extends StatefulWidget {
   final String tipoAssistencia;
@@ -90,7 +92,6 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
   final TextEditingController _tempoSlaCtrl = TextEditingController(text: '30');
   final List<String> _tiposVidroSelecionados = [];
   final TextEditingController _outroVidroCtrl = TextEditingController();
-  List<String> _seguradoras = [];
   final TextEditingController _numeroApoliceCtrl = TextEditingController();
 
   final TextEditingController _cpfCnpjCtrl = TextEditingController();
@@ -306,7 +307,7 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
         if (apoliceParaMostrar != null) {
           _numeroApoliceCtrl.text = apoliceParaMostrar.numeroApolice;
           _vigenciaApolice = BRFormatters.formatarData(apoliceParaMostrar.dataFim);
-          _seguradoraCtrl.text = apoliceParaMostrar.seguradora;
+          _seguradoraCtrl.text = SeguradorasCadastradas.normalizar(apoliceParaMostrar.seguradora); // Etapa 20
         } else {
           // Limpa campos da apólice se não encontrou
           _numeroApoliceCtrl.clear();
@@ -317,16 +318,10 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
     }
   }
 
-  // CARREGAR SEGURADORAS DO BANCO DE DADOS
+  // Etapa 20: o cadastro de seguradoras agora é lido uma vez para o app todo
+  // (SeguradorasCadastradas) e usado pelo CampoSeguradora.
   Future<void> _carregarSeguradoras() async {
-    final snapshot = await EmpresaAtual.col('seguradoras')
-        .where('ativa', isEqualTo: true)
-        .get();
-    setState(() {
-      _seguradoras = snapshot.docs
-          .map((doc) => doc['nome'] as String)
-          .toList();
-    });
+    await SeguradorasCadastradas.nomes().catchError((_) => <String>[]);
   }
 
   /// Abre popup para selecionar data/hora do comunicado retroativo
@@ -810,6 +805,18 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
       return;
     }
 
+    // Etapa 20: seguradora só do cadastro.
+    final segConferida = await SeguradorasCadastradas.conferir(_seguradoraCtrl.text);
+    if (segConferida == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(SeguradorasCadastradas.mensagemForaDoCadastro(_seguradoraCtrl.text))),
+        );
+      }
+      return;
+    }
+    _seguradoraCtrl.text = segConferida;
+
     // Valida tipo de assistência (veicular) ou tipo de serviço (residencial)
     late String tipoSelecionado = widget.tipoAssistencia == 'veiculo' 
       ? _tipoAssistenciaCtrl.text 
@@ -1239,27 +1246,12 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
                   children: [
                     Expanded(
                       flex: 3,
-                      child: Autocomplete<String>(
-                        optionsBuilder: (textEditingValue) {
-                          if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
-                          return _seguradoras.where((s) =>
-                              s.toLowerCase().contains(textEditingValue.text.toLowerCase()));
-                        },
-                        onSelected: (selection) =>
-                            setState(() => _seguradoraCtrl.text = selection),
-                        fieldViewBuilder: (ctx, autoCtrl, focusNode, onSubmitted) {
-                          autoCtrl.text = _seguradoraCtrl.text;
-                          return TextField(
-                            controller: autoCtrl,
-                            focusNode: focusNode,
-                            decoration: InputDecoration(
-                              labelText: 'Seguradora',
-                              prefixIcon: const Icon(Icons.business_outlined),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
-                            onChanged: (v) => _seguradoraCtrl.text = v,
-                          );
-                        },
+                      child: CampoSeguradora( // Etapa 20: só seguradoras cadastradas
+                        controller: _seguradoraCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Seguradora',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1806,27 +1798,12 @@ class _SpreadsheetAssistScreenState extends State<SpreadsheetAssistScreen> {
                     children: [
                       Expanded(
                         flex: 3,
-                        child: Autocomplete<String>(
-                          optionsBuilder: (textEditingValue) {
-                            if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
-                            return _seguradoras.where((s) =>
-                                s.toLowerCase().contains(textEditingValue.text.toLowerCase()));
-                          },
-                          onSelected: (selection) =>
-                              setState(() => _seguradoraCtrl.text = selection),
-                          fieldViewBuilder: (ctx, autoCtrl, focusNode, onSubmitted) {
-                            autoCtrl.text = _seguradoraCtrl.text;
-                            return TextField(
-                              controller: autoCtrl,
-                              focusNode: focusNode,
-                              decoration: InputDecoration(
-                                labelText: 'Seguradora',
-                                prefixIcon: const Icon(Icons.business_outlined),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                              ),
-                              onChanged: (v) => _seguradoraCtrl.text = v,
-                            );
-                          },
+                        child: CampoSeguradora( // Etapa 20: só seguradoras cadastradas
+                          controller: _seguradoraCtrl,
+                          decoration: InputDecoration(
+                            labelText: 'Seguradora',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),

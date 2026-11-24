@@ -40,6 +40,8 @@ import '../widgets/apolice_visualizacao_dialog.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
 import 'package:upgrade_seguros/utils/videos.dart' show Videos; // Etapa 16c (bucket)
+import 'package:upgrade_seguros/widgets/campo_seguradora.dart'; // Etapa 20
+import 'package:upgrade_seguros/services/seguradoras_cadastradas.dart'; // Etapa 20
 
 class ClientFormScreen extends StatefulWidget {
   final Client? clientToEdit;
@@ -84,7 +86,6 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
   List<String> _selectedRamos = [];
 
   List<Apolice> _apolices = [];
-  List<String> _seguradoras = [];
 
   @override
     void initState() {
@@ -141,21 +142,10 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
     super.dispose();
   }
 
-  // Carregar seguradoras do firestore
+  // Etapa 20: o cadastro de seguradoras agora é lido uma vez para o app todo
+  // (SeguradorasCadastradas) e usado pelo CampoSeguradora.
   Future<void> _carregarSeguradoras() async {
-    try {
-      final snapshot = await EmpresaAtual.col('seguradoras')
-          .where('ativa', isEqualTo: true)
-          .get();
-
-      setState(() {
-        _seguradoras = snapshot.docs
-            .map((doc) => doc['nome'] as String)
-            .toList();
-      });
-    } catch (e) {
-      debugPrint('Erro ao carregar seguradoras: $e');
-    }
+    await SeguradorasCadastradas.nomes().catchError((_) => <String>[]);
   }
 
    // BUSCAR LOCAL NO MAPS
@@ -613,6 +603,8 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
 
   // --- Importar novo contrato ---
   Future<void> _importarContrato() async {
+    // Etapa 20: carrega o cadastro para trocar o nome do PDF pelo cadastrado.
+    await SeguradorasCadastradas.nomes().catchError((_) => <String>[]);
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -820,7 +812,7 @@ for (int i = 0; i < linhasDebug.length; i++) {
     return Apolice(
       id: const Uuid().v4(),
       ramo: contrato.ramo,
-      seguradora: contrato.seguradora,
+      seguradora: SeguradorasCadastradas.normalizar(contrato.seguradora), // Etapa 20: nome do PDF → nome cadastrado
       numeroApolice: contrato.numeroApolice,
       dataInicio: contrato.dataInicio,
       dataFim: contrato.dataFim,
@@ -3447,30 +3439,12 @@ Widget build(BuildContext context) {
                           const SizedBox(height: 12),
 
                           // SEGURADORA (com autocomplete)
-                          Autocomplete<String>(
-                            optionsBuilder: (TextEditingValue textEditingValue) {
-                              if (textEditingValue.text.isEmpty) {
-                                return const Iterable<String>.empty();
-                              }
-                              return _seguradoras.where((option) =>
-                                option.toLowerCase().contains(textEditingValue.text.toLowerCase())
-                              );
-                            },
-                            onSelected: (String selection) {
-                              setModalState(() => seguradoraCtrl.text = selection);
-                            },
-                            fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
-                              textEditingController.text = seguradoraCtrl.text;
-                              return TextField(
-                                controller: textEditingController,
-                                focusNode: focusNode,
-                                decoration: InputDecoration(
-                                  labelText: 'Seguradora',
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                                ),
-                                onChanged: (val) => seguradoraCtrl.text = val,
-                              );
-                            },
+                          CampoSeguradora( // Etapa 20: só seguradoras cadastradas
+                            controller: seguradoraCtrl,
+                            decoration: InputDecoration(
+                              labelText: 'Seguradora',
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
                           ),
                           const SizedBox(height: 12),
 
@@ -3925,17 +3899,34 @@ Widget build(BuildContext context) {
                       const SizedBox(width: 8),
                       Expanded(
                         child: ElevatedButton(
-                          onPressed: () {
+                          onPressed: () async {
                             if (ramoCtrl.text.isEmpty || dataInicio == null || dataFim == null) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(content: Text('Preencha os campos obrigatórios')),
                               );
                               return;
                             }
+                            // Etapa 20: seguradora só do cadastro.
+                            final segConferida = await SeguradorasCadastradas.conferir(seguradoraCtrl.text);
+                            if (segConferida == null) {
+                              if (ctx.mounted) {
+                                showDialog(
+                                  context: ctx,
+                                  builder: (d) => AlertDialog(
+                                    backgroundColor: Colors.white,
+                                    surfaceTintColor: Colors.transparent,
+                                    content: Text(SeguradorasCadastradas.mensagemForaDoCadastro(seguradoraCtrl.text)),
+                                    actions: [TextButton(onPressed: () => Navigator.pop(d), child: const Text('OK'))],
+                                  ),
+                                );
+                              }
+                              return;
+                            }
+                            if (!ctx.mounted) return;
                             final novaApolice = Apolice(
                               id: apoliceToEdit?.id ?? const Uuid().v4(),
                               ramo: ramoCtrl.text,
-                              seguradora: seguradoraCtrl.text,
+                              seguradora: segConferida,
                               numeroApolice: numeroCtrl.text,
                               dataInicio: dataInicio!,
                               dataFim: dataFim!,

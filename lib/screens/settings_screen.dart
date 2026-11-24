@@ -26,6 +26,7 @@ import 'package:upgrade_seguros/services/pdf_signature_service.dart';
 import 'package:upgrade_seguros/models/workshop_model.dart';
 import 'package:upgrade_seguros/services/workshop_service.dart';
 import 'package:upgrade_seguros/widgets/perfil_corretora_card.dart'; // Etapa 17
+import 'package:upgrade_seguros/widgets/corrigir_seguradoras_dialog.dart'; // Etapa 20
 
 // ─── Paleta ──────────────────────────────────────────────────────────────────
 const _kBlue  = Color(0xFF1565C0);
@@ -293,6 +294,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                   onAdicionar: () => _soGestor(() => _abrirForm()),
                   onEditar: (s) => _soGestor(() => _abrirForm(seguradora: s)),
                   onToggle: (s) => _soGestor(() => _toggleAtiva(s)),
+                  onCorrigir: () => _soGestor(() => abrirCorrecaoSeguradoras(context)), // Etapa 20
                 ),
                 
                 // ─── ABA OFICINAS (NOVA) ───
@@ -324,9 +326,11 @@ class _AbaSeguradoras extends StatelessWidget {
     required this.onAdicionar,
     required this.onEditar,
     required this.onToggle,
+    required this.onCorrigir,
   });
 
   final SeguradoraService service;
+  final VoidCallback onCorrigir; // Etapa 20
   final String busca;
   final ValueChanged<String> onBuscaChanged;
   final VoidCallback onAdicionar;
@@ -384,6 +388,27 @@ class _AbaSeguradoras extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                 ),
+              ),
+            ],
+          ),
+        ),
+
+        // Etapa 20: corrigir grafias antigas nos registros (CHUBB, AXA SEGURUROS…)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Sinistros, assistências e apólices só aceitam seguradoras desta lista.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: onCorrigir,
+                icon: const Icon(Icons.auto_fix_high, size: 16),
+                label: const Text('Corrigir nomes nos registros'),
+                style: TextButton.styleFrom(foregroundColor: _kBlue, textStyle: const TextStyle(fontSize: 12.5)),
               ),
             ],
           ),
@@ -778,7 +803,7 @@ class _SeguradoraFormState extends State<_SeguradoraForm> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Erro: $e'), backgroundColor: _kRed));
+            SnackBar(content: Text('$e'.replaceFirst('Exception: ', '')), backgroundColor: _kRed)); // Etapa 20
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);

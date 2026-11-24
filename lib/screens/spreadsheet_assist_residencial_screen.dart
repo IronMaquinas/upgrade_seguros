@@ -26,6 +26,8 @@ import '../utils/formatters.dart';
 import 'assist_detail_screen.dart';
 import '../widgets/client_search_dialog.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
+import 'package:upgrade_seguros/widgets/campo_seguradora.dart'; // Etapa 20
+import 'package:upgrade_seguros/services/seguradoras_cadastradas.dart'; // Etapa 20
 
 class SpreadsheetAssistResidencialScreen extends StatefulWidget {
   const SpreadsheetAssistResidencialScreen({super.key});
@@ -99,7 +101,6 @@ class _SpreadsheetAssistResidencialScreenState
   static const _apiKey = 'AIzaSyCoE3ZT1_EMmET0RaSmBeFMWQiYwJcl1YE';
 
   // Lista de seguradoras
-  List<String> _seguradoras = [];
 
   @override
   void initState() {
@@ -131,16 +132,10 @@ class _SpreadsheetAssistResidencialScreenState
     });
   }
 
-  // ── Carregar seguradoras do banco de dados ──────────────────────────────
+  // Etapa 20: o cadastro de seguradoras agora é lido uma vez para o app todo
+  // (SeguradorasCadastradas) e usado pelo CampoSeguradora.
   Future<void> _carregarSeguradoras() async {
-    final snapshot = await EmpresaAtual.col('seguradoras')
-        .where('ativa', isEqualTo: true)
-        .get();
-    setState(() {
-      _seguradoras = snapshot.docs
-          .map((doc) => doc['nome'] as String)
-          .toList();
-    });
+    await SeguradorasCadastradas.nomes().catchError((_) => <String>[]);
   }
 
   @override
@@ -541,6 +536,18 @@ class _SpreadsheetAssistResidencialScreenState
       return;
     }
 
+    // Etapa 20: seguradora só do cadastro.
+    final segConferida = await SeguradorasCadastradas.conferir(_seguradoraCtrl.text);
+    if (segConferida == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(SeguradorasCadastradas.mensagemForaDoCadastro(_seguradoraCtrl.text))),
+        );
+      }
+      return;
+    }
+    _seguradoraCtrl.text = segConferida;
+
     setState(() => _isSaving = true);
 
     try {
@@ -905,27 +912,12 @@ class _SpreadsheetAssistResidencialScreenState
                     children: [
                       Expanded(
                         flex: 3,
-                        child: Autocomplete<String>(
-                          optionsBuilder: (textEditingValue) {
-                            if (textEditingValue.text.isEmpty) return const Iterable<String>.empty();
-                            return _seguradoras.where((s) =>
-                                s.toLowerCase().contains(textEditingValue.text.toLowerCase()));
-                          },
-                          onSelected: (selection) =>
-                              setState(() => _seguradoraCtrl.text = selection),
-                          fieldViewBuilder: (ctx, autoCtrl, focusNode, onSubmitted) {
-                            autoCtrl.text = _seguradoraCtrl.text;
-                            return TextField(
-                              controller: autoCtrl,
-                              focusNode: focusNode,
-                              decoration: InputDecoration(
-                                labelText: 'Seguradora',
-                                prefixIcon: const Icon(Icons.business_outlined),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                              ),
-                              onChanged: (v) => _seguradoraCtrl.text = v,
-                            );
-                          },
+                        child: CampoSeguradora( // Etapa 20: só seguradoras cadastradas
+                          controller: _seguradoraCtrl,
+                          decoration: InputDecoration(
+                            labelText: 'Seguradora',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),

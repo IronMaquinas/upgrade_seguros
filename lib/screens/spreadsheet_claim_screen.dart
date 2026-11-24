@@ -46,6 +46,8 @@ import 'package:upgrade_seguros/widgets/videos_sinistro.dart';
 import 'package:upgrade_seguros/utils/gatilho.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
 import 'package:upgrade_seguros/utils/arquivos.dart'; // Etapa 16c
+import 'package:upgrade_seguros/widgets/campo_seguradora.dart'; // Etapa 20
+import 'package:upgrade_seguros/services/seguradoras_cadastradas.dart'; // Etapa 20
 
  enum RelatoStep {
     situacao,
@@ -2036,6 +2038,22 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
 
     if (_isSaving) return;
 
+    // Etapa 20: seguradora só do cadastro. No registro final bloqueia; no
+    // salvamento automático grava o nome cadastrado quando houver.
+    final segDigitada = _ctrl['seguradora']?.text ?? '';
+    if (!silent) {
+      final seg = await SeguradorasCadastradas.conferir(segDigitada);
+      if (seg == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(SeguradorasCadastradas.mensagemForaDoCadastro(segDigitada))),
+          );
+        }
+        return;
+      }
+      if (seg != segDigitada) _ctrl['seguradora']!.text = seg;
+    }
+
     final userId = _authService.getUserId();
     final userEmail = _authService.getUserEmail();
     final horaOcorrencia = _ctrl['horaOcorrencia']?.text; // "HH:mm"
@@ -2460,7 +2478,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
         fotosUrls: [],
         arquivosLaudosUrls: [],
         numeroSeguradora: _ctrl['numeroSinistroSeguradora']!.text.trim(),
-        seguradora: _ctrl['seguradora']!.text.trim(),
+        seguradora: SeguradorasCadastradas.normalizar(_ctrl['seguradora']!.text), // Etapa 20
         clientNome: _cliente?.nome ?? _ctrl['empresaSegurada']!.text.trim(),
         clientCnpjCpf: _cliente?.cnpjCpf ?? _ctrl['cnpjSegurado']!.text.trim(),
         valorTotalSinistro: valorAbertura,
@@ -2838,7 +2856,7 @@ class _SpreadsheetClaimScreenState extends State<SpreadsheetClaimScreen> {
           _ctrl['valorGatilho']!.text = _formatarMoeda((apolice.gatilhoEfetivo(percentualGatilho) * 100).round());
 
           if (apolice.seguradora.isNotEmpty) {
-            _ctrl['seguradora']!.text = apolice.seguradora;
+            _ctrl['seguradora']!.text = SeguradorasCadastradas.normalizar(apolice.seguradora); // Etapa 20
           }
         } else {
           // Limpa campos da apólice se não encontrou
@@ -4616,47 +4634,16 @@ class _FieldCell extends StatefulWidget {
         ),
         const SizedBox(height: 4),
 
-        Autocomplete<String>(
-          optionsBuilder: (textEditingValue) {
-            if (textEditingValue.text.isEmpty) {
-              return const Iterable<String>.empty();
-            }
-
-            return widget.field.autocompleteOptions!.where((option) {
-              return option.toLowerCase().contains(
-                textEditingValue.text.toLowerCase(),
-              );
-            });
-          },
-
-          onSelected: (selection) {
-            widget.controller.text = selection;
-            widget.onChanged(selection);
-          },
-
-          fieldViewBuilder:
-              (context, autoController, focusNode, onFieldSubmitted) {
-
-            // 🔥 sincroniza controller do sistema
-            autoController.text = widget.controller.text;
-
-            return TextFormField(
-              controller: autoController,
-              focusNode: focusNode,
-              decoration: _inputDecoration(
-                context,
-                widget.groupColor,
-                focused: _focused,
-                hint: widget.field.hint ?? 'Digite para buscar...',
-              ).copyWith(
-                prefixIcon: const Icon(Icons.business_outlined),
-              ),
-              onChanged: (value) {
-                widget.controller.text = value;
-                widget.onChanged(value);
-              },
-            );
-          },
+        // Etapa 20: campo compartilhado — sugere as cadastradas e só aceita
+        // uma delas (antes não sugeria nada e gravava qualquer texto).
+        CampoSeguradora(
+          controller: widget.controller,
+          decoration: _inputDecoration(
+            context,
+            widget.groupColor,
+            focused: _focused,
+          ),
+          onChanged: widget.onChanged,
         ),
       ],
     );

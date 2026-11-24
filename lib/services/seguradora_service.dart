@@ -1,6 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/seguradora_model.dart';
 import 'package:upgrade_seguros/services/empresa_atual.dart'; // Etapa 16
+import 'package:upgrade_seguros/services/seguradoras_cadastradas.dart'; // Etapa 20
+import 'package:upgrade_seguros/utils/seguradoras.dart'; // Etapa 20
 
 class SeguradoraService {
   final String _collection = 'seguradoras';
@@ -8,10 +9,10 @@ class SeguradoraService {
   /// 📝 CRIAR nova seguradora (com TODOS os campos)
   Future<Seguradora> criar(Seguradora seguradora) async {
     try {
-      // Verificar se já existe com esse nome
-      final existe = await _nomeJaExiste(seguradora.nome);
-      if (existe) {
-        throw Exception('Já existe uma seguradora com esse nome!');
+      // Etapa 20: barra também nome parecido (Chubb × CHUBB, AXA × AXA Seguros)
+      final parecida = await _nomeParecido(seguradora.nome);
+      if (parecida != null) {
+        throw Exception('Já existe a seguradora "$parecida" — use essa.');
       }
 
       final docRef = await EmpresaAtual.col(_collection).add(
@@ -24,6 +25,7 @@ class SeguradoraService {
         'id': docRef.id,
       });
 
+      SeguradorasCadastradas.invalidar(); // Etapa 20
       print('✅ Seguradora criada com sucesso! ID: ${docRef.id}');
 
       return Seguradora(
@@ -93,9 +95,9 @@ class SeguradoraService {
     try {
       // Verificar se o novo nome já existe (excluindo o atual)
       if (seguradora.nome != (await buscarPorId(id))?.nome) {
-        final existe = await _nomeJaExiste(seguradora.nome, excluirId: id);
-        if (existe) {
-          throw Exception('Já existe uma seguradora com esse nome!');
+        final parecida = await _nomeParecido(seguradora.nome, excluirId: id);
+        if (parecida != null) {
+          throw Exception('Já existe a seguradora "$parecida" — use essa.');
         }
       }
 
@@ -103,6 +105,7 @@ class SeguradoraService {
         seguradora.toMap(),
       );
 
+      SeguradorasCadastradas.invalidar(); // Etapa 20
       print('✅ Seguradora editada com sucesso!');
     } catch (e) {
       print('❌ Erro ao editar seguradora: $e');
@@ -117,6 +120,7 @@ class SeguradoraService {
         'ativa': false,
       });
 
+      SeguradorasCadastradas.invalidar(); // Etapa 20
       print('✅ Seguradora desativada com sucesso!');
     } catch (e) {
       print('❌ Erro ao desativar seguradora: $e');
@@ -131,6 +135,7 @@ class SeguradoraService {
         'ativa': true,
       });
 
+      SeguradorasCadastradas.invalidar(); // Etapa 20
       print('✅ Seguradora reativada com sucesso!');
     } catch (e) {
       print('❌ Erro ao reativar seguradora: $e');
@@ -138,26 +143,16 @@ class SeguradoraService {
     }
   }
 
-  /// 🔎 Verificar se nome já existe
-  Future<bool> _nomeJaExiste(String nome, {String? excluirId}) async {
-    try {
-      var query = EmpresaAtual.col(_collection)
-          .where('nome', isEqualTo: nome);
-
-      final snapshot = await query.get();
-
-      if (snapshot.docs.isEmpty) return false;
-
-      // Se tem excluirId, verifica se é diferente
-      if (excluirId != null) {
-        return snapshot.docs.any((doc) => doc.id != excluirId);
-      }
-
-      return true;
-    } catch (e) {
-      print('❌ Erro ao verificar nome: $e');
-      return false;
-    }
+  /// 🔎 Etapa 20: nome igual OU parecido já cadastrado (sem acento/caixa e sem
+  /// "Seguros"/"S.A." no fim). Antes só barrava nome exatamente igual e, se a
+  /// consulta falhasse, deixava passar.
+  Future<String?> _nomeParecido(String nome, {String? excluirId}) async {
+    final snapshot = await EmpresaAtual.col(_collection).get();
+    final outros = [
+      for (final d in snapshot.docs)
+        if (d.id != excluirId) ((d.data()['nome'] ?? '') as String),
+    ];
+    return resolverSeguradora(nome, outros);
   }
 
   /// 🔄 STREAM para atualização em tempo real
