@@ -49,6 +49,11 @@ function intencaoDe(t, placa) {
   if (/apolice|vence|vencimento|vigencia|vigente|gastos?\b|gastou|gatilho|sinistralidade|renova/.test(t)) return 'apolices';
   if (/(quais|lista|numeros?|todos) (os )?sinistros|sinistros (do|da|de) /.test(t)) return 'sinistros_cliente';
   if (/\b(sinistros|atendimentos|assistencias)\b/.test(t)) return 'sinistros_cliente'; // 28.1: "e os sinistros dele?"
+  // 28.6: singular sem número — "qual sinistro da X?", "X possui assistência em andamento?"
+  const ATD = '(sinistro|assistencia|atendimento)';
+  if (new RegExp(`^(e )?(qual|quais|tem|existe|ha)( o| a| algum| alguma)? ${ATD}\\b`).test(t)
+    || new RegExp(`\\b(possui|tem|teve|ha) (algum |alguma |um |uma )?${ATD}\\b`).test(t)
+    || new RegExp(`\\b${ATD} (do|da|de) (cliente |segurad[oa] )?(?!terceir|motorist|oficin)[a-z]`).test(t) && !/\b(sn|as)\d{14}\b/.test(t) && !/telefone|contato|e-?mail|veiculo|placa|pendent|tarefa/.test(t)) return 'sinistros_cliente';
   if (/pendent|pendencia|tarefa|\bacao\b|\bacoes\b|falta fazer/.test(t)) return 'pendencias';
   if (/status|situacao|andamento|como esta|em que pe/.test(t)) return 'status';
   if (/veiculo|carro|placa|modelo|chassi|marca|caminhao|moto\b|\b(bem|bens)( segurados?)?\b|frota/.test(t)) return 'veiculo'; // 28.2: "bem segurado", "frota"
@@ -58,13 +63,14 @@ function intencaoDe(t, placa) {
 
 /** Nome do cliente depois de "do cliente", "do segurado", "sinistros do/da". */
 function clienteDe(t) {
-  const m = t.match(/(?:sinistros|veiculos?|telefone|contato|apolices?|bens|bem|segurad[oa]s?|frota|placas?|dados|carros?|caminhoes|e-?mail|whatsapp|celular|fone)\s(?:do|da|de)\s(?:cliente\s|segurad[oa]\s)?(.+?)(?:\?|$)/)
+  const m = t.match(/(?:sinistros?|assistencias?|atendimentos?|veiculos?|telefone|contato|apolices?|bens|bem|segurad[oa]s?|frota|placas?|dados|carros?|caminhoes|e-?mail|whatsapp|celular|fone)\s(?:do|da|de)\s(?:cliente\s|segurad[oa]\s)?(.+?)(?:\?|$)/)
     || t.match(/(?:cliente|segurad[oa])\s(?!do\b|da\b)(.+?)(?:\?|$)/);
   if (!m) return clienteAntesDoVerbo(t);
   let nome = m[1].replace(/\b(sn|as)\d{14}\b/g, '').replace(/\b(do|da|de) sinistro.*$/, '').trim();
   // 28.1: tira o que sobrou da pergunta ("contato do", "cliente", "segurado"…) antes do nome
   const sobra = /^(contato|telefone|fone|celular|whatsapp|whats|zap|e-?mail|numero|cliente|segurad[oa])\s(?:(?:do|da|de)\s)?/;
   while (sobra.test(nome)) nome = nome.replace(sobra, '').trim();
+  nome = nome.replace(/\s(possui|tem|teve|esta|estao|com)\b.*$/, '').trim(); // 28.6: "X possui assistência em andamento"
   if (!nome || nome.length < 3 || /^(do|da|de|o|a)$/.test(nome)) return null;
   // 28.2: "que ele tem", "dele", "desse cliente" → é o cliente da conversa, não um nome
   if (/^(que|qual|quais|ele|ela|eles|dele|dela|deles|desse|dessa|deste|desta|esse|essa|este|esta|isso|tem|o mesmo|a mesma)\b/.test(nome)) return null;
@@ -103,7 +109,14 @@ function interpretar(pergunta, assunto = {}) {
     : /gastos?\b|gastou|gatilho|sinistralidade|consum|utiliz/.test(t) ? 'gastos'
       : /\b(bem|bens)\b/.test(t) ? 'bens'
         : null;
-  return { intencao, alvo, numero, numeroSeguradora: seg, placa, cliente, detalhe };
+  // 28.6: atendimentos do cliente — só em curso? só sinistros ou só assistências?
+  let filtro = null;
+  if (intencao === 'sinistros_cliente') {
+    const so = /assistencia/.test(t) && !/sinistro/.test(t) ? 'assistencias' : /sinistro/.test(t) && !/assistencia/.test(t) ? 'sinistros' : null;
+    const emCurso = /andamento|em curso|abert|ativ|pendente/.test(t);
+    if (so || emCurso) filtro = { so, emCurso };
+  }
+  return { intencao, alvo, numero, numeroSeguradora: seg, placa, cliente, detalhe, filtro };
 }
 
 /** As regras resolvem sozinhas? (senão, pergunta ao Haiku) */

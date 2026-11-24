@@ -442,6 +442,15 @@ async function executar(e, p, assunto) {
     }
     case 'veiculo': {
       const itens = respostaVeiculo(p.alvo, at, cli);
+      // 28.5: tem apólice, mas nenhum bem cadastrado nela — diz isso (não é "fora do escopo")
+      if (!itens && !at && cli && apolicesDe(cli).length) {
+        const aps = apolicesDe(cli);
+        return {
+          texto: `${cli.nome} tem ${aps.length} apólice(s), mas nenhum bem cadastrado nelas.`,
+          itens: aps.slice(0, 10).map((a) => ({ titulo: rotuloApolice(a), linhas: [a.seguradora && `Seguradora: ${a.seguradora}`, 'Sem bens cadastrados — dá para incluir no cadastro do cliente, em Apólices por Ramo.'].filter(Boolean), acoes: [] })),
+          assunto: novoAssunto,
+        };
+      }
       if (!itens) return { ...FORA('nao_encontrado', 'Não há veículo cadastrado para isso.'), assunto: novoAssunto };
       return { texto: at ? rotuloAt(at) : cli.nome, itens, assunto: novoAssunto };
     }
@@ -482,15 +491,22 @@ async function executar(e, p, assunto) {
     case 'sinistros_cliente': {
       const c = cli || (await cliente(e, at && at.id_cliente));
       if (!c) return { ...FORA('nao_encontrado'), assunto: novoAssunto };
+      // 28.6: filtro — só sinistros / só assistências / só em curso (mesma regra das listas)
+      const f = p.filtro || {};
+      const FINALIZADOS = ['Concluído', 'Cancelado', 'Negado'];
       const lista = [];
-      for (const nome of ['sinistros', 'assistencias']) {
+      for (const nome of f.so ? [f.so] : ['sinistros', 'assistencias']) {
         const s = await col(e, nome).where('id_cliente', '==', c.id).get();
-        s.docs.forEach((d) => lista.push({ id: d.id, ...d.data() }));
+        s.docs.forEach((d) => lista.push({ id: d.id, ...d.data(), tipo: d.data().tipo || (nome === 'assistencias' ? 'assistencia' : 'sinistro') }));
       }
-      lista.sort((a, b) => String(b.numero_sinistro || '').localeCompare(String(a.numero_sinistro || '')));
+      const filtrada = f.emCurso ? lista.filter((x) => !FINALIZADOS.includes(String(x.status_atual || x.status || '').trim())) : lista;
+      filtrada.sort((a, b) => String(b.numero_sinistro || '').localeCompare(String(a.numero_sinistro || '')));
+      const oque = f.so === 'assistencias' ? 'assistência(s)' : f.so === 'sinistros' ? 'sinistro(s)' : 'atendimento(s)';
+      const nenhum = f.so === 'assistencias' ? 'nenhuma assistência' : f.so === 'sinistros' ? 'nenhum sinistro' : 'nenhum sinistro nem assistência';
+      const lista2 = filtrada;
       return {
-        texto: lista.length ? `${c.nome}: ${lista.length} atendimento(s).` : `${c.nome} não tem sinistros nem assistências.`,
-        itens: lista.slice(0, 15).map((x) => ({ titulo: `${x.tipo === 'assistencia' ? 'Assistência' : 'Sinistro'} ${x.numero_sinistro || ''}`, linhas: [`Status: ${x.status_atual || x.status || '—'}`, x.data_abertura && `Aberto em ${dataBr(x.data_abertura)}`].filter(Boolean), acoes: [abrir(x)] })),
+        texto: lista2.length ? `${c.nome}: ${lista2.length} ${oque}${f.emCurso ? ' em andamento' : ''}.` : `${c.nome} não tem ${nenhum}${f.emCurso ? ' em andamento' : ''}.`,
+        itens: lista2.slice(0, 15).map((x) => ({ titulo: `${x.tipo === 'assistencia' ? 'Assistência' : 'Sinistro'} ${x.numero_sinistro || ''}`, linhas: [`Status: ${x.status_atual || x.status || '—'}`, x.data_abertura && `Aberto em ${dataBr(x.data_abertura)}`].filter(Boolean), acoes: [abrir(x)] })),
         assunto: { atendimentoId: null, clienteId: c.id, rotulo: `Cliente ${c.nome}`, intencao: 'sinistros_cliente' },
       };
     }

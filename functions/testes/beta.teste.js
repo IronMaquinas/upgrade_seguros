@@ -37,6 +37,12 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   t.ok(interpretar('telefone do contato do cliente iury guaru').cliente === 'iury guaru', '28.1: "do contato do cliente" também');
   t.ok(interpretar('qual o telefone de contato do terceiro').alvo === 'contato_terceiro', '28.1: contato do terceiro continua');
   t.ok(interpretar('e os sinistros dele?', { clienteId: 'x' }).intencao === 'sinistros_cliente' && bastaSemIa(interpretar('e os sinistros dele?', { clienteId: 'x' }), { clienteId: 'x' }), '28.1: "e os sinistros dele?" sem IA');
+  // 28.6: singular e "em andamento"
+  p = interpretar('qual sinistro da fibra minas?');
+  t.ok(p.intencao === 'sinistros_cliente' && p.cliente === 'fibra minas' && p.filtro.so === 'sinistros' && bastaSemIa(p), '28.6: "qual sinistro da X" sem IA');
+  p = interpretar('o cliente Sem Fronteiras possui assistência em andamento?', { atendimentoId: 'x', intencao: 'contato' });
+  t.ok(p.intencao === 'sinistros_cliente' && p.cliente === 'sem fronteiras' && p.filtro.so === 'assistencias' && p.filtro.emCurso, '28.6: "possui assistência em andamento" com outro assunto');
+  t.ok(interpretar(`o sinistro ${SN} tem ação pendente?`).intencao === 'pendencias' && interpretar('qual o status desse sinistro?', { atendimentoId: 'x' }).intencao === 'status', '28.6: pendência e status continuam');
   // 28.2: o print do Marcony
   p = interpretar('qual o bem segurado que ele tem?', { clienteId: 'x', intencao: 'contato' });
   t.ok(p.intencao === 'veiculo' && p.cliente === null && p.alvo === null, '28.2: "bem segurado que ele tem" = veículo do cliente da conversa');
@@ -135,6 +141,24 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   r = await per('qual o total de gastos da apólice do Iury Guaru?', { novaConversa: true });
   const a1 = r.body.itens.find((i) => i.titulo === 'Frota • 950001854');
   t.ok(a1.linhas.includes('Gasto com sinistros na vigência: R$ 20.000,00 (1 sinistro(s))') && a1.linhas.some((l) => l.startsWith('Gatilho: R$ 104.944,20 — 19% usado')), '28.4: gasto × gatilho (negado não conta; 70% do valor)');
+  store[`corretoras/${E}/clientes/cli4`] = { nome: 'MAIS ALIMENTOS LTDA', apolices: [{ id: 'm1', ramo: 'Frota', numero_apolice: '31.69.2026.0488237', seguradora: 'LIBERTY', data_inicio: ts('2026-04-19T03:00:00Z'), data_fim: ts('2027-04-19T03:00:00Z'), valor_apolice: 59611.01, bens_segurados: [] }] };
+  r = await per('quais os bens segurados da mais alimentos?', { novaConversa: true });
+  t.ok(!r.body.foraDoEscopo && r.body.texto === 'MAIS ALIMENTOS LTDA tem 1 apólice(s), mas nenhum bem cadastrado nelas.' && r.body.itens[0].titulo === 'Frota • 31.69.2026.0488237', '28.5: apólice sem bens: diz isso (não é "sem resposta")');
+  // 28.6: prints do Marcony — sinistro/assistência no singular, e "em andamento" com outro assunto na conversa
+  store[`corretoras/${E}/clientes/cli5`] = { nome: 'SEM FRONTEIRAS' };
+  store[`corretoras/${E}/assistencias/a1`] = { numero_sinistro: 'AS20261022102913', id_cliente: 'cli5', tipo: 'assistencia', status_atual: 'Aberto' };
+  store[`corretoras/${E}/assistencias/a2`] = { numero_sinistro: 'AS20260101000000', id_cliente: 'cli5', tipo: 'assistencia', status_atual: 'Concluído' };
+  store[`corretoras/${E}/sinistros/s11`] = { numero_sinistro: 'SN20260505000000', id_cliente: 'cli5', tipo: 'sinistro', status_atual: 'Em análise' };
+  r = await per('qual sinistro da transportes silva ltda?', { novaConversa: true });
+  t.ok(!r.body.foraDoEscopo && r.body.itens.length === 1 && r.body.itens[0].titulo === `Sinistro ${SN}`, '28.6: "qual sinistro da <cliente>?"');
+  r = await per('qual a assistência da Sem Fronteiras?', { novaConversa: true });
+  t.ok(!r.body.foraDoEscopo && r.body.itens.length === 2 && r.body.itens.every((i) => i.titulo.startsWith('Assistência')), '28.6: "qual a assistência da <cliente>?" — só assistências');
+  r = await per(`quem é o contato do sinistro ${SN}?`, { novaConversa: true });
+  r = await per('o cliente Sem Fronteiras possui assistência em andamento?');
+  t.ok(r.body.texto === 'SEM FRONTEIRAS: 1 assistência(s) em andamento.' && r.body.itens[0].titulo === 'Assistência AS20261022102913', '28.6: cliente citado vence o sinistro da conversa; só em andamento');
+  r = await per('a Transportes Silva Ltda tem assistência em andamento?', { novaConversa: true });
+  t.ok(r.body.texto === 'Transportes Silva Ltda não tem nenhuma assistência em andamento.', '28.6: nenhuma em andamento');
+  r = await per('quando vence a apólice do Iury Guaru?', { novaConversa: true });
   r = await per('e ele tem apólice vigente?');
   t.ok(r.body.texto.includes('vigente'), '28.4: continua com o cliente da conversa');
   r = await per('de quem é a placa ABC-1D23?');
@@ -155,7 +179,7 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   // uso e custo
   const mes = B.mesAtual();
   const u = store[`plataforma_contas/${E}`].beta[mes];
-  t.ok(u.comIa === 3 && u.tokensEntrada === 1200 && u.tokensSaida === 120 && u.perguntas === 24, 'mede perguntas, IA e tokens');
+  t.ok(u.comIa === 3 && u.tokensEntrada === 1200 && u.tokensSaida === 120 && u.perguntas === 31, 'mede perguntas, IA e tokens');
   t.ok(Math.abs(u.custoUsd - 3 * (400 * 1 + 40 * 5) / 1e6) < 1e-12, 'custo em US$ pelos preços do modelo');
 
   // teto
