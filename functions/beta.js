@@ -433,6 +433,11 @@ async function executar(e, p, assunto) {
     ? { atendimentoId: at.id, clienteId: at.id_cliente || null, rotulo: rotuloAt(at), intencao: p.intencao }
     : { atendimentoId: null, clienteId: cli.id, rotulo: `Cliente ${cli.nome}`, intencao: p.intencao };
 
+  // 28.6: status/pendência pede um atendimento; se veio um CLIENTE (não um número),
+  // responde com os atendimentos em andamento dele.
+  if ((p.intencao === 'status' || p.intencao === 'pendencias') && !at && cli) {
+    p = { ...p, intencao: 'sinistros_cliente', filtro: { ...(p.filtro || {}), emCurso: true } };
+  }
   switch (p.intencao) {
     case 'contato': {
       const itens = respostaContato(p.alvo, at, cli);
@@ -495,9 +500,20 @@ async function executar(e, p, assunto) {
       const f = p.filtro || {};
       const FINALIZADOS = ['Concluído', 'Cancelado', 'Negado'];
       const lista = [];
+      // 28.6: o atendimento pode estar ligado ao cliente pelo id, pelo CNPJ/CPF ou só pelo nome
+      // (registros antigos) — procura pelos três e junta sem repetir.
+      const vistos = new Set();
       for (const nome of f.so ? [f.so] : ['sinistros', 'assistencias']) {
-        const s = await col(e, nome).where('id_cliente', '==', c.id).get();
-        s.docs.forEach((d) => lista.push({ id: d.id, ...d.data(), tipo: d.data().tipo || (nome === 'assistencias' ? 'assistencia' : 'sinistro') }));
+        const buscas = [col(e, nome).where('id_cliente', '==', c.id).get()];
+        if (c.cnpj_cpf) buscas.push(col(e, nome).where('client_cnpj_cpf', '==', c.cnpj_cpf).get());
+        if (c.nome) buscas.push(col(e, nome).where('client_nome', '==', c.nome).get());
+        for (const s of await Promise.all(buscas)) {
+          s.docs.forEach((d) => {
+            if (vistos.has(d.id)) return;
+            vistos.add(d.id);
+            lista.push({ id: d.id, ...d.data(), tipo: d.data().tipo || (nome === 'assistencias' ? 'assistencia' : 'sinistro') });
+          });
+        }
       }
       const filtrada = f.emCurso ? lista.filter((x) => !FINALIZADOS.includes(String(x.status_atual || x.status || '').trim())) : lista;
       filtrada.sort((a, b) => String(b.numero_sinistro || '').localeCompare(String(a.numero_sinistro || '')));

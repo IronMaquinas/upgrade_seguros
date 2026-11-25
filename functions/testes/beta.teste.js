@@ -158,6 +158,16 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   t.ok(r.body.texto === 'SEM FRONTEIRAS: 1 assistência(s) em andamento.' && r.body.itens[0].titulo === 'Assistência AS20261022102913', '28.6: cliente citado vence o sinistro da conversa; só em andamento');
   r = await per('a Transportes Silva Ltda tem assistência em andamento?', { novaConversa: true });
   t.ok(r.body.texto === 'Transportes Silva Ltda não tem nenhuma assistência em andamento.', '28.6: nenhuma em andamento');
+  // 28.6 (2º print): assistência antiga ligada ao cliente só pelo nome/CNPJ (id_cliente diferente)
+  store[`corretoras/${E}/clientes/cli6`] = { nome: 'PLUMA REAL', cnpj_cpf: '11.222.333/0001-44' };
+  store[`corretoras/${E}/assistencias/a3`] = { numero_sinistro: 'AS20261008122926', id_cliente: 'idAntigo', client_nome: 'PLUMA REAL', client_cnpj_cpf: '11.222.333/0001-44', tipo: 'assistencia', status_atual: 'Aberto' };
+  r = await per('pluma real possui assistência am andamento?', { novaConversa: true });
+  t.ok(r.body.texto === 'PLUMA REAL: 1 assistência(s) em andamento.' && r.body.itens[0].titulo === 'Assistência AS20261008122926', '28.6: acha assistência pelo CNPJ/nome quando o id_cliente é antigo');
+  r = await per('Sem fronteiras está com assistência em andamento?', { novaConversa: true });
+  t.ok(r.body.texto === 'SEM FRONTEIRAS: 1 assistência(s) em andamento.', '28.6: "está com assistência em andamento"');
+  r = await per('qual a situação?', { novaConversa: true });
+  r = await per('sem fronteiras');
+  t.ok(!r.body.foraDoEscopo && /SEM FRONTEIRAS: \d+ atendimento\(s\) em andamento\./.test(r.body.texto), '28.6: status + resposta com nome do cliente → atendimentos em andamento');
   r = await per('quando vence a apólice do Iury Guaru?', { novaConversa: true });
   r = await per('e ele tem apólice vigente?');
   t.ok(r.body.texto.includes('vigente'), '28.4: continua com o cliente da conversa');
@@ -179,8 +189,8 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   // uso e custo
   const mes = B.mesAtual();
   const u = store[`plataforma_contas/${E}`].beta[mes];
-  t.ok(u.comIa === 3 && u.tokensEntrada === 1200 && u.tokensSaida === 120 && u.perguntas === 31, 'mede perguntas, IA e tokens');
-  t.ok(Math.abs(u.custoUsd - 3 * (400 * 1 + 40 * 5) / 1e6) < 1e-12, 'custo em US$ pelos preços do modelo');
+  t.ok(u.comIa === 4 && u.tokensEntrada === 1600 && u.tokensSaida === 160 && u.perguntas === 35, 'mede perguntas, IA e tokens');
+  t.ok(Math.abs(u.custoUsd - 4 * (400 * 1 + 40 * 5) / 1e6) < 1e-12, 'custo em US$ pelos preços do modelo');
 
   // teto
   store[`plataforma_contas/${E}`].betaTetoUsd = 0.0001;
@@ -201,7 +211,7 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   store['plataforma_admins/adm'] = { email: 'adm@x.com', ativo: true };
   t.ok((await chamar(plataforma, { acao: 'betaResumo' }, 'tFunc')).code === 403, 'funcionário não vê o resumo');
   const rs = await chamar(plataforma, { acao: 'betaResumo' }, 'tAdm');
-  t.ok(rs.code === 200 && rs.body.corretoras[0].nome === 'Upgrade' && rs.body.corretoras[0].comIa === 3 && rs.body.perguntas.length >= 2, 'portal: uso por corretora e perguntas');
+  t.ok(rs.code === 200 && rs.body.corretoras[0].nome === 'Upgrade' && rs.body.corretoras[0].comIa === 4 && rs.body.perguntas.length >= 2, 'portal: uso por corretora e perguntas');
   await chamar(plataforma, { acao: 'betaPerguntaVista', id: rs.body.perguntas[0].id }, 'tAdm');
   t.ok(store[`plataforma_beta_perguntas/${rs.body.perguntas[0].id}`].visto === true, 'marcar como vista');
   t.ok((await chamar(plataforma, { acao: 'contaDefinirTetoBeta', empresaId: E, tetoUsd: 10 }, 'tAdm')).code === 200 && store[`plataforma_contas/${E}`].betaTetoUsd === 10, 'teto por corretora');

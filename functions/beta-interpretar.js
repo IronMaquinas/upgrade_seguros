@@ -52,7 +52,7 @@ function intencaoDe(t, placa) {
   // 28.6: singular sem número — "qual sinistro da X?", "X possui assistência em andamento?"
   const ATD = '(sinistro|assistencia|atendimento)';
   if (new RegExp(`^(e )?(qual|quais|tem|existe|ha)( o| a| algum| alguma)? ${ATD}\\b`).test(t)
-    || new RegExp(`\\b(possui|tem|teve|ha) (algum |alguma |um |uma )?${ATD}\\b`).test(t)
+    || new RegExp(`\\b(possui|tem|teve|ha|esta com|estao com|com) (algum |alguma |um |uma |alguns |algumas )?${ATD}s?\\b`).test(t)
     || new RegExp(`\\b${ATD} (do|da|de) (cliente |segurad[oa] )?(?!terceir|motorist|oficin)[a-z]`).test(t) && !/\b(sn|as)\d{14}\b/.test(t) && !/telefone|contato|e-?mail|veiculo|placa|pendent|tarefa/.test(t)) return 'sinistros_cliente';
   if (/pendent|pendencia|tarefa|\bacao\b|\bacoes\b|falta fazer/.test(t)) return 'pendencias';
   if (/status|situacao|andamento|como esta|em que pe/.test(t)) return 'status';
@@ -81,8 +81,8 @@ function clienteDe(t) {
 
 /** 28.4: "o fulano tem bens segurados?", "quais os bens e apólices fulano possui?" */
 function clienteAntesDoVerbo(t) {
-  const m = t.match(/.*(?:apolices?|bens|segurados?)\s+(?!do\b|da\b|de\b|e\b)([a-z0-9][a-z0-9 .&-]*?)\s(?:possui|tem)\b/)
-    || t.match(/^(?:sera que |e )?(?:o |a )?([a-z0-9][a-z0-9 .&-]*?)\s(?:possui|tem)\b/);
+  const m = t.match(/.*(?:apolices?|bens|segurados?)\s+(?!do\b|da\b|de\b|e\b)([a-z0-9][a-z0-9 .&-]*?)\s(?:possui|tem|esta com|estao com)\b/)
+    || t.match(/^(?:sera que |e )?(?:o |a )?([a-z0-9][a-z0-9 .&-]*?)\s(?:possui|tem|esta com|estao com)\b/);
   if (!m) return null;
   const nome = m[1].trim();
   if (nome.length < 3) return null;
