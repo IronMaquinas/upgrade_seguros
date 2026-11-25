@@ -400,6 +400,28 @@ const FORA = (motivo, texto) => ({
   texto: texto || 'Isso não está no meu escopo. Guardei a pergunta para a equipe da plataforma avaliar.',
 });
 
+// 28.6/28.10: atendimentos do cliente — ligados pelo id, pelo CNPJ/CPF ou só pelo nome
+// (registros antigos); junta sem repetir.
+const FINALIZADOS = ['Concluído', 'Cancelado', 'Negado'];
+const emCurso = (x) => !FINALIZADOS.includes(String(x.status_atual || x.status || '').trim());
+async function atendimentosDoCliente(e, c, so) {
+  const lista = [];
+  const vistos = new Set();
+  for (const nome of so ? [so] : ['sinistros', 'assistencias']) {
+    const buscas = [col(e, nome).where('id_cliente', '==', c.id).get()];
+    if (c.cnpj_cpf) buscas.push(col(e, nome).where('client_cnpj_cpf', '==', c.cnpj_cpf).get());
+    if (c.nome) buscas.push(col(e, nome).where('client_nome', '==', c.nome).get());
+    for (const r of await Promise.all(buscas)) {
+      r.docs.forEach((d) => {
+        if (vistos.has(d.id)) return;
+        vistos.add(d.id);
+        lista.push({ ...d.data(), id: d.id, tipo: d.data().tipo || (nome === 'assistencias' ? 'assistencia' : 'sinistro') });
+      });
+    }
+  }
+  return lista;
+}
+
 async function executar(e, p, assunto) {
   if (!p || !p.intencao) return { ...FORA('fora_do_escopo'), assunto };
 
@@ -448,6 +470,25 @@ async function executar(e, p, assunto) {
   }
   if (!at && !cli) return { ...FORA('sem_assunto', 'De qual sinistro ou cliente? Me diga o número (SN… / AS…) ou o nome do cliente.'), assunto: { ...assunto, pendente: { intencao: p.intencao, alvo: p.alvo } } };
   if (at && !cli) cli = await cliente(e, at.id_cliente);
+
+  // 28.10: pessoa DO SINISTRO (proprietário, condutor, contato do sinistro, terceiros…) pedida
+  // pelo nome do cliente, sem número: usa os sinistros em andamento dele. Um só → responde
+  // direto; vários → o mesmo dado de cada um, com o número.
+  const DO_SINISTRO = ['proprietario', 'motorista', 'terceiro', 'contato_terceiro', 'motorista_terceiro', 'contato_local', 'oficina'];
+  if (p.intencao === 'contato' && !at && cli && (DO_SINISTRO.includes(p.alvo) || (p.alvo === 'contato_segurado' && p.doSinistro))) {
+    const abertos = (await atendimentosDoCliente(e, cli, p.doAssistencia ? 'assistencias' : null)).filter(emCurso)
+      .sort((a, b) => String(b.numero_sinistro || '').localeCompare(String(a.numero_sinistro || '')));
+    if (abertos.length === 1) at = abertos[0];
+    else {
+      const assuntoCli = { atendimentoId: null, clienteId: cli.id, rotulo: `Cliente ${cli.nome}`, intencao: p.intencao };
+      if (!abertos.length) return { texto: `${cli.nome} não tem sinistro nem assistência em andamento. Me diga o número (SN… / AS…) para eu olhar um encerrado.`, itens: [], acoes: [], assunto: assuntoCli };
+      const itens = [];
+      for (const a of abertos.slice(0, 6)) {
+        for (const i of respostaContato(p.alvo, a, cli) || []) itens.push({ ...i, titulo: `${a.numero_sinistro} — ${i.titulo}`, acoes: [...(i.acoes || []), abrir(a)] });
+      }
+      return { texto: `${cli.nome} tem ${abertos.length} atendimento(s) em andamento:`, itens, acoes: [], assunto: assuntoCli };
+    }
+  }
 
   const novoAssunto = at
     ? { atendimentoId: at.id, clienteId: at.id_cliente || null, rotulo: rotuloAt(at), intencao: p.intencao }
@@ -518,24 +559,8 @@ async function executar(e, p, assunto) {
       if (!c) return { ...FORA('nao_encontrado'), assunto: novoAssunto };
       // 28.6: filtro — só sinistros / só assistências / só em curso (mesma regra das listas)
       const f = p.filtro || {};
-      const FINALIZADOS = ['Concluído', 'Cancelado', 'Negado'];
-      const lista = [];
-      // 28.6: o atendimento pode estar ligado ao cliente pelo id, pelo CNPJ/CPF ou só pelo nome
-      // (registros antigos) — procura pelos três e junta sem repetir.
-      const vistos = new Set();
-      for (const nome of f.so ? [f.so] : ['sinistros', 'assistencias']) {
-        const buscas = [col(e, nome).where('id_cliente', '==', c.id).get()];
-        if (c.cnpj_cpf) buscas.push(col(e, nome).where('client_cnpj_cpf', '==', c.cnpj_cpf).get());
-        if (c.nome) buscas.push(col(e, nome).where('client_nome', '==', c.nome).get());
-        for (const s of await Promise.all(buscas)) {
-          s.docs.forEach((d) => {
-            if (vistos.has(d.id)) return;
-            vistos.add(d.id);
-            lista.push({ ...d.data(), id: d.id, tipo: d.data().tipo || (nome === 'assistencias' ? 'assistencia' : 'sinistro') });
-          });
-        }
-      }
-      const filtrada = f.emCurso ? lista.filter((x) => !FINALIZADOS.includes(String(x.status_atual || x.status || '').trim())) : lista;
+      const lista = await atendimentosDoCliente(e, c, f.so);
+      const filtrada = f.emCurso ? lista.filter(emCurso) : lista;
       filtrada.sort((a, b) => String(b.numero_sinistro || '').localeCompare(String(a.numero_sinistro || '')));
       const oque = f.so === 'assistencias' ? 'assistência(s)' : f.so === 'sinistros' ? 'sinistro(s)' : 'atendimento(s)';
       const nenhum = f.so === 'assistencias' ? 'nenhuma assistência' : f.so === 'sinistros' ? 'nenhum sinistro' : 'nenhum sinistro nem assistência';

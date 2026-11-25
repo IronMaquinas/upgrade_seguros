@@ -192,6 +192,18 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   t.ok(r.body.itens[0].linhas[0] === 'Bruno' && r.body.itens[0].linhas.includes('Telefone: 27 94444-0000'), '28.9: condutor do terceiro');
   r = await per('contato para o sinistro do terceiro');
   t.ok(r.body.itens[0].linhas[0] === 'Ana', '28.9: contato do sinistro do terceiro');
+  // 28.10: print da GMC — pessoa do sinistro pedida pelo nome do cliente, sem número
+  store[`corretoras/${E}/clientes/cli8`] = { id: '', nome: 'GMC REPRESENTACOES', cnpj_cpf: '46.557.458/0001-47', contato: 'FULANO DO CADASTRO', contato_telefone: '(27) 90000-0000' };
+  store[`corretoras/${E}/sinistros/s30`] = { numero_sinistro: 'SN20261113175453', id_cliente: 'cli8', client_nome: 'GMC REPRESENTACOES', tipo: 'sinistro', status_atual: 'Aberto',
+    nomeContatoSinistro: 'GUSTAVO MOULÃO', telefoneContatoSinistro: '(88) 9217-3750', veiculo_selecionado: { nomeCondutorMotorista: 'LEONCIO DE CASTRO DRIUSSO' } };
+  store[`corretoras/${E}/sinistros/s31`] = { numero_sinistro: 'SN20260101000001', id_cliente: 'cli8', client_nome: 'GMC REPRESENTACOES', tipo: 'sinistro', status_atual: 'Concluído', nomeContatoSinistro: 'ANTIGO' };
+  r = await per('qual o telefone de contato do sinistro da GMC?', { novaConversa: true });
+  t.ok(!r.body.foraDoEscopo && r.body.itens.length === 1 && r.body.itens[0].linhas[0] === 'GUSTAVO MOULÃO' && r.body.itens[0].linhas.includes('Telefone: (88) 9217-3750'), '28.10: contato do sinistro da GMC (o print) — só o em andamento');
+  r = await per('e o condutor?');
+  t.ok(r.body.itens[0].linhas[0] === 'LEONCIO DE CASTRO DRIUSSO', '28.10: continua no sinistro da GMC');
+  store[`corretoras/${E}/sinistros/s21`] = { numero_sinistro: 'SN20261028180612', id_cliente: 'cli7', client_nome: 'LUBE DISTRIBUIDORA LTDA', tipo: 'sinistro', status_atual: 'Aberto', veiculo_selecionado: { nomeCondutorMotorista: 'OUTRO MOTORISTA' } };
+  r = await per('quem é o condutor do sinistro da lube?', { novaConversa: true });
+  t.ok(r.body.texto === 'LUBE DISTRIBUIDORA LTDA tem 2 atendimento(s) em andamento:' && r.body.itens.length === 2 && r.body.itens[0].titulo.startsWith('SN20261124180447') && r.body.itens[1].linhas[0] === 'OUTRO MOTORISTA', '28.10: vários em andamento → condutor de cada um');
   r = await per('quando vence a apólice do Iury Guaru?', { novaConversa: true });
   r = await per('e ele tem apólice vigente?');
   t.ok(r.body.texto.includes('vigente'), '28.4: continua com o cliente da conversa');
@@ -213,7 +225,7 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   // uso e custo
   const mes = B.mesAtual();
   const u = store[`plataforma_contas/${E}`].beta[mes];
-  t.ok(u.comIa === 4 && u.tokensEntrada === 1600 && u.tokensSaida === 160 && u.perguntas === 44, 'mede perguntas, IA e tokens');
+  t.ok(u.comIa === 4 && u.tokensEntrada === 1600 && u.tokensSaida === 160 && u.perguntas === 47, 'mede perguntas, IA e tokens');
   t.ok(Math.abs(u.custoUsd - 4 * (400 * 1 + 40 * 5) / 1e6) < 1e-12, 'custo em US$ pelos preços do modelo');
 
   // teto
