@@ -204,6 +204,16 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   store[`corretoras/${E}/sinistros/s21`] = { numero_sinistro: 'SN20261028180612', id_cliente: 'cli7', client_nome: 'LUBE DISTRIBUIDORA LTDA', tipo: 'sinistro', status_atual: 'Aberto', veiculo_selecionado: { nomeCondutorMotorista: 'OUTRO MOTORISTA' } };
   r = await per('quem é o condutor do sinistro da lube?', { novaConversa: true });
   t.ok(r.body.texto === 'LUBE DISTRIBUIDORA LTDA tem 2 atendimento(s) em andamento:' && r.body.itens.length === 2 && r.body.itens[0].titulo.startsWith('SN20261124180447') && r.body.itens[1].linhas[0] === 'OUTRO MOTORISTA', '28.10: vários em andamento → condutor de cada um');
+  // 28.11: troca de cliente no meio da conversa (print: GMC → Lube)
+  r = await per('qual o telefone de contato do sinistro da GMC?', { novaConversa: true });
+  r = await per('houve terceiro?');
+  r = await per('quais os sinistros abertos da Lube?');
+  t.ok(/^LUBE DISTRIBUIDORA LTDA: 2 /.test(r.body.texto), '28.11: "sinistros abertos da Lube" troca de cliente (o print)');
+  r = await per('qual o telefone de contato do sinistro da GMC?');
+  r = await per('condutor lube');
+  t.ok(/^LUBE DISTRIBUIDORA LTDA tem 2/.test(r.body.texto), '28.11: nome do cliente solto na frase também troca');
+  r = await per('e o contato do sinistro?');
+  t.ok(r.body.texto.startsWith('LUBE'), '28.11: sem nome novo, continua no cliente da conversa');
   r = await per('quando vence a apólice do Iury Guaru?', { novaConversa: true });
   r = await per('e ele tem apólice vigente?');
   t.ok(r.body.texto.includes('vigente'), '28.4: continua com o cliente da conversa');
@@ -225,7 +235,7 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   // uso e custo
   const mes = B.mesAtual();
   const u = store[`plataforma_contas/${E}`].beta[mes];
-  t.ok(u.comIa === 4 && u.tokensEntrada === 1600 && u.tokensSaida === 160 && u.perguntas === 47, 'mede perguntas, IA e tokens');
+  t.ok(u.comIa === 4 && u.tokensEntrada === 1600 && u.tokensSaida === 160 && u.perguntas === 53, 'mede perguntas, IA e tokens');
   t.ok(Math.abs(u.custoUsd - 4 * (400 * 1 + 40 * 5) / 1e6) < 1e-12, 'custo em US$ pelos preços do modelo');
 
   // teto

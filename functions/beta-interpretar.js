@@ -77,7 +77,7 @@ function intencaoDe(t, placa) {
 /** Nome do cliente depois de "do cliente", "do segurado", "sinistros do/da". */
 function clienteDe(t) {
   // 28.10: "… do sinistro da GMC" — o cliente vem depois de "sinistro/assistência"
-  const doAtd = t.match(/(?:sinistros?|assistencias?|atendimentos?)\s(?:do|da|de)\s(?:cliente\s|segurad[oa]\s)?(?!terceir|segurad|client|motorist|condutor|propriet)(.+?)(?:\?|$)/);
+  const doAtd = t.match(/(?:sinistros?|assistencias?|atendimentos?)(?:\s(?:abert[oa]s?|em andamento|em aberto|em curso|ativ[oa]s?|pendentes?|encerrad[oa]s?|conclu[i]d[oa]s?|fechad[oa]s?|antig[oa]s?|recentes?))?\s(?:do|da|de)\s(?:cliente\s|segurad[oa]\s)?(?!terceir|segurad|client|motorist|condutor|propriet)(.+?)(?:\?|$)/);
   const m = doAtd || t.match(/(?:sinistros?|assistencias?|atendimentos?|veiculos?|telefone|contato|apolices?|bens|bem|segurad[oa]s?|frota|placas?|dados|carros?|caminhoes|e-?mail|whatsapp|celular|fone)\s(?:do|da|de)\s(?:cliente\s|segurad[oa]\s)?(.+?)(?:\?|$)/)
     || t.match(/(?:cliente|segurad[oa])\s(?!do\b|da\b)(.+?)(?:\?|$)/);
   if (!m) return clienteAntesDoVerbo(t);

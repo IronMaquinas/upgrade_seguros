@@ -374,7 +374,7 @@ async function responder(e, quem, corpo, conta) {
     }
   }
 
-  const r = await executar(e, p, assunto);
+  const r = await executar(e, p, assunto, corpo.escolherClienteId ? '' : mensagem);
   const foraDoEscopo = !!r.foraDoEscopo;
   if (foraDoEscopo) {
     registro.semResposta = inc(1);
@@ -422,7 +422,33 @@ async function atendimentosDoCliente(e, c, so) {
   return lista;
 }
 
-async function executar(e, p, assunto) {
+// 28.11: palavras que não identificam um cliente (genéricas de razão social ou da própria pergunta)
+const NAO_IDENTIFICA = new Set(('ltda me eireli epp sa s/a cia companhia comercio comercial industria industrial servicos servico '
+  + 'transportes transporte transportadora logistica distribuidora representacoes representacao agro grupo brasil do da de dos das e '
+  + 'sinistro sinistros assistencia assistencias atendimento atendimentos contato telefone terceiro terceiros condutor motorista '
+  + 'proprietario dono veiculo veiculos placa apolice apolices bens segurado segurados cliente clientes aberto abertos andamento '
+  + 'qual quais quem como onde tem possui esta sao com sem para pra pelo pela nome dados numero status situacao '
+  + 'vigente vigentes vence vencimento gastos gatilho whatsapp email celular fone ligar ele ela dele dela esse essa este esta isso '
+  + 'tambem houve teve oficina local pendente pendencia tarefa acao marca modelo chassi cor ano frota '
+  + 'real nova novo sul norte central total mais').split(' '));
+
+/** Cliente cadastrado cujo nome aparece na frase (palavra própria com 3+ letras). */
+async function clienteCitado(e, mensagem) {
+  const palavras = new Set(normalizar(mensagem).replace(/[^a-z0-9 ]/g, ' ').split(' ').filter((w) => w.length >= 3 && !NAO_IDENTIFICA.has(w)));
+  if (!palavras.size) return null;
+  const s = await col(e, 'clientes').get();
+  let melhor = null; let pontos = 0; let empate = false;
+  for (const d of s.docs) {
+    const c = { ...d.data(), id: d.id };
+    const doNome = normalizar(c.nome).replace(/[^a-z0-9 ]/g, ' ').split(' ').filter((w) => w.length >= 3 && !NAO_IDENTIFICA.has(w));
+    const n = doNome.filter((w) => palavras.has(w)).length;
+    if (!n) continue;
+    if (n > pontos) { melhor = c; pontos = n; empate = false; } else if (n === pontos) empate = true;
+  }
+  return empate ? null : melhor; // dois clientes com a mesma palavra → não adivinha
+}
+
+async function executar(e, p, assunto, mensagem = '') {
   if (!p || !p.intencao) return { ...FORA('fora_do_escopo'), assunto };
 
   // dono da placa
@@ -463,6 +489,12 @@ async function executar(e, p, assunto) {
     const s = await col(e, 'clientes').get();
     const c = s.docs.map((d) => ({ ...d.data(), id: d.id })).find((x) => (x.veiculos_segurados || []).some((v) => String(v.placa || '').replace(/[^a-z0-9]/gi, '').toUpperCase() === p.placa));
     if (c) cli = c;
+  }
+  // 28.11: troca de cliente — a frase cita um cliente cadastrado que eu não consegui recortar
+  // ("quais os sinistros abertos da Lube?"). Se for outro cliente, ele vira o assunto.
+  if (!at && !cli && mensagem) {
+    const citado = await clienteCitado(e, mensagem);
+    if (citado && citado.id !== assunto.clienteId) cli = citado;
   }
   if (!at && !cli) {
     if (assunto.atendimentoId) at = await atendimentoPorId(e, assunto.atendimentoId);
