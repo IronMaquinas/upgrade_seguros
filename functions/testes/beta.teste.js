@@ -86,7 +86,7 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   r = await per('e o telefone de contato do segurado?');
   t.ok(r.body.itens[0].linhas.includes('Telefone: (27) 97777-0000'), 'continuação: contato do segurado do mesmo sinistro');
   r = await per('e do terceiro?');
-  t.ok(r.body.itens[0].titulo === 'Terceiro' && r.body.itens[0].linhas.includes('Telefone: (27) 96666-0000'), 'continuação: terceiro');
+  t.ok(r.body.itens[0].titulo === 'Proprietário do veículo do terceiro' && r.body.itens[0].linhas.includes('Telefone: (27) 96666-0000'), 'continuação: terceiro');
   r = await per('e o motorista do terceiro?');
   t.ok(r.body.itens[0].linhas.includes('Bruno'), 'motorista do terceiro');
   r = await per('qual o veículo segurado?');
@@ -173,6 +173,25 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   r = await per('qual a situação?', { novaConversa: true });
   r = await per('sem fronteiras');
   t.ok(!r.body.foraDoEscopo && /SEM FRONTEIRAS: \d+ atendimento\(s\) em andamento\./.test(r.body.texto), '28.6: status + resposta com nome do cliente → atendimentos em andamento');
+  // 28.9: as 3 pessoas de cada lado do sinistro (print da Lube)
+  store[`corretoras/${E}/clientes/cli7`] = { id: '', nome: 'LUBE DISTRIBUIDORA LTDA', cnpj_cpf: '11.111.111/0001-11' };
+  store[`corretoras/${E}/sinistros/s20`] = { numero_sinistro: 'SN20261124180447', id_cliente: 'cli7', client_nome: 'LUBE DISTRIBUIDORA LTDA', tipo: 'sinistro', status_atual: 'Aberto',
+    veiculo_selecionado: { placa: 'SFP9B84', nomeCondutor: 'L LOG TRANSPORTES E SERVICOS LTDA.', cpfCondutor: '29.380.230/0001-05', nomeCondutorMotorista: 'RAPHAEL RIBEIRO ERPES', cpfCondutorMotorista: '139.118.277-41', cnhCondutorMotorista: '05906467495' },
+    terceiros: [] };
+  r = await per('qual o nome do condutor do SN20261124180447?', { novaConversa: true });
+  t.ok(r.body.itens.length === 1 && r.body.itens[0].titulo === 'Condutor do veículo (segurado)' && r.body.itens[0].linhas[0] === 'RAPHAEL RIBEIRO ERPES' && r.body.itens[0].linhas.includes('CNH: 05906467495'), '28.9: condutor do segurado (o print)');
+  r = await per('e o proprietário do veículo?');
+  t.ok(r.body.itens[0].linhas[0] === 'L LOG TRANSPORTES E SERVICOS LTDA.' && r.body.itens[0].linhas.includes('CPF/CNPJ: 29.380.230/0001-05'), '28.9: proprietário (CRLV)');
+  r = await per('qual o contato para o sinistro?');
+  t.ok(r.body.itens[0].linhas[0] === 'Não há essa informação neste sinistro.', '28.9: contato do sinistro não informado');
+  r = await per('e o condutor do veículo do terceiro?');
+  t.ok(r.body.itens[0].linhas[0] === 'Não houve terceiros neste sinistro.', '28.9: sem terceiros');
+  r = await per(`quem é o proprietário do veículo do terceiro no ${SN}?`, { novaConversa: true });
+  t.ok(r.body.itens[0].titulo === 'Proprietário do veículo do terceiro' && r.body.itens[0].linhas[0] === 'Carlos', '28.9: proprietário do terceiro');
+  r = await per('dados de contato do condutor do veículo do terceiro');
+  t.ok(r.body.itens[0].linhas[0] === 'Bruno' && r.body.itens[0].linhas.includes('Telefone: 27 94444-0000'), '28.9: condutor do terceiro');
+  r = await per('contato para o sinistro do terceiro');
+  t.ok(r.body.itens[0].linhas[0] === 'Ana', '28.9: contato do sinistro do terceiro');
   r = await per('quando vence a apólice do Iury Guaru?', { novaConversa: true });
   r = await per('e ele tem apólice vigente?');
   t.ok(r.body.texto.includes('vigente'), '28.4: continua com o cliente da conversa');
@@ -194,7 +213,7 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   // uso e custo
   const mes = B.mesAtual();
   const u = store[`plataforma_contas/${E}`].beta[mes];
-  t.ok(u.comIa === 4 && u.tokensEntrada === 1600 && u.tokensSaida === 160 && u.perguntas === 37, 'mede perguntas, IA e tokens');
+  t.ok(u.comIa === 4 && u.tokensEntrada === 1600 && u.tokensSaida === 160 && u.perguntas === 44, 'mede perguntas, IA e tokens');
   t.ok(Math.abs(u.custoUsd - 4 * (400 * 1 + 40 * 5) / 1e6) < 1e-12, 'custo em US$ pelos preços do modelo');
 
   // teto

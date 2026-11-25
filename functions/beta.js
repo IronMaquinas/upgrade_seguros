@@ -144,33 +144,53 @@ async function clientesPorNome(e, nome) {
 }
 
 // ── respostas por intenção ──────────────────────────────────────────────────
+// 28.9: no sinistro, 3 pessoas de cada lado (o que não foi preenchido aparece como "não informado").
+const SEM_INFO = 'Não há essa informação neste sinistro.';
+function pessoaDoSinistro(titulo, nome, tel, email, extra = []) {
+  const ex = extra.filter(Boolean);
+  if (!nome && !tel && !email && !ex.length) return { titulo, linhas: [SEM_INFO], acoes: [], vazio: true };
+  const r = pessoa(titulo, nome, tel, email, ex);
+  if (!tel && !email) r.linhas.push('Sem telefone ou e-mail cadastrados para esta pessoa no sinistro.');
+  return { ...r, vazio: false };
+}
+const soDigitos = (v) => String(v || '').replace(/\D/g, '');
+
 function respostaContato(alvo, at, cli) {
   const a = alvo || 'segurado';
   if (a === 'segurado') {
     return [pessoa('Segurado', (at && at.client_nome) || (cli && cli.nome), (at && at.telefone_cliente) || (cli && cli.contato_telefone), cli && cli.email)];
   }
   if (a === 'contato_segurado') {
-    if (at && (at.nomeContatoSinistro || at.telefoneContatoSinistro)) return [pessoa('Contato do segurado (neste atendimento)', at.nomeContatoSinistro, at.telefoneContatoSinistro)];
+    if (at) return [pessoaDoSinistro('Contato do sinistro (segurado)', at.nomeContatoSinistro, at.telefoneContatoSinistro)];
     return [pessoa('Contato do segurado', cli && cli.contato, cli && cli.contato_telefone, cli && cli.email)];
   }
   if (!at) return null; // os demais dependem de um atendimento
   if (a === 'contato_local') return [pessoa('Contato no local', at.nome_contato, at.telefone_contato_local)];
   if (a === 'oficina') return [pessoa('Oficina', [at.nome_oficina, at.nome_contato_oficina && `Contato: ${at.nome_contato_oficina}`].filter(Boolean).join(' · '), at.telefone_contato_oficina, null, [at.endereco_oficina])];
+  if (a === 'proprietario') {
+    const v = at.veiculo_selecionado || {};
+    // proprietário é o próprio segurado (mesmo CPF/CNPJ)? então o contato do cadastro serve
+    const ehOSegurado = soDigitos(v.cpfCondutor) && cli && soDigitos(v.cpfCondutor) === soDigitos(cli.cnpj_cpf);
+    return [pessoaDoSinistro('Proprietário do veículo (segurado)', v.nomeCondutor, ehOSegurado ? cli.contato_telefone : null, ehOSegurado ? cli.email : null,
+      [v.cpfCondutor && `CPF/CNPJ: ${v.cpfCondutor}`, v.placa && `Placa: ${v.placa}`, ehOSegurado && 'É o próprio segurado (contato do cadastro).'])];
+  }
   if (a === 'motorista') {
     const v = at.veiculo_selecionado || {};
-    return [pessoa('Motorista do segurado', v.nomeCondutorMotorista || v.nomeCondutor, null, null, [v.cpfCondutorMotorista && `CPF: ${v.cpfCondutorMotorista}`, v.cnhCondutorMotorista && `CNH: ${v.cnhCondutorMotorista}`, 'Telefone do motorista não é cadastrado no sinistro.'])];
+    const tr = at.transporte || {};
+    return [pessoaDoSinistro('Condutor do veículo (segurado)', v.nomeCondutorMotorista || tr.nomeMotorista, null, null,
+      [(v.cpfCondutorMotorista || tr.cpfMotorista) && `CPF: ${v.cpfCondutorMotorista || tr.cpfMotorista}`, v.cnhCondutorMotorista && `CNH: ${v.cnhCondutorMotorista}`])];
   }
   const ts = Array.isArray(at.terceiros) ? at.terceiros : [];
-  if (!ts.length) return [{ titulo: 'Terceiros', linhas: ['Este atendimento não tem terceiros cadastrados.'], acoes: [], vazio: true }];
+  if (!ts.length) return [{ titulo: 'Terceiros', linhas: ['Não houve terceiros neste sinistro.'], acoes: [], vazio: false }];
   return ts.map((t, i) => {
     const n = ts.length > 1 ? ` ${i + 1}` : '';
-    if (a === 'contato_terceiro') return pessoa(`Contato do terceiro${n}`, t.nomeContatoTerceiro, t.telefoneContatoTerceiro);
+    if (a === 'contato_terceiro') return pessoaDoSinistro(`Contato do sinistro (terceiro${n})`, t.nomeContatoTerceiro, t.telefoneContatoTerceiro);
     if (a === 'motorista_terceiro') {
       return t.motoristaMesmoProprietario
-        ? pessoa(`Motorista do terceiro${n} (o próprio dono)`, t.nome, t.contato, t.email)
-        : pessoa(`Motorista do terceiro${n}`, t.nomeMotorista, t.telefoneMotorista, t.emailMotorista);
+        ? pessoaDoSinistro(`Condutor do veículo do terceiro${n} (o próprio proprietário)`, t.nome, t.contato, t.email, [t.cpf && `CPF/CNPJ: ${t.cpf}`])
+        : pessoaDoSinistro(`Condutor do veículo do terceiro${n}`, t.nomeMotorista, t.telefoneMotorista, t.emailMotorista, [t.cpfMotorista && `CPF: ${t.cpfMotorista}`, t.cnhMotorista && `CNH: ${t.cnhMotorista}`]);
     }
-    return pessoa(`Terceiro${n}`, t.nome, t.contato, t.email, [t.placa && `Placa: ${t.placa}`]);
+    return pessoaDoSinistro(`Proprietário do veículo do terceiro${n}`, t.nome, t.contato, t.email, [t.cpf && `CPF/CNPJ: ${t.cpf}`, t.placa && `Placa: ${t.placa}`]);
   });
 }
 

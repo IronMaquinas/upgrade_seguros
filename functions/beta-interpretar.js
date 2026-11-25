@@ -4,8 +4,11 @@
 //   { intencao, alvo, numero, numeroSeguradora, placa, cliente }
 // intencao: contato · veiculo · apolices · status · pendencias · sinistros_cliente · dono_placa
 //   apolices (28.4): apólices do cliente por ramo, vencimento, valor, bens e gasto × gatilho
-// alvo (de quem): segurado · contato_segurado · motorista · terceiro ·
+// alvo (de quem): segurado · contato_segurado · proprietario · motorista · terceiro ·
 //                 contato_terceiro · motorista_terceiro · contato_local · oficina
+//   28.9 — no sinistro, 3 pessoas de cada lado:
+//     segurado: proprietario (CRLV) · motorista (condutor) · contato_segurado (contato do sinistro)
+//     terceiro: terceiro (proprietário) · motorista_terceiro · contato_terceiro
 //
 // Quando a pergunta não traz o número, o servidor usa o ASSUNTO da conversa
 // (último atendimento/cliente citado) — "e o telefone do terceiro?".
@@ -13,7 +16,7 @@
 // mesmo formato (functions/beta.js). Sem Firebase: testado em testes/beta.teste.js.
 
 const INTENCOES = ['contato', 'veiculo', 'apolices', 'status', 'pendencias', 'sinistros_cliente', 'dono_placa'];
-const ALVOS = ['segurado', 'contato_segurado', 'motorista', 'terceiro', 'contato_terceiro', 'motorista_terceiro', 'contato_local', 'oficina'];
+const ALVOS = ['segurado', 'contato_segurado', 'proprietario', 'motorista', 'terceiro', 'contato_terceiro', 'motorista_terceiro', 'contato_local', 'oficina'];
 
 const normalizar = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -29,10 +32,16 @@ function placaDe(t) {
 
 /** De quem a pergunta fala (do mais específico para o mais geral). */
 function alvoDe(t) {
-  if (/contato (do |da )?terceir/.test(t)) return 'contato_terceiro';
-  if (/(motorista|condutor) (do |da )?terceir/.test(t)) return 'motorista_terceiro';
-  if (/terceir/.test(t)) return 'terceiro';
+  // 28.9: lado do terceiro — proprietário, condutor ou contato do sinistro do terceiro
+  if (/terceir/.test(t)) {
+    if (/motorista|condutor/.test(t)) return 'motorista_terceiro';
+    if (/proprietari|\bdono\b/.test(t)) return 'terceiro';
+    if (/\bcontato\b/.test(t)) return 'contato_terceiro';
+    return 'terceiro';
+  }
   if (/motorista|condutor/.test(t)) return 'motorista';
+  if (/proprietari|\bdono\b/.test(t)) return 'proprietario'; // 28.9: proprietário legal (CRLV) do veículo segurado
+  if (/contato (do |para o |pro |no |deste |desse |neste |nesse )?(sinistro|atendimento|assistencia)/.test(t)) return 'contato_segurado'; // 28.9
   if (/contato (no |do |de )?local|no local/.test(t)) return 'contato_local';
   // 28.1: "telefone de contato do X" = contato do segurado/cliente
   if (/(telefone|numero|fone|celular|whats\w*) de contato/.test(t)) return 'contato_segurado';
@@ -56,6 +65,10 @@ function intencaoDe(t, placa) {
     || new RegExp(`\\b${ATD} (do|da|de) (cliente |segurad[oa] )?(?!terceir|motorist|oficin)[a-z]`).test(t) && !/\b(sn|as)\d{14}\b/.test(t) && !/telefone|contato|e-?mail|veiculo|placa|pendent|tarefa/.test(t)) return 'sinistros_cliente';
   if (/pendent|pendencia|tarefa|\bacao\b|\bacoes\b|falta fazer/.test(t)) return 'pendencias';
   if (/status|situacao|andamento|como esta|em que pe/.test(t)) return 'status';
+  // 28.9: pergunta sobre PESSOA do sinistro (proprietário, condutor, contato) — antes de "veículo",
+  // porque "condutor do veículo" fala do condutor, não do carro
+  if (/motorista|condutor|proprietari|\bdono\b|\bcontato\b/.test(t) && !(placa && /de quem|dono|proprietari/.test(t))
+    && !/\b(placa|modelo|marca|chassi|cor|ano)\b/.test(t)) return 'contato';
   if (/veiculo|carro|placa|modelo|chassi|marca|caminhao|moto\b|\b(bem|bens)( segurados?)?\b|frota/.test(t)) return 'veiculo'; // 28.2: "bem segurado", "frota"
   if (/telefone|fone|celular|whats|zap|ligar|contato|e-?mail|numero (do|da) (segurad|client|terceir|motorist|oficin)/.test(t)) return 'contato';
   return null;
