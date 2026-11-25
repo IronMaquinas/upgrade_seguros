@@ -167,6 +167,12 @@ function respostaContato(alvo, at, cli) {
   if (!at) return null; // os demais dependem de um atendimento
   if (a === 'contato_local') return [pessoa('Contato no local', at.nome_contato, at.telefone_contato_local)];
   if (a === 'oficina') return [pessoa('Oficina', [at.nome_oficina, at.nome_contato_oficina && `Contato: ${at.nome_contato_oficina}`].filter(Boolean).join(' · '), at.telefone_contato_oficina, null, [at.endereco_oficina])];
+  if (a === 'responsavel') {
+    const u = at.__responsavel;
+    if (!u) return [{ titulo: 'Responsável pelo atendimento', linhas: ['Não há usuário responsável registrado neste atendimento.'], acoes: [], vazio: false }];
+    const r = pessoa('Responsável (quem abriu)', u.nome || u.email, u.telefone, u.email, [u.role === 'admin' ? 'Gestor(a)' : null, u.ativo === false ? 'Usuário inativo' : null].filter(Boolean));
+    return [{ ...r, vazio: false }];
+  }
   if (a === 'proprietario') {
     const v = at.veiculo_selecionado || {};
     // proprietário é o próprio segurado (mesmo CPF/CNPJ)? então o contato do cadastro serve
@@ -448,6 +454,22 @@ async function clienteCitado(e, mensagem) {
   return empate ? null : melhor; // dois clientes com a mesma palavra → não adivinha
 }
 
+// 28.12: usuário que abriu o atendimento (responsavel_id → users/{uid}). Os usuários ficam
+// na raiz; só vale se for DA MESMA corretora (empresaId). Sem id → tenta pelo e-mail.
+async function responsavelDe(e, at) {
+  const id = String(at.responsavel_id || '').trim();
+  if (id) {
+    const d = await admin.firestore().collection('users').doc(id).get();
+    if (d.exists && d.data().empresaId === e) return { ...d.data(), id: d.id };
+  }
+  const email = String(at.responsavel_email || '').trim().toLowerCase();
+  if (email) {
+    const s = await admin.firestore().collection('users').where('empresaId', '==', e).where('email', '==', email).get();
+    if (s.docs.length) return { ...s.docs[0].data(), id: s.docs[0].id };
+  }
+  return null;
+}
+
 async function executar(e, p, assunto, mensagem = '') {
   if (!p || !p.intencao) return { ...FORA('fora_do_escopo'), assunto };
 
@@ -506,7 +528,7 @@ async function executar(e, p, assunto, mensagem = '') {
   // 28.10: pessoa DO SINISTRO (proprietário, condutor, contato do sinistro, terceiros…) pedida
   // pelo nome do cliente, sem número: usa os sinistros em andamento dele. Um só → responde
   // direto; vários → o mesmo dado de cada um, com o número.
-  const DO_SINISTRO = ['proprietario', 'motorista', 'terceiro', 'contato_terceiro', 'motorista_terceiro', 'contato_local', 'oficina'];
+  const DO_SINISTRO = ['responsavel', 'proprietario', 'motorista', 'terceiro', 'contato_terceiro', 'motorista_terceiro', 'contato_local', 'oficina'];
   if (p.intencao === 'contato' && !at && cli && (DO_SINISTRO.includes(p.alvo) || (p.alvo === 'contato_segurado' && p.doSinistro))) {
     const abertos = (await atendimentosDoCliente(e, cli, p.doAssistencia ? 'assistencias' : null)).filter(emCurso)
       .sort((a, b) => String(b.numero_sinistro || '').localeCompare(String(a.numero_sinistro || '')));
@@ -516,6 +538,7 @@ async function executar(e, p, assunto, mensagem = '') {
       if (!abertos.length) return { texto: `${cli.nome} não tem sinistro nem assistência em andamento. Me diga o número (SN… / AS…) para eu olhar um encerrado.`, itens: [], acoes: [], assunto: assuntoCli };
       const itens = [];
       for (const a of abertos.slice(0, 6)) {
+        if (p.alvo === 'responsavel') a.__responsavel = await responsavelDe(e, a);
         for (const i of respostaContato(p.alvo, a, cli) || []) itens.push({ ...i, titulo: `${a.numero_sinistro} — ${i.titulo}`, acoes: [...(i.acoes || []), abrir(a)] });
       }
       return { texto: `${cli.nome} tem ${abertos.length} atendimento(s) em andamento:`, itens, acoes: [], assunto: assuntoCli };
@@ -531,6 +554,7 @@ async function executar(e, p, assunto, mensagem = '') {
   if ((p.intencao === 'status' || p.intencao === 'pendencias') && !at && cli) {
     p = { ...p, intencao: 'sinistros_cliente', filtro: { ...(p.filtro || {}), emCurso: true } };
   }
+  if (p.alvo === 'responsavel' && at) at.__responsavel = await responsavelDe(e, at);
   switch (p.intencao) {
     case 'contato': {
       const itens = respostaContato(p.alvo, at, cli);

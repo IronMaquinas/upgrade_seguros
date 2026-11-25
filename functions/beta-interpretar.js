@@ -16,7 +16,7 @@
 // mesmo formato (functions/beta.js). Sem Firebase: testado em testes/beta.teste.js.
 
 const INTENCOES = ['contato', 'veiculo', 'apolices', 'status', 'pendencias', 'sinistros_cliente', 'dono_placa'];
-const ALVOS = ['segurado', 'contato_segurado', 'proprietario', 'motorista', 'terceiro', 'contato_terceiro', 'motorista_terceiro', 'contato_local', 'oficina'];
+const ALVOS = ['segurado', 'contato_segurado', 'proprietario', 'responsavel', 'motorista', 'terceiro', 'contato_terceiro', 'motorista_terceiro', 'contato_local', 'oficina'];
 
 const normalizar = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -32,6 +32,8 @@ function placaDe(t) {
 
 /** De quem a pergunta fala (do mais específico para o mais geral). */
 function alvoDe(t) {
+  // 28.12: quem abriu / com quem está o atendimento (usuário da corretora)
+  if (/quem (abriu|cadastrou|registrou|criou|lancou|cuida|atende|acompanha|esta cuidando|esta com|e o responsavel|e a responsavel)|com quem (esta|fica|ficou)|\bresponsavel\b|\bdon[oa] (do|da|desse|deste|dessa|desta|de) (sinistro|assistencia|atendimento|sn|as)/.test(t)) return 'responsavel';
   // 28.9: lado do terceiro — proprietário, condutor ou contato do sinistro do terceiro
   if (/terceir/.test(t)) {
     if (/motorista|condutor/.test(t)) return 'motorista_terceiro';
@@ -62,11 +64,12 @@ function intencaoDe(t, placa) {
   const ATD = '(sinistro|assistencia|atendimento)';
   if (new RegExp(`^(e )?(qual|quais|tem|existe|ha)( o| a| algum| alguma)? ${ATD}\\b`).test(t)
     || new RegExp(`\\b(possui|tem|teve|ha|esta com|estao com|com) (algum |alguma |um |uma |alguns |algumas )?${ATD}s?\\b`).test(t)
-    || new RegExp(`\\b${ATD} (do|da|de) (cliente |segurad[oa] )?(?!terceir|motorist|oficin)[a-z]`).test(t) && !/\b(sn|as)\d{14}\b/.test(t) && !/telefone|contato|e-?mail|veiculo|placa|pendent|tarefa|motorista|condutor|proprietari|\bdono\b/.test(t)) return 'sinistros_cliente';
+    || new RegExp(`\\b${ATD} (do|da|de) (cliente |segurad[oa] )?(?!terceir|motorist|oficin)[a-z]`).test(t) && !/\b(sn|as)\d{14}\b/.test(t) && !/telefone|contato|e-?mail|veiculo|placa|pendent|tarefa|motorista|condutor|proprietari|\bdono\b|\bquem\b|responsavel/.test(t)) return 'sinistros_cliente';
   if (/pendent|pendencia|tarefa|\bacao\b|\bacoes\b|falta fazer/.test(t)) return 'pendencias';
   if (/status|situacao|andamento|como esta|em que pe/.test(t)) return 'status';
   // 28.9: pergunta sobre PESSOA do sinistro (proprietário, condutor, contato) — antes de "veículo",
   // porque "condutor do veículo" fala do condutor, não do carro
+  if (/quem (abriu|cadastrou|registrou|criou|lancou|cuida|atende|acompanha|esta cuidando|esta com|e o responsavel|e a responsavel)|com quem (esta|fica|ficou)|\bresponsavel\b|\bdon[oa] (do|da|desse|deste|dessa|desta|de) (sinistro|assistencia|atendimento|sn|as)/.test(t)) return 'contato'; // 28.12: responsável pelo atendimento
   if (/motorista|condutor|proprietari|\bdono\b|\bcontato\b/.test(t) && !(placa && /de quem|dono|proprietari/.test(t))
     && !/\b(placa|modelo|marca|chassi|cor|ano)\b/.test(t)) return 'contato';
   if (/veiculo|carro|placa|modelo|chassi|marca|caminhao|moto\b|\b(bem|bens)( segurados?)?\b|frota/.test(t)) return 'veiculo'; // 28.2: "bem segurado", "frota"

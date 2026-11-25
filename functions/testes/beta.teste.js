@@ -214,6 +214,25 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   t.ok(/^LUBE DISTRIBUIDORA LTDA tem 2/.test(r.body.texto), '28.11: nome do cliente solto na frase também troca');
   r = await per('e o contato do sinistro?');
   t.ok(r.body.texto.startsWith('LUBE'), '28.11: sem nome novo, continua no cliente da conversa');
+  // 28.12: quem abriu / com quem está — usuário da MESMA corretora (users/{uid}.empresaId)
+  store['users/uAle'] = { nome: 'Alessandra', email: 'sinistro01@upgradeseguros.com.br', telefone: '27999520770', empresaId: E, role: 'user', ativo: true };
+  store['users/uOutra'] = { nome: 'De Outra Corretora', email: 'x@outra.com', telefone: '1', empresaId: 'outraEmpresa', role: 'admin', ativo: true };
+  store[`corretoras/${E}/sinistros/s40`] = { numero_sinistro: 'SN20261113173311', id_cliente: 'cli8', client_nome: 'GMC REPRESENTACOES', tipo: 'sinistro', status_atual: 'Aberto', responsavel_id: 'uAle' };
+  store[`corretoras/${E}/assistencias/a40`] = { numero_sinistro: 'AS20261022102999', id_cliente: 'cli5', tipo: 'assistencia', status_atual: 'Aberto', responsavel_id: 'uOutra' };
+  store[`corretoras/${E}/sinistros/s41`] = { numero_sinistro: 'SN20261023101604', id_cliente: 'cli8', tipo: 'sinistro', status_atual: 'Concluído', responsavel_id: '', responsavel_email: 'sinistro01@upgradeseguros.com.br' };
+  for (const q of ['Quem é o dono do sinistro SN20261113173311?', 'Quem abriu o sinistro SN20261113173311?', 'Com quem está o sinistro SN20261113173311']) {
+    r = await per(q, { novaConversa: true });
+    t.ok(r.body.itens[0].titulo === 'Responsável (quem abriu)' && r.body.itens[0].linhas[0] === 'Alessandra' && r.body.itens[0].linhas.includes('Telefone: 27999520770') && r.body.itens[0].acoes.some((a) => a.tipo === 'ligar'), `28.12: "${q}"`);
+  }
+  r = await per('quem abriu a assistência AS20261022102999?', { novaConversa: true });
+  t.ok(r.body.itens[0].linhas[0] === 'Não há usuário responsável registrado neste atendimento.' && !JSON.stringify(r.body).includes('Outra Corretora'), '28.12: usuário de OUTRA corretora nunca aparece');
+  r = await per('quem abriu o SN20261023101604?', { novaConversa: true });
+  t.ok(r.body.itens[0].linhas[0] === 'Alessandra', '28.12: sem responsavel_id → pelo e-mail, dentro da corretora');
+  r = await per('qual o condutor do SN20261113173311?', { novaConversa: true });
+  r = await per('e quem abriu?');
+  t.ok(r.body.itens[0].linhas[0] === 'Alessandra', '28.12: continuação "e quem abriu?"');
+  r = await per('quem é o dono do veículo?');
+  t.ok(r.body.itens[0].titulo === 'Proprietário do veículo (segurado)', '28.12: "dono do veículo" continua sendo o proprietário');
   r = await per('quando vence a apólice do Iury Guaru?', { novaConversa: true });
   r = await per('e ele tem apólice vigente?');
   t.ok(r.body.texto.includes('vigente'), '28.4: continua com o cliente da conversa');
@@ -235,7 +254,7 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   // uso e custo
   const mes = B.mesAtual();
   const u = store[`plataforma_contas/${E}`].beta[mes];
-  t.ok(u.comIa === 4 && u.tokensEntrada === 1600 && u.tokensSaida === 160 && u.perguntas === 53, 'mede perguntas, IA e tokens');
+  t.ok(u.comIa === 4 && u.tokensEntrada === 1600 && u.tokensSaida === 160 && u.perguntas === 61, 'mede perguntas, IA e tokens');
   t.ok(Math.abs(u.custoUsd - 4 * (400 * 1 + 40 * 5) / 1e6) < 1e-12, 'custo em US$ pelos preços do modelo');
 
   // teto
