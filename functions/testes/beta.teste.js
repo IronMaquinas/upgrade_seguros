@@ -159,10 +159,15 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   r = await per('a Transportes Silva Ltda tem assistência em andamento?', { novaConversa: true });
   t.ok(r.body.texto === 'Transportes Silva Ltda não tem nenhuma assistência em andamento.', '28.6: nenhuma em andamento');
   // 28.6 (2º print): assistência antiga ligada ao cliente só pelo nome/CNPJ (id_cliente diferente)
-  store[`corretoras/${E}/clientes/cli6`] = { nome: 'PLUMA REAL', cnpj_cpf: '11.222.333/0001-44' };
+  store[`corretoras/${E}/clientes/cli6`] = { id: '', nome: 'PLUMA REAL', cnpj_cpf: '11.222.333/0001-44', contato: 'JOSE', contato_telefone: '(27) 99747-0688', apolices: [{ id: 'pr1', ramo: 'Frota', numero_apolice: '0531 13 9133962', seguradora: 'PORTO SEGURO', data_inicio: ts('2026-11-04T03:00:00Z'), data_fim: ts('2027-11-04T03:00:00Z'), valor_apolice: 410952.98 }] }; // o app grava id: '' dentro do cliente
   store[`corretoras/${E}/assistencias/a3`] = { numero_sinistro: 'AS20261008122926', id_cliente: 'idAntigo', client_nome: 'PLUMA REAL', client_cnpj_cpf: '11.222.333/0001-44', tipo: 'assistencia', status_atual: 'Aberto' };
   r = await per('pluma real possui assistência am andamento?', { novaConversa: true });
   t.ok(r.body.texto === 'PLUMA REAL: 1 assistência(s) em andamento.' && r.body.itens[0].titulo === 'Assistência AS20261008122926', '28.6: acha assistência pelo CNPJ/nome quando o id_cliente é antigo');
+  // 28.7: conversa do print — o "id" vazio gravado no cliente não pode apagar o assunto
+  r = await per('qual o telefone de contato da pluma real?');
+  t.ok(r.body.itens[0].linhas.includes('JOSE'), '28.7: contato do cliente');
+  r = await per('e possui apólice vigente?');
+  t.ok(r.body.texto === 'PLUMA REAL: 1 apólice(s), 1 vigente(s).', '28.7: continua com o cliente (id do documento, não o "id" vazio gravado nele)');
   r = await per('Sem fronteiras está com assistência em andamento?', { novaConversa: true });
   t.ok(r.body.texto === 'SEM FRONTEIRAS: 1 assistência(s) em andamento.', '28.6: "está com assistência em andamento"');
   r = await per('qual a situação?', { novaConversa: true });
@@ -189,7 +194,7 @@ B._trocarIa(async () => { chamadasIa++; return { json: respostaIa, entrada: 400,
   // uso e custo
   const mes = B.mesAtual();
   const u = store[`plataforma_contas/${E}`].beta[mes];
-  t.ok(u.comIa === 4 && u.tokensEntrada === 1600 && u.tokensSaida === 160 && u.perguntas === 35, 'mede perguntas, IA e tokens');
+  t.ok(u.comIa === 4 && u.tokensEntrada === 1600 && u.tokensSaida === 160 && u.perguntas === 37, 'mede perguntas, IA e tokens');
   t.ok(Math.abs(u.custoUsd - 4 * (400 * 1 + 40 * 5) / 1e6) < 1e-12, 'custo em US$ pelos preços do modelo');
 
   // teto

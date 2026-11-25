@@ -114,7 +114,7 @@ async function atendimentoPor(e, campo, valor) {
     const s = await col(e, c).where(campo, '==', valor).limit(1).get();
     if (!s.empty) {
       const d = s.docs[0];
-      return { id: d.id, colecao: c, ...d.data() };
+      return { ...d.data(), id: d.id, colecao: c };
     }
   }
   return null;
@@ -122,14 +122,14 @@ async function atendimentoPor(e, campo, valor) {
 async function atendimentoPorId(e, id) {
   for (const c of ['sinistros', 'assistencias']) {
     const d = await col(e, c).doc(id).get();
-    if (d.exists) return { id: d.id, colecao: c, ...d.data() };
+    if (d.exists) return { ...d.data(), id: d.id, colecao: c };
   }
   return null;
 }
 async function cliente(e, id) {
   if (!id) return null;
   const d = await col(e, 'clientes').doc(id).get();
-  return d.exists ? { id: d.id, ...d.data() } : null;
+  return d.exists ? { ...d.data(), id: d.id } : null;
 }
 async function clientesPorNome(e, nome) {
   // 28.1: palavras da pergunta que não fazem parte do nome não podem atrapalhar a busca
@@ -138,7 +138,7 @@ async function clientesPorNome(e, nome) {
   if (!partes.length) return [];
   const s = await col(e, 'clientes').get();
   return s.docs
-    .map((d) => ({ id: d.id, ...d.data() }))
+    .map((d) => ({ ...d.data(), id: d.id }))
     .filter((c) => { const n = normalizar(c.nome); return partes.every((p) => n.includes(p)); })
     .slice(0, 6);
 }
@@ -386,7 +386,7 @@ async function executar(e, p, assunto) {
   // dono da placa
   if (p.intencao === 'dono_placa') {
     const s = await col(e, 'clientes').get();
-    const achados = s.docs.map((d) => ({ id: d.id, ...d.data() }))
+    const achados = s.docs.map((d) => ({ ...d.data(), id: d.id }))
       .filter((c) => (c.veiculos_segurados || []).some((v) => String(v.placa || '').replace(/[^a-z0-9]/gi, '').toUpperCase() === p.placa));
     if (!achados.length) return { ...FORA('nao_encontrado', `Não achei a placa ${p.placa} nos veículos dos clientes.`), assunto };
     const c = achados[0];
@@ -419,7 +419,7 @@ async function executar(e, p, assunto) {
   }
   if (!at && !cli && p.placa) {
     const s = await col(e, 'clientes').get();
-    const c = s.docs.map((d) => ({ id: d.id, ...d.data() })).find((x) => (x.veiculos_segurados || []).some((v) => String(v.placa || '').replace(/[^a-z0-9]/gi, '').toUpperCase() === p.placa));
+    const c = s.docs.map((d) => ({ ...d.data(), id: d.id })).find((x) => (x.veiculos_segurados || []).some((v) => String(v.placa || '').replace(/[^a-z0-9]/gi, '').toUpperCase() === p.placa));
     if (c) cli = c;
   }
   if (!at && !cli) {
@@ -511,7 +511,7 @@ async function executar(e, p, assunto) {
           s.docs.forEach((d) => {
             if (vistos.has(d.id)) return;
             vistos.add(d.id);
-            lista.push({ id: d.id, ...d.data(), tipo: d.data().tipo || (nome === 'assistencias' ? 'assistencia' : 'sinistro') });
+            lista.push({ ...d.data(), id: d.id, tipo: d.data().tipo || (nome === 'assistencias' ? 'assistencia' : 'sinistro') });
           });
         }
       }
@@ -569,7 +569,7 @@ async function resumoPortal() {
     });
   }
   const ps = await db().collection('plataforma_beta_perguntas').get();
-  const perguntas = ps.docs.map((d) => ({ id: d.id, ...d.data() }))
+  const perguntas = ps.docs.map((d) => ({ ...d.data(), id: d.id }))
     .map((p) => ({ id: p.id, empresaId: p.empresaId, email: p.email, pergunta: p.pergunta, motivo: p.motivo, visto: p.visto === true,
       criadoEm: p.criadoEm && typeof p.criadoEm.toDate === 'function' ? p.criadoEm.toDate().toISOString() : null }))
     .sort((a, b) => String(b.criadoEm || '').localeCompare(String(a.criadoEm || '')))
